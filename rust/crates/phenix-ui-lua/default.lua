@@ -93,21 +93,24 @@ map("sidebar", "o", function()
 end, { desc = "Open run and focus transcript" })
 map("sidebar", "i", function() phenix.ui.focus.set("ui.input") end, { desc = "Enter composer" })
 
--- Transcript selection and viewport motion are independent. j/k and {/} move
--- semantic conversation turns; Ctrl motions scroll the rendered viewport without
--- changing the selected turn. Rich-block-local controls remain native below this
+-- Transcript navigation follows Vim's read-only-buffer model: j/k move one
+-- rendered line, {/} move between semantic conversation turns, and z-prefixed
+-- commands operate folds. Rich-block-local controls remain native below this
 -- keymap (currently [ ], v/V, H/L, J/K).
 map("transcript", "<Esc>", function() end, { desc = "Cancel pending navigation" })
-map("transcript", "j", function() phenix.ui.transcript.move(1) end, { desc = "Next conversation turn" })
-map("transcript", "k", function() phenix.ui.transcript.move(-1) end, { desc = "Previous conversation turn" })
+map("transcript", "j", function() phenix.ui.pane.scroll("ui.transcript", -1) end, { desc = "Down one rendered line" })
+map("transcript", "k", function() phenix.ui.pane.scroll("ui.transcript", 1) end, { desc = "Up one rendered line" })
 map("transcript", "}", function() phenix.ui.transcript.move(1) end, { desc = "Next conversation turn" })
 map("transcript", "{", function() phenix.ui.transcript.move(-1) end, { desc = "Previous conversation turn" })
 map("transcript", "<C-n>", function() phenix.ui.transcript.move(1) end, { desc = "Next conversation turn" })
 map("transcript", "<C-p>", function() phenix.ui.transcript.move(-1) end, { desc = "Previous conversation turn" })
-map("transcript", "gg", function() phenix.ui.transcript.move(-1000000) end, { desc = "First conversation turn" })
-map("transcript", "G", function() phenix.ui.transcript.move(1000000) end, { desc = "Latest conversation turn" })
-map("transcript", "za", phenix.ui.transcript.toggle_details, { desc = "Toggle selected turn details" })
-map("transcript", "<CR>", phenix.ui.transcript.toggle_details, { desc = "Toggle selected turn details" })
+map("transcript", "gg", function() phenix.ui.pane.scroll("ui.transcript", 1000000) end, { desc = "Top of transcript" })
+map("transcript", "G", function() phenix.ui.pane.scroll("ui.transcript", -1000000) end, { desc = "Bottom of transcript" })
+map("transcript", "zj", function() phenix.ui.transcript.move_fold(1) end, { desc = "Next transcript fold" })
+map("transcript", "zk", function() phenix.ui.transcript.move_fold(-1) end, { desc = "Previous transcript fold" })
+map("transcript", "zo", phenix.ui.transcript.open_fold, { desc = "Open transcript fold" })
+map("transcript", "zc", phenix.ui.transcript.close_fold, { desc = "Close transcript fold" })
+map("transcript", "za", phenix.ui.transcript.toggle_fold, { desc = "Toggle transcript fold" })
 map("transcript", "i", function() phenix.ui.focus.set("ui.input") end, { desc = "Enter composer" })
 
 map("transcript", "<C-e>", function() phenix.ui.pane.scroll("ui.transcript", -1) end, { desc = "Scroll down one line" })

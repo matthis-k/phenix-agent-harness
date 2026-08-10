@@ -1,10 +1,11 @@
-use crate::state::{AppState, DialogState, RuntimeConnectionState};
+use crate::state::{
+    transcript_item_id, AppState, DialogState, RuntimeConnectionState, ToolCallView,
+};
 use crate::view::{FocusTarget, OverlayState};
 use phenix_runtime_api::{
     AuthFlowId, AuthMethod, AuthPromptResponse, BackendCommand, BackendError, BackendEvent,
     BackendOutput, BackendReply, CommandSource, CommandSummary, ExtensionUiResponse, ModelRef,
-    RunId, SessionId, StreamingBehavior, ThinkingLevel, ToolExecutionOutcome, TranscriptBlock,
-    TranscriptRole,
+    RunId, SessionId, StreamingBehavior, ThinkingLevel, TranscriptBlock, TranscriptRole,
 };
 
 const MAX_INPUT_HISTORY: usize = 1_000;
@@ -580,44 +581,70 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
             run_id,
             tool_call_id,
             tool_name,
-            input_summary,
+            raw_input_json,
             ..
-        } => state
-            .transcript_mut(run_id.clone())
-            .append(TranscriptBlock {
-                id: tool_block_id(&tool_call_id),
-                run_id,
-                role: TranscriptRole::Tool,
-                text: format!("{tool_name}\n{input_summary}"),
-                complete: false,
-            }),
+        } => {
+            let block_id = tool_block_id(&tool_call_id);
+            let item_id = transcript_item_id(&run_id, &block_id);
+            state.tool_calls.insert(
+                item_id,
+                ToolCallView {
+                    name: tool_name.clone(),
+                    raw_input_json,
+                    output: None,
+                    outcome: None,
+                },
+            );
+            state
+                .transcript_mut(run_id.clone())
+                .append(TranscriptBlock {
+                    id: block_id,
+                    run_id,
+                    role: TranscriptRole::Tool,
+                    text: tool_name,
+                    complete: false,
+                });
+        }
         BackendEvent::ToolUpdated {
             run_id,
             tool_call_id,
             output,
-        } => state
-            .transcript_mut(run_id.clone())
-            .update(TranscriptBlock {
-                id: tool_block_id(&tool_call_id),
-                run_id,
-                role: TranscriptRole::Tool,
-                text: output,
-                complete: false,
-            }),
+        } => {
+            let block_id = tool_block_id(&tool_call_id);
+            let item_id = transcript_item_id(&run_id, &block_id);
+            let view = state
+                .tool_calls
+                .entry(item_id)
+                .or_insert_with(|| ToolCallView {
+                    name: "Tool".to_owned(),
+                    raw_input_json: "{}".to_owned(),
+                    output: None,
+                    outcome: None,
+                });
+            view.output = Some(output);
+            upsert_tool_block(state, run_id, block_id, false);
+        }
         BackendEvent::ToolFinished {
             run_id,
             tool_call_id,
             outcome,
             output_summary,
-        } => state
-            .transcript_mut(run_id.clone())
-            .update(TranscriptBlock {
-                id: tool_block_id(&tool_call_id),
-                run_id,
-                role: TranscriptRole::Tool,
-                text: format!("{}\n{output_summary}", tool_outcome_label(&outcome)),
-                complete: true,
-            }),
+        } => {
+            let block_id = tool_block_id(&tool_call_id);
+            let item_id = transcript_item_id(&run_id, &block_id);
+            let view = state
+                .tool_calls
+                .entry(item_id)
+                .or_insert_with(|| ToolCallView {
+                    name: "Tool".to_owned(),
+                    raw_input_json: "{}".to_owned(),
+                    output: None,
+                    outcome: None,
+                });
+            view.output = Some(output_summary);
+            view.outcome = Some(outcome);
+            upsert_tool_block(state, run_id, block_id, true);
+        }
         BackendEvent::QueueChanged {
             run_id,
             steering,
@@ -648,12 +675,21 @@ fn tool_block_id(tool_call_id: &phenix_runtime_api::ToolCallId) -> String {
     format!("tool-{tool_call_id}")
 }
 
-fn tool_outcome_label(outcome: &ToolExecutionOutcome) -> &'static str {
-    match outcome {
-        ToolExecutionOutcome::Succeeded => "completed",
-        ToolExecutionOutcome::Failed => "failed",
-        ToolExecutionOutcome::Aborted => "aborted",
-    }
+fn upsert_tool_block(state: &mut AppState, run_id: RunId, block_id: String, complete: bool) {
+    let item_id = transcript_item_id(&run_id, &block_id);
+    let name = state
+        .tool_calls
+        .get(&item_id)
+        .map_or_else(|| "Tool".to_owned(), |view| view.name.clone());
+    state
+        .transcript_mut(run_id.clone())
+        .update(TranscriptBlock {
+            id: block_id,
+            run_id,
+            role: TranscriptRole::Tool,
+            text: name,
+            complete,
+        });
 }
 
 fn upsert_by<T, K: PartialEq>(items: &mut Vec<T>, item: T, key: impl Fn(&T) -> K) {
@@ -673,7 +709,7 @@ mod tests {
     use super::*;
     use phenix_runtime_api::{
         AuthPrompt, BackendHealth, DialogId, ExtensionUiRequest, RunKind, RunState, RunSummary,
-        RuntimeSnapshot, TranscriptBlock, TranscriptRole,
+        RuntimeSnapshot, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
     };
 
     #[test]
@@ -915,7 +951,7 @@ mod tests {
             },
             BackendEvent::ToolFinished {
                 run_id: run.clone(),
-                tool_call_id,
+                tool_call_id: tool_call_id.clone(),
                 outcome: ToolExecutionOutcome::Succeeded,
                 output_summary: "done".to_owned(),
             },
@@ -928,7 +964,12 @@ mod tests {
         let transcript = state.transcript(&run).expect("transcript");
         assert_eq!(transcript.blocks.len(), 1);
         assert!(transcript.blocks[0].complete);
-        assert!(transcript.blocks[0].text.contains("done"));
+        assert_eq!(transcript.blocks[0].text, "read");
+        let item_id = transcript_item_id(&run, &tool_block_id(&tool_call_id));
+        let tool = state.tool_calls.get(&item_id).expect("tool view");
+        assert_eq!(tool.raw_input_json, r#"{"path":"file.rs"}"#);
+        assert_eq!(tool.output.as_deref(), Some("done"));
+        assert_eq!(tool.outcome, Some(ToolExecutionOutcome::Succeeded));
     }
 
     fn state_with_run(run: RunId) -> AppState {

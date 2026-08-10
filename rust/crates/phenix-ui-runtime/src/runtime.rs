@@ -7,7 +7,7 @@ use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendW
 use phenix_ui_core::{
     command_completions, group_transcript_turns, parse_markdown, reduce, AppEffect, AppEvent,
     AppState, ElementId, FocusDirection, FocusTarget, LayoutAxis, OverlayState, ResizeRequest,
-    RouteTarget, UiInput, VimMode,
+    RouteTarget, TranscriptTurnItemKind, UiInput, VimMode,
 };
 #[cfg(test)]
 use phenix_ui_core::{InputEditor, RichBlockView};
@@ -431,7 +431,10 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
         ViewMutation::ScrollPane { element, lines } => {
             let scroll = match element.as_str() {
                 "ui.sidebar" => Some(&mut state.view.sidebar_scroll),
-                "ui.transcript" => Some(&mut state.view.transcript_scroll),
+                "ui.transcript" => {
+                    state.view.transcript_reveal_selection = false;
+                    Some(&mut state.view.transcript_scroll)
+                }
                 _ => None,
             };
             if let Some(scroll) = scroll {
@@ -444,7 +447,11 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
         ViewMutation::MoveSidebarRunChild => move_sidebar_run_child(state),
         ViewMutation::ToggleSidebarRun => toggle_sidebar_run(state),
         ViewMutation::MoveTranscriptTurn(delta) => move_transcript_turn(state, delta),
-        ViewMutation::ToggleTranscriptTurnDetails => toggle_transcript_turn_details(state),
+        ViewMutation::MoveTranscriptFold(delta) => move_transcript_fold(state, delta),
+        ViewMutation::SetTranscriptFoldExpanded(expanded) => {
+            set_transcript_fold_expanded(state, expanded)
+        }
+        ViewMutation::ToggleTranscriptFold => toggle_transcript_fold(state),
         ViewMutation::MoveTranscriptBlock(delta) => move_transcript_block(state, delta),
         ViewMutation::CycleTranscriptBlockView(delta) => cycle_transcript_block_view(state, delta),
         ViewMutation::ScrollTranscriptBlock {
@@ -555,25 +562,94 @@ fn move_transcript_turn(state: &mut AppState, delta: i32) {
         .min(last);
     state.view.transcript_selected_turn =
         Some(current.saturating_add_signed(delta as isize).min(last));
+    state.view.transcript_selected_fold = None;
     state.view.transcript_selected_block = None;
     state.view.transcript_scroll.follow_end = false;
+    state.view.transcript_reveal_selection = true;
 }
 
-fn toggle_transcript_turn_details(state: &mut AppState) {
-    let turn_ids = state.active_transcript_turn_ids();
-    if turn_ids.is_empty() {
-        return;
-    }
-    let last = turn_ids.len() - 1;
-    let selected = state
-        .view
-        .transcript_selected_turn
-        .unwrap_or(last)
-        .min(last);
-    state.view.transcript_selected_turn = Some(selected);
+fn transcript_folds(state: &AppState) -> Vec<(usize, String)> {
+    let Some(run_id) = state.input_target() else {
+        return Vec::new();
+    };
+    let Some(transcript) = state.transcript(run_id) else {
+        return Vec::new();
+    };
+    group_transcript_turns(&transcript.blocks)
+        .into_iter()
+        .enumerate()
+        .flat_map(|(turn_index, turn)| {
+            turn.items.into_iter().filter_map(move |item| {
+                matches!(
+                    item.kind,
+                    TranscriptTurnItemKind::Thinking
+                        | TranscriptTurnItemKind::Tool
+                        | TranscriptTurnItemKind::System
+                )
+                .then_some((turn_index, item.id))
+            })
+        })
+        .collect()
+}
+
+fn selected_fold_index(state: &AppState, folds: &[(usize, String)]) -> Option<usize> {
     state
         .view
-        .toggle_transcript_turn(turn_ids[selected].clone());
+        .transcript_selected_fold
+        .filter(|selected| *selected < folds.len())
+        .or_else(|| {
+            let selected_turn = state
+                .view
+                .transcript_selected_turn
+                .unwrap_or_else(|| folds.last().map_or(0, |(turn, _)| *turn));
+            folds.iter().position(|(turn, _)| *turn == selected_turn)
+        })
+}
+
+fn move_transcript_fold(state: &mut AppState, delta: i32) {
+    let folds = transcript_folds(state);
+    if folds.is_empty() {
+        state.view.transcript_selected_fold = None;
+        return;
+    }
+    let last = folds.len() - 1;
+    let next = state
+        .view
+        .transcript_selected_fold
+        .filter(|current| *current <= last)
+        .map_or_else(
+            || if delta.is_negative() { last } else { 0 },
+            |current| current.saturating_add_signed(delta as isize).min(last),
+        );
+    state.view.transcript_selected_fold = Some(next);
+    state.view.transcript_selected_turn = Some(folds[next].0);
+    state.view.transcript_selected_block = None;
+    state.view.transcript_scroll.follow_end = false;
+    state.view.transcript_reveal_selection = true;
+}
+
+fn set_transcript_fold_expanded(state: &mut AppState, expanded: bool) {
+    let folds = transcript_folds(state);
+    let Some(selected) = selected_fold_index(state, &folds) else {
+        return;
+    };
+    state.view.transcript_selected_fold = Some(selected);
+    state.view.transcript_selected_turn = Some(folds[selected].0);
+    state
+        .view
+        .set_transcript_item_expanded(folds[selected].1.clone(), expanded);
+    state.view.transcript_reveal_selection = true;
+}
+
+fn toggle_transcript_fold(state: &mut AppState) {
+    let folds = transcript_folds(state);
+    let Some(selected) = selected_fold_index(state, &folds) else {
+        return;
+    };
+    state.view.transcript_selected_fold = Some(selected);
+    state.view.transcript_selected_turn = Some(folds[selected].0);
+    state.view.toggle_transcript_item(folds[selected].1.clone());
+    state.view.transcript_reveal_selection = true;
 }
 
 fn selected_rich_document(state: &AppState) -> Option<(String, phenix_ui_core::RichDocument)> {
@@ -633,6 +709,7 @@ fn move_transcript_block(state: &mut AppState, delta: i32) {
         );
     state.view.transcript_selected_block = Some(interactive[next]);
     state.view.transcript_scroll.follow_end = false;
+    state.view.transcript_reveal_selection = true;
 }
 
 fn cycle_transcript_block_view(state: &mut AppState, delta: i32) {
@@ -893,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_turns_are_selected_and_expanded_independently() {
+    fn transcript_turns_and_folds_are_selected_independently() {
         let run_id = phenix_runtime_api::RunId::parse("run-1").expect("run id");
         let mut state = AppState {
             root_run: Some(run_id.clone()),
@@ -901,8 +978,10 @@ mod tests {
         };
         for (id, role) in [
             ("u1", TranscriptRole::User),
+            ("t1", TranscriptRole::Thinking),
             ("a1", TranscriptRole::Assistant),
             ("u2", TranscriptRole::User),
+            ("t2", TranscriptRole::Thinking),
             ("a2", TranscriptRole::Assistant),
         ] {
             state
@@ -917,9 +996,17 @@ mod tests {
         }
         apply_view_mutation(&mut state, ViewMutation::MoveTranscriptTurn(-1));
         assert_eq!(state.view.transcript_selected_turn, Some(0));
-        apply_view_mutation(&mut state, ViewMutation::ToggleTranscriptTurnDetails);
-        assert!(state.view.transcript_turn_is_expanded("run-1:u1"));
-        assert!(!state.view.transcript_turn_is_expanded("run-1:u2"));
+        apply_view_mutation(&mut state, ViewMutation::SetTranscriptFoldExpanded(true));
+        assert_eq!(state.view.transcript_selected_fold, Some(0));
+        assert!(state.view.transcript_item_is_expanded("run-1:t1"));
+        assert!(!state.view.transcript_item_is_expanded("run-1:t2"));
+
+        state.view.transcript_selected_fold = None;
+        apply_view_mutation(&mut state, ViewMutation::MoveTranscriptFold(1));
+        assert_eq!(state.view.transcript_selected_fold, Some(0));
+        state.view.transcript_selected_fold = None;
+        apply_view_mutation(&mut state, ViewMutation::MoveTranscriptFold(-1));
+        assert_eq!(state.view.transcript_selected_fold, Some(1));
     }
 
     #[test]

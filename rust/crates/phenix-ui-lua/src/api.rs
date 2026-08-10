@@ -352,16 +352,31 @@ fn ui_api(
             .map_err(runtime_error)?,
         )
         .map_err(runtime_error)?;
+    let fold_move_commands = Rc::clone(&commands);
     transcript
         .set(
-            "toggle_details",
-            command_function(
-                lua,
-                Rc::clone(&commands),
-                FrontendCommand::Ui(UiCommand::TranscriptTurnToggleDetails),
-            )?,
+            "move_fold",
+            lua.create_function(move |_, delta: i32| {
+                fold_move_commands
+                    .borrow_mut()
+                    .push(FrontendCommand::Ui(UiCommand::TranscriptFoldMove(delta)));
+                Ok(())
+            })
+            .map_err(runtime_error)?,
         )
         .map_err(runtime_error)?;
+    for (name, command) in [
+        ("open_fold", UiCommand::TranscriptFoldSetExpanded(true)),
+        ("close_fold", UiCommand::TranscriptFoldSetExpanded(false)),
+        ("toggle_fold", UiCommand::TranscriptFoldToggle),
+    ] {
+        transcript
+            .set(
+                name,
+                command_function(lua, Rc::clone(&commands), FrontendCommand::Ui(command))?,
+            )
+            .map_err(runtime_error)?;
+    }
     api.set("transcript", transcript).map_err(runtime_error)?;
 
     api.set(

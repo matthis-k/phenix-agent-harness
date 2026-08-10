@@ -225,8 +225,16 @@ fn ui_reactions(state: &AppState, command: UiCommand) -> Vec<BusReaction> {
         UiCommand::TranscriptTurnMove(delta) => {
             vec![BusReaction::View(ViewMutation::MoveTranscriptTurn(delta))]
         }
-        UiCommand::TranscriptTurnToggleDetails => {
-            vec![BusReaction::View(ViewMutation::ToggleTranscriptTurnDetails)]
+        UiCommand::TranscriptFoldMove(delta) => {
+            vec![BusReaction::View(ViewMutation::MoveTranscriptFold(delta))]
+        }
+        UiCommand::TranscriptFoldSetExpanded(expanded) => {
+            vec![BusReaction::View(ViewMutation::SetTranscriptFoldExpanded(
+                expanded,
+            ))]
+        }
+        UiCommand::TranscriptFoldToggle => {
+            vec![BusReaction::View(ViewMutation::ToggleTranscriptFold)]
         }
         UiCommand::Invalidate => vec![BusReaction::Render],
     }

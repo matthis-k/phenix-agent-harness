@@ -173,8 +173,10 @@ pub struct ViewState {
     pub transcript_scroll: ScrollState,
     pub sidebar_scroll: ScrollState,
     pub transcript_selected_turn: Option<usize>,
+    pub transcript_selected_fold: Option<usize>,
     pub transcript_selected_block: Option<usize>,
-    pub expanded_transcript_turns: BTreeSet<String>,
+    pub transcript_reveal_selection: bool,
+    pub expanded_transcript_items: BTreeSet<String>,
     pub rich_block_views: BTreeMap<String, RichBlockView>,
     pub rich_block_viewports: BTreeMap<String, RichBlockViewport>,
     pub show_details: bool,
@@ -210,14 +212,21 @@ impl ViewState {
         }
     }
 
-    pub fn transcript_turn_is_expanded(&self, id: &str) -> bool {
-        self.expanded_transcript_turns.contains(id)
+    pub fn transcript_item_is_expanded(&self, id: &str) -> bool {
+        self.expanded_transcript_items.contains(id)
     }
 
-    pub fn toggle_transcript_turn(&mut self, id: String) {
-        if !self.expanded_transcript_turns.remove(&id) {
-            self.expanded_transcript_turns.insert(id);
+    pub fn set_transcript_item_expanded(&mut self, id: String, expanded: bool) {
+        if expanded {
+            self.expanded_transcript_items.insert(id);
+        } else {
+            self.expanded_transcript_items.remove(&id);
         }
+    }
+
+    pub fn toggle_transcript_item(&mut self, id: String) {
+        let expanded = !self.transcript_item_is_expanded(&id);
+        self.set_transcript_item_expanded(id, expanded);
     }
 
     pub fn rich_block_view(&self, id: &str) -> Option<RichBlockView> {
@@ -312,8 +321,10 @@ impl Default for ViewState {
             transcript_scroll: ScrollState::default(),
             sidebar_scroll: ScrollState::default(),
             transcript_selected_turn: None,
+            transcript_selected_fold: None,
             transcript_selected_block: None,
-            expanded_transcript_turns: BTreeSet::new(),
+            transcript_reveal_selection: false,
+            expanded_transcript_items: BTreeSet::new(),
             rich_block_views: BTreeMap::new(),
             rich_block_viewports: BTreeMap::new(),
             show_details: false,
@@ -340,13 +351,13 @@ mod tests {
     }
 
     #[test]
-    fn transcript_turn_expansion_is_independent_per_turn() {
+    fn transcript_item_expansion_is_independent_per_item() {
         let mut view = ViewState::default();
-        view.toggle_transcript_turn("turn-a".to_owned());
-        assert!(view.transcript_turn_is_expanded("turn-a"));
-        assert!(!view.transcript_turn_is_expanded("turn-b"));
-        view.toggle_transcript_turn("turn-a".to_owned());
-        assert!(!view.transcript_turn_is_expanded("turn-a"));
+        view.toggle_transcript_item("item-a".to_owned());
+        assert!(view.transcript_item_is_expanded("item-a"));
+        assert!(!view.transcript_item_is_expanded("item-b"));
+        view.toggle_transcript_item("item-a".to_owned());
+        assert!(!view.transcript_item_is_expanded("item-a"));
     }
 
     #[test]
