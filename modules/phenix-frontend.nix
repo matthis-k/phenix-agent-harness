@@ -6,22 +6,15 @@ _:
     let
       rustSource = pkgs.lib.cleanSource ../rust;
 
-      # The user-facing runtime is one Rust workspace product. Build only the
-      # binaries that are actually shipped. Unit/integration/system tests are
-      # owned by the Cargo CI layers rather than rerun during packaging.
-      phenixRustRuntime = pkgs.rustPlatform.buildRustPackage {
-        pname = "phenix-rust-runtime";
+      phenixConductor = pkgs.rustPlatform.buildRustPackage {
+        pname = "phenix-conductor";
         version = "0";
         src = rustSource;
 
         cargoLock.lockFile = ../rust/Cargo.lock;
         cargoBuildFlags = [
           "--package"
-          "phenix-tui"
-          "--package"
           "phenix-conductor"
-          "--bin"
-          "phenix"
           "--bin"
           "phenix-conductor"
         ];
@@ -30,13 +23,8 @@ _:
         installPhase = ''
           runHook preInstall
           mkdir -p "$out/bin"
-
-          phenix_binary="$(find target -path '*/release/phenix' -type f -print -quit)"
           conductor_binary="$(find target -path '*/release/phenix-conductor' -type f -print -quit)"
-          test -n "$phenix_binary"
           test -n "$conductor_binary"
-
-          cp "$phenix_binary" "$out/bin/phenix"
           cp "$conductor_binary" "$out/bin/phenix-conductor"
           runHook postInstall
         '';
@@ -66,95 +54,92 @@ _:
         '';
       };
 
-      mkPhenixWrapper =
-        {
-          name ? "phenix",
-          configDir ? null,
-          loadDefaults ? true,
-          extraArgs ? [ ],
-        }:
-        let
-          configArgument = pkgs.lib.optionalString (configDir != null) ''--config "${configDir}"'';
-          wrapperArguments = (pkgs.lib.optional (!loadDefaults) "--no-default-config") ++ extraArgs;
-        in
-        pkgs.writeShellApplication {
-          inherit name;
-          runtimeInputs = [
-            config.packages.pi-acp
-            phenixRustRuntime
-          ];
-          text = ''
-            export PHENIX_CONDUCTOR_COMMAND="${phenixRustRuntime}/bin/phenix-conductor"
-            exec "${phenixRustRuntime}/bin/phenix" ${configArgument} ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
-          '';
-        };
+      nuiNvim = pkgs.vimPlugins.nui-nvim;
 
-      # Copy the authoring configuration into its own immutable store output.
-      # The package wrapper references this derivation directly so the config is
-      # part of the runtime closure rather than a textual path into flake source.
+      phenixNvim = pkgs.vimUtils.buildVimPlugin {
+        pname = "phenix.nvim";
+        version = "0";
+        src = ../nvim;
+        dependencies = [ nuiNvim ];
+      };
+
       packagedConfigDir = pkgs.runCommand "phenix-harness-config" { } ''
         mkdir -p "$out"
         cp -R ${../config/phenix-harness}/. "$out/"
       '';
 
-      phenix = mkPhenixWrapper {
-        configDir = packagedConfigDir;
+      phenix = pkgs.writeShellApplication {
+        name = "phenix";
+        runtimeInputs = [
+          pkgs.neovim
+          config.packages.pi-acp
+          phenixConductor
+        ];
+        text = ''
+          export PHENIX_CONDUCTOR_COMMAND="''${PHENIX_CONDUCTOR_COMMAND:-${phenixConductor}/bin/phenix-conductor}"
+          export PHENIX_CONFIG_DIR="''${PHENIX_CONFIG_DIR:-${packagedConfigDir}}"
+          exec nvim \
+            --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${nuiNvim}"} \
+            --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${phenixNvim}"} \
+            -c PhenixOpen \
+            "$@"
+        '';
       };
 
-      configuredSmokeDir = pkgs.runCommand "phenix-configured-smoke-config" { } ''
-        cp -R ${../config/phenix-harness} "$out"
-        chmod u+w "$out/init.lua"
-        cat >> "$out/init.lua" <<'EOF_CONFIG'
-        phenix.keymap.del("global", "<C-q>")
-        phenix.theme.set("Accent", { fg = "#ffffff", bold = true })
-        assert(type(phenix.ui.pane.resize) == "function")
-        assert(phenix.layout == nil)
-        EOF_CONFIG
-      '';
-
-      configuredSmokePackage = mkPhenixWrapper {
-        name = "phenix-configured-smoke";
-        configDir = configuredSmokeDir;
-      };
-
-      phenixSmoke =
-        pkgs.runCommand "phenix-product-smoke"
+      phenixNvimSmoke =
+        pkgs.runCommand "phenix-nvim-smoke"
           {
             nativeBuildInputs = [
-              phenix
-              phenixAcpSmoke
-              configuredSmokePackage
+              pkgs.neovim
+              pkgs.python3
             ];
           }
           ''
             export HOME="$TMPDIR/home"
+            export XDG_CACHE_HOME="$HOME/.cache"
             export XDG_CONFIG_HOME="$HOME/.config"
             export XDG_DATA_HOME="$HOME/.local/share"
             export XDG_STATE_HOME="$HOME/.local/state"
-            export XDG_CACHE_HOME="$HOME/.cache"
-            export PI_SKIP_VERSION_CHECK=1
-            mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+            mkdir -p "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
 
-            phenix --print-default-config | grep -Fq 'phenix.theme.set("Normal"'
-            phenix --check
-            phenix-configured-smoke --check
+            export PHENIX_TEST_FIXTURE=${../nvim/tests/fixture_agent.py}
+            export PHENIX_TEST_PYTHON=${pkgs.python3}/bin/python3
+            export PHENIX_TEST_CONFIG=${../config/phenix-harness/init.lua}
+
+            nvim --headless -u NONE \
+              --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${nuiNvim}"} \
+              --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${phenixNvim}"} \
+              -c ${pkgs.lib.escapeShellArg "lua dofile('${../nvim/tests/smoke.lua}')"} \
+              -c 'qa!'
+
+            touch "$out"
+          '';
+
+      phenixProductSmoke =
+        pkgs.runCommand "phenix-product-smoke"
+          {
+            nativeBuildInputs = [ phenixAcpSmoke ];
+          }
+          ''
             phenix-acp-smoke
             touch "$out"
           '';
     in
     {
       packages = {
-        phenix-runtime = phenixRustRuntime;
-        phenix-tui = phenixRustRuntime;
-        phenix-conductor = phenixRustRuntime;
-        phenix-acp-smoke = phenixAcpSmoke;
         inherit phenix;
+        phenix-nvim = phenixNvim;
+        phenix-conductor = phenixConductor;
+        phenix-acp-smoke = phenixAcpSmoke;
         default = pkgs.lib.mkForce phenix;
       };
 
       apps.phenix.program = pkgs.lib.getExe phenix;
       apps.default.program = pkgs.lib.getExe phenix;
 
-      checks.phenix-product-smoke = phenixSmoke;
+      checks = {
+        phenix-nvim-smoke = phenixNvimSmoke;
+        phenix-product-smoke = phenixProductSmoke;
+      };
     };
 }

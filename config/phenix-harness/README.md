@@ -1,19 +1,19 @@
 # Phenix Harness example configuration
 
-This directory is an **explicit example and authoring surface**. It is not built-in conductor policy and is not silently selected as a fallback.
+This directory is an **explicit example and authoring surface**. It is not built-in conductor policy and is not silently selected as a conductor fallback.
 
-A user may copy, reference, or pass this directory explicitly with `--config DIR`. The directory entry point is always `init.lua`.
+`phenix.nvim` evaluates `init.lua` as an authoring file and submits the resulting typed input to `phenix-conductor` through `_phenix/config/apply`.
+
+The packaged `phenix` launcher points `PHENIX_CONFIG_DIR` at this immutable packaged directory. Existing Neovim setups can instead configure `require("phenix").setup({ config_file = ... })` or place the file at `$XDG_CONFIG_HOME/phenix-harness/init.lua`.
 
 ```text
---config DIR
+init.lua
     │
+    │ phenix.acp.* authoring
     ▼
-DIR/init.lua
+phenix.nvim
     │
-    │ structured Lua authoring
-    ▼
-typed _phenix/config/apply
-    │
+    │ typed _phenix/config/apply
     ▼
 phenix-conductor
     │

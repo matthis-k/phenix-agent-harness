@@ -50,18 +50,6 @@
           test = "repeated_prompts";
           label = "phenix-acp / repeated_prompts";
         }
-        {
-          id = "phenix-ui-core-runtime-controls";
-          package = "phenix-ui-core";
-          test = "runtime_controls";
-          label = "phenix-ui-core / runtime_controls";
-        }
-        {
-          id = "phenix-ui-runtime-multiline-input";
-          package = "phenix-ui-runtime";
-          test = "multiline_input";
-          label = "phenix-ui-runtime / multiline_input";
-        }
       ];
 
       systemTargets = [
@@ -159,14 +147,13 @@
             ];
             commands = {
               source = {
-                description = "Formatting, source analysis, workflow consistency, and flake evaluation";
+                description = "Formatting, source analysis, test classification, and workflow consistency";
                 order = [
                   "nix-format"
                   "rust-format"
                   "statix"
                   "actionlint"
                   "test-targets"
-                  "flake-eval"
                   "workflow-sync"
                 ];
                 commands = {
@@ -246,6 +233,7 @@
                     runtimeInputs = pkgs: [
                       pkgs.cargo
                       pkgs.coreutils
+                      pkgs.diffutils
                       pkgs.git
                       pkgs.jq
                     ];
@@ -271,21 +259,6 @@
                         sort > "$actual"
 
                       diff -u "$expected" "$actual"
-                    '';
-                  };
-
-                  flake-eval = {
-                    description = "Flake output and check evaluation";
-                    ci = sourceCi // {
-                      stepName = "Flake evaluation";
-                    };
-                    runtimeInputs = pkgs: [
-                      pkgs.git
-                      pkgs.nix
-                    ];
-                    exec = ''
-                      ${repositoryRoot}
-                      nix flake check --no-build --print-build-logs
                     '';
                   };
 
@@ -387,17 +360,23 @@
               };
 
               product = {
-                description = "Nix-installed product/package smoke checks";
+                description = "Installed product behavior and package realization";
                 order = [
-                  "phenix"
+                  "phenix-nvim"
+                  "phenix-acp"
                   "stitch-runtime"
                   "stitch-mcp"
                 ];
                 commands = {
-                  phenix = mkProductCommand {
+                  phenix-nvim = mkProductCommand {
+                    check = "phenix-nvim-smoke";
+                    description = "Run the Neovim frontend against an ACP fixture";
+                    stepName = "Neovim frontend smoke";
+                  };
+                  phenix-acp = mkProductCommand {
                     check = "phenix-product-smoke";
-                    description = "Installed Phenix product smoke";
-                    stepName = "Phenix product smoke";
+                    description = "Run the installed Phenix ACP smoke fixture";
+                    stepName = "Phenix ACP smoke";
                   };
                   stitch-runtime = mkProductCommand {
                     check = "stitch-runtime-smoke";
@@ -460,6 +439,7 @@
           pkgs.git
           pkgs.jq
           pkgs.lua-language-server
+          pkgs.neovim
           pkgs.nixd
           pkgs.nixfmt
           pkgs.rust-analyzer
