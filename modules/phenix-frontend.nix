@@ -54,10 +54,13 @@ _:
         '';
       };
 
+      nuiNvim = pkgs.vimPlugins.nui-nvim;
+
       phenixNvim = pkgs.vimUtils.buildVimPlugin {
         pname = "phenix.nvim";
         version = "0";
         src = ../nvim;
+        dependencies = [ nuiNvim ];
       };
 
       packagedConfigDir = pkgs.runCommand "phenix-harness-config" { } ''
@@ -76,7 +79,7 @@ _:
           export PHENIX_CONDUCTOR_COMMAND="''${PHENIX_CONDUCTOR_COMMAND:-${phenixConductor}/bin/phenix-conductor}"
           export PHENIX_CONFIG_DIR="''${PHENIX_CONFIG_DIR:-${packagedConfigDir}}"
           exec nvim \
-            --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${pkgs.vimPlugins.nvim-nui}"} \
+            --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${nuiNvim}"} \
             --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${phenixNvim}"} \
             -c PhenixOpen \
             "$@"
@@ -104,7 +107,7 @@ _:
             export PHENIX_TEST_CONFIG=${../config/phenix-harness/init.lua}
 
             nvim --headless -u NONE \
-              --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${pkgs.vimPlugins.nvim-nui}"} \
+              --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${nuiNvim}"} \
               --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${phenixNvim}"} \
               -c ${pkgs.lib.escapeShellArg "lua dofile('${../nvim/tests/smoke.lua}')"} \
               -c 'qa!'
