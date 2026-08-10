@@ -69,15 +69,15 @@ _:
       mkPhenixWrapper =
         {
           name ? "phenix",
-          configPath ? null,
+          configDir ? null,
           loadDefaults ? true,
           extraArgs ? [ ],
         }:
         let
           wrapperArguments =
-            (pkgs.lib.optionals (configPath != null) [
+            (pkgs.lib.optionals (configDir != null) [
               "--config"
-              (toString configPath)
+              (toString configDir)
             ])
             ++ (pkgs.lib.optional (!loadDefaults) "--no-default-config")
             ++ extraArgs;
@@ -95,17 +95,15 @@ _:
         };
 
       # The packaged frontend has an explicit immutable authoring configuration.
-      # The path is supplied to the binary directly so runtime startup never
-      # depends on mutable XDG/HOME state for the packaged product.
-      packagedConfigPath = "${../config/phenix-harness}/config.lua";
+      # Pass its Nix-store directory directly; init.lua is the canonical entrypoint.
       phenix = mkPhenixWrapper {
-        configPath = packagedConfigPath;
+        configDir = ../config/phenix-harness;
       };
 
       configuredSmokeDir = pkgs.runCommand "phenix-configured-smoke-config" { } ''
         cp -R ${../config/phenix-harness} "$out"
-        chmod u+w "$out/config.lua"
-        cat >> "$out/config.lua" <<'EOF_CONFIG'
+        chmod u+w "$out/init.lua"
+        cat >> "$out/init.lua" <<'EOF_CONFIG'
         phenix.keymap.del("global", "<C-q>")
         phenix.theme.set("Accent", { fg = "#ffffff", bold = true })
         assert(type(phenix.ui.pane.resize) == "function")
@@ -115,7 +113,7 @@ _:
 
       configuredSmokePackage = mkPhenixWrapper {
         name = "phenix-configured-smoke";
-        configPath = "${configuredSmokeDir}/config.lua";
+        configDir = configuredSmokeDir;
       };
 
       phenixSmoke =
