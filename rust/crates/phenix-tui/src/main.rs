@@ -417,12 +417,9 @@ mod tests {
 
     #[test]
     fn config_flag_accepts_store_directory() {
-        let arguments = Arguments::try_parse_from([
-            "phenix",
-            "--config",
-            "/nix/store/aaaaaaaa-phenix-config",
-        ])
-        .expect("config directory should parse");
+        let arguments =
+            Arguments::try_parse_from(["phenix", "--config", "/nix/store/aaaaaaaa-phenix-config"])
+                .expect("config directory should parse");
         assert_eq!(
             arguments.config.as_deref(),
             Some(Path::new("/nix/store/aaaaaaaa-phenix-config"))
