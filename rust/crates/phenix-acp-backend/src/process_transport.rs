@@ -27,6 +27,9 @@ const CHILD_WAIT_POLL_PERIOD: Duration = Duration::from_millis(10);
 /// `blocking::Unblock`, like the SDK's own `Stdio` transport. The blocking read
 /// thread parks in the OS while the child is idle, so work once again scales
 /// with actual bytes received rather than poll frequency.
+///
+/// This can return to the SDK `AcpAgent` transport once the stable futures 0.3
+/// line includes the cloned-waker-identity fix from futures-rs#3032.
 pub(crate) struct BlockingAcpAgent {
     launch: AcpAgentConfig,
 }
