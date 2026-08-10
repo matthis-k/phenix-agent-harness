@@ -2,8 +2,8 @@ use crate::rich_document::{render_document, RichBlockPresentation, RichMedia};
 use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
 use phenix_ui_core::{
-    group_transcript_turns, parse_markdown, AppState, TranscriptDetailKind, TranscriptTurn,
-    TranscriptTurnDetail,
+    group_transcript_turns, parse_markdown, AppState, TranscriptTurn, TranscriptTurnItem,
+    TranscriptTurnItemKind,
 };
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -43,19 +43,15 @@ pub(crate) fn transcript_document(
                 id: "frontend-notifications".to_owned(),
                 user: None,
                 response: String::new(),
-                details: Vec::new(),
+                items: Vec::new(),
             });
         }
         if let Some(turn) = turns.last_mut() {
-            turn.details.extend(
-                state
-                    .notifications
-                    .iter()
-                    .map(|message| TranscriptTurnDetail {
-                        kind: TranscriptDetailKind::System,
-                        text: message.clone(),
-                    }),
-            );
+            turn.items
+                .extend(state.notifications.iter().map(|message| TranscriptTurnItem {
+                    kind: TranscriptTurnItemKind::System,
+                    text: message.clone(),
+                }));
         }
     }
 
@@ -128,45 +124,83 @@ fn render_turn(
         lines.push(Line::default());
     }
 
-    if !turn.response.trim().is_empty() {
-        let document = parse_markdown(&turn.response);
-        let rendered = render_document(&document, width, theme, |block_index, _| {
-            let key = rich_block_key(&turn.id, block_index);
-            RichBlockPresentation {
-                view: state.view.rich_block_view(&key),
-                viewport: state.view.rich_block_viewport(&key),
-                selected: selected && state.view.transcript_selected_block == Some(block_index),
-            }
-        });
-        for (block_index, block) in rendered.into_iter().enumerate() {
-            if block_index > 0 {
-                lines.push(Line::default());
-            }
-            let start = lines.len();
-            if let Some(block_media) = block.media {
-                media.push(TranscriptMediaAnchor {
-                    // Interactive rich blocks reserve their first row for the view toolbar.
-                    line: start.saturating_add(1),
-                    media: block_media,
-                });
-            }
-            lines.extend(block.lines);
+    let mut rendered_any = false;
+    let mut rich_block_index = 0usize;
+    for item in &turn.items {
+        if item.text.trim().is_empty() {
+            continue;
         }
-    } else if turn.user.is_some() {
-        lines.push(Line::styled("…", theme_style(theme, "Muted")));
-    }
-
-    if !turn.details.is_empty() {
-        if !turn.response.trim().is_empty() {
+        if rendered_any {
             lines.push(Line::default());
         }
-        lines.push(detail_summary_line(turn, selected, expanded, theme));
-        if expanded {
-            for detail in &turn.details {
-                lines.extend(detail_lines(detail, width, theme));
+        match item.kind {
+            TranscriptTurnItemKind::Assistant => render_assistant_item(
+                lines,
+                media,
+                item,
+                turn,
+                selected,
+                width,
+                state,
+                theme,
+                &mut rich_block_index,
+            ),
+            TranscriptTurnItemKind::Thinking
+            | TranscriptTurnItemKind::Tool
+            | TranscriptTurnItemKind::System => {
+                lines.push(detail_summary_line(item, selected, expanded, theme));
+                if expanded {
+                    lines.extend(detail_lines(item, width, theme));
+                }
             }
         }
+        rendered_any = true;
     }
+
+    if !rendered_any && turn.user.is_some() {
+        lines.push(Line::styled("…", theme_style(theme, "Muted")));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_assistant_item(
+    lines: &mut Vec<Line<'static>>,
+    media: &mut Vec<TranscriptMediaAnchor>,
+    item: &TranscriptTurnItem,
+    turn: &TranscriptTurn,
+    selected: bool,
+    width: u16,
+    state: &AppState,
+    theme: &ThemeConfig,
+    rich_block_index: &mut usize,
+) {
+    let document = parse_markdown(&item.text);
+    let first_block = *rich_block_index;
+    let rendered = render_document(&document, width, theme, |block_index, _| {
+        let block_index = first_block.saturating_add(block_index);
+        let key = rich_block_key(&turn.id, block_index);
+        RichBlockPresentation {
+            view: state.view.rich_block_view(&key),
+            viewport: state.view.rich_block_viewport(&key),
+            selected: selected && state.view.transcript_selected_block == Some(block_index),
+        }
+    });
+    let block_count = rendered.len();
+    for (local_block_index, block) in rendered.into_iter().enumerate() {
+        if local_block_index > 0 {
+            lines.push(Line::default());
+        }
+        let start = lines.len();
+        if let Some(block_media) = block.media {
+            media.push(TranscriptMediaAnchor {
+                // Interactive rich blocks reserve their first row for the view toolbar.
+                line: start.saturating_add(1),
+                media: block_media,
+            });
+        }
+        lines.extend(block.lines);
+    }
+    *rich_block_index = first_block.saturating_add(block_count);
 }
 
 fn rich_block_key(turn_id: &str, index: usize) -> String {
@@ -225,99 +259,67 @@ fn padded_surface_line(
 }
 
 fn detail_summary_line(
-    turn: &TranscriptTurn,
+    item: &TranscriptTurnItem,
     selected: bool,
     expanded: bool,
     theme: &ThemeConfig,
 ) -> Line<'static> {
-    let thinking = turn
-        .details
-        .iter()
-        .filter(|detail| detail.kind == TranscriptDetailKind::Thinking)
-        .count();
-    let tools = turn
-        .details
-        .iter()
-        .filter(|detail| detail.kind == TranscriptDetailKind::Tool)
-        .count();
-    let notices = turn
-        .details
-        .iter()
-        .filter(|detail| detail.kind == TranscriptDetailKind::System)
-        .count();
-
+    let (label, group, show_summary) = match item.kind {
+        TranscriptTurnItemKind::Thinking => ("Thinking", "Thinking", false),
+        TranscriptTurnItemKind::Tool => ("Tool", "Tool", true),
+        TranscriptTurnItemKind::System => ("Notice", "Muted", true),
+        TranscriptTurnItemKind::Assistant => unreachable!("assistant items use rich rendering"),
+    };
     let marker_style = if selected {
         theme_style(theme, "Accent")
     } else {
-        theme_style(theme, "Muted")
+        theme_style(theme, group)
     };
-    let mut spans = vec![Span::styled(
-        if expanded { "▾ " } else { "▸ " },
-        marker_style,
-    )];
-    let mut first = true;
-    let mut push_chip = |label: String, group: &'static str| {
-        if !first {
-            spans.push(Span::styled("  ", theme_style(theme, "Muted")));
-        }
-        spans.push(Span::styled(
-            format!("[{label}]"),
+    let mut spans = vec![
+        Span::styled(if expanded { "▾ " } else { "▸ " }, marker_style),
+        Span::styled(
+            label,
             theme_style(theme, group).add_modifier(Modifier::BOLD),
-        ));
-        first = false;
-    };
-    if thinking > 0 {
-        push_chip("Thinking".to_owned(), "Thinking");
-    }
-    if tools > 0 {
-        push_chip(
-            if tools == 1 {
-                "Tool".to_owned()
-            } else {
-                format!("Tools {tools}")
-            },
-            "Tool",
-        );
-    }
-    if notices > 0 {
-        push_chip(
-            if notices == 1 {
-                "Notice".to_owned()
-            } else {
-                format!("Notices {notices}")
-            },
-            "Muted",
-        );
+        ),
+    ];
+    if show_summary {
+        if let Some(summary) = item.text.lines().next().filter(|line| !line.trim().is_empty()) {
+            spans.push(Span::styled("  ", theme_style(theme, "Muted")));
+            spans.push(Span::styled(summary.to_owned(), theme_style(theme, "Muted")));
+        }
     }
     Line::from(spans)
 }
 
 fn detail_lines(
-    detail: &TranscriptTurnDetail,
+    item: &TranscriptTurnItem,
     width: u16,
     theme: &ThemeConfig,
 ) -> Vec<Line<'static>> {
-    let (label, group) = match detail.kind {
-        TranscriptDetailKind::Thinking => ("Thinking", "Thinking"),
-        TranscriptDetailKind::Tool => ("Tool", "Tool"),
-        TranscriptDetailKind::System => ("Notice", "Muted"),
+    let group = match item.kind {
+        TranscriptTurnItemKind::Thinking => "Thinking",
+        TranscriptTurnItemKind::Tool => "Tool",
+        TranscriptTurnItemKind::System => "Muted",
+        TranscriptTurnItemKind::Assistant => unreachable!("assistant items use rich rendering"),
     };
-    let mut lines = vec![Line::styled(
-        format!("  {label}"),
-        theme_style(theme, group).add_modifier(Modifier::BOLD),
-    )];
     let content_width = usize::from(width)
         .saturating_sub(DETAIL_PREFIX.chars().count())
         .max(1);
-    for logical_line in detail.text.lines() {
-        for fragment in wrap_preserving_text(logical_line, content_width) {
-            lines.push(Line::from(vec![
+    let skip_summary_line = matches!(
+        item.kind,
+        TranscriptTurnItemKind::Tool | TranscriptTurnItemKind::System
+    );
+    item.text
+        .lines()
+        .skip(usize::from(skip_summary_line))
+        .flat_map(|logical_line| wrap_preserving_text(logical_line, content_width))
+        .map(|fragment| {
+            Line::from(vec![
                 Span::styled(DETAIL_PREFIX, theme_style(theme, group)),
                 Span::styled(fragment, theme_style(theme, "Muted")),
-            ]));
-        }
-    }
-    lines
+            ])
+        })
+        .collect()
 }
 
 fn wrap_preserving_text(line: &str, width: usize) -> Vec<String> {
@@ -393,6 +395,46 @@ mod tests {
     }
 
     #[test]
+    fn mixed_thinking_tools_and_assistant_text_render_in_event_order() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
+        let transcript = state.transcript_mut(run_id);
+        transcript.append(block("u1", TranscriptRole::User, "inspect"));
+        transcript.append(block("t1", TranscriptRole::Thinking, "before tool"));
+        transcript.append(block("tool", TranscriptRole::Tool, "read\nfile.rs"));
+        transcript.append(block("t2", TranscriptRole::Thinking, "after tool"));
+        transcript.append(block("a1", TranscriptRole::Assistant, "final answer"));
+        state
+            .view
+            .expanded_transcript_turns
+            .insert("run-1:u1".to_owned());
+
+        let document = transcript_document(&state, &ThemeConfig::default(), 50);
+        let text = document.lines.iter().map(line_text).collect::<Vec<_>>();
+        let before = text
+            .iter()
+            .position(|line| line.contains("before tool"))
+            .expect("first thinking");
+        let tool = text
+            .iter()
+            .position(|line| line.contains("read"))
+            .expect("tool");
+        let after = text
+            .iter()
+            .position(|line| line.contains("after tool"))
+            .expect("second thinking");
+        let answer = text
+            .iter()
+            .position(|line| line.contains("final answer"))
+            .expect("assistant answer");
+        assert!(before < tool && tool < after && after < answer);
+    }
+
+    #[test]
     fn per_block_view_and_viewport_state_reaches_the_component_renderer() {
         let run_id = RunId::parse("run-1").expect("run id");
         let mut state = AppState {
@@ -423,6 +465,41 @@ mod tests {
     }
 
     #[test]
+    fn rich_block_indices_remain_stable_across_interleaved_items() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
+        let transcript = state.transcript_mut(run_id.clone());
+        transcript.append(block("u1", TranscriptRole::User, "code"));
+        transcript.append(block(
+            "a1",
+            TranscriptRole::Assistant,
+            "```rust\nfirst\n```",
+        ));
+        transcript.append(block("tool", TranscriptRole::Tool, "read\nfile.rs"));
+        transcript.append(block(
+            "a2",
+            TranscriptRole::Assistant,
+            "```rust\nsecond\n```",
+        ));
+        state.view.set_rich_block_view(
+            "run-1:u1:block:1".to_owned(),
+            RichBlockView::Source,
+        );
+        state
+            .view
+            .rich_block_viewport_mut("run-1:u1:block:1".to_owned())
+            .vertical = 0;
+        let document = transcript_document(&state, &ThemeConfig::default(), 50);
+        let text = document.lines.iter().map(line_text).collect::<Vec<_>>();
+        assert!(text.iter().any(|line| line.contains("first")));
+        assert!(text.iter().any(|line| line.contains("second")));
+    }
+
+    #[test]
     fn image_blocks_keep_a_media_anchor() {
         let run_id = RunId::parse("run-1").expect("run id");
         let mut state = AppState {
@@ -445,12 +522,12 @@ mod tests {
 
     #[test]
     fn expanded_details_keep_a_stable_hanging_indent_when_wrapped() {
-        let detail = TranscriptTurnDetail {
-            kind: TranscriptDetailKind::Thinking,
+        let detail = TranscriptTurnItem {
+            kind: TranscriptTurnItemKind::Thinking,
             text: "abcdefghijklmnopqrstuvwxyz".to_owned(),
         };
         let lines = detail_lines(&detail, 12, &ThemeConfig::default());
-        let rendered = lines.iter().skip(1).map(line_text).collect::<Vec<_>>();
+        let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
         assert!(rendered.len() > 1);
         assert!(rendered.iter().all(|line| line.starts_with(DETAIL_PREFIX)));
         assert!(rendered.iter().all(|line| line.chars().count() <= 12));
