@@ -343,12 +343,7 @@ id: router.b
         let tree_id = SessionTreeId::parse("tree-root-routing").expect("tree id");
         let backend = BackendId::parse("test").expect("backend id");
         let selection = policy
-            .resolve_selection(
-                &tree_id,
-                "routing/router.b",
-                &backend,
-                ThinkingLevel::High,
-            )
+            .resolve_selection(&tree_id, "routing/router.b", &backend, ThinkingLevel::High)
             .expect("selection");
 
         let model = policy

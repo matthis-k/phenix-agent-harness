@@ -1,8 +1,6 @@
 use super::{ConductorRuntime, RuntimeError, StandardSession};
 use crate::routing::SessionRoutingOption;
-use phenix_acp::{
-    BackendId, Difficulty, GatewayError, RoleId, SessionCommand, ThinkingLevel,
-};
+use phenix_acp::{BackendId, Difficulty, GatewayError, RoleId, SessionCommand, ThinkingLevel};
 use serde_json::{json, Value};
 
 const MODEL_CONFIG_ID: &str = "model";
