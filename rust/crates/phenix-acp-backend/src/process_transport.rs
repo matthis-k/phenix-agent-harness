@@ -2,7 +2,6 @@ use blocking::Unblock;
 use phenix_acp::acp::{AcpAgent, AcpAgentConfig, Agent, ByteStreams, Client, ConnectTo};
 use std::collections::VecDeque;
 use std::io::Read;
-use std::path::PathBuf;
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::str::FromStr;
 use std::sync::mpsc::{self, Receiver};
@@ -29,13 +28,12 @@ const CHILD_WAIT_POLL_PERIOD: Duration = Duration::from_millis(10);
 /// with actual bytes received rather than poll frequency.
 pub(crate) struct BlockingAcpAgent {
     launch: AcpAgentConfig,
-    cwd: PathBuf,
 }
 
 impl BlockingAcpAgent {
-    pub(crate) fn from_command(command: &str, cwd: PathBuf) -> Result<Self, phenix_acp::acp::Error> {
+    pub(crate) fn from_command(command: &str) -> Result<Self, phenix_acp::acp::Error> {
         let launch = AcpAgent::from_str(command)?.into_config();
-        Ok(Self { launch, cwd })
+        Ok(Self { launch })
     }
 }
 
@@ -48,7 +46,6 @@ impl ConnectTo<Client> for BlockingAcpAgent {
         command
             .args(self.launch.arguments())
             .envs(self.launch.environment())
-            .current_dir(self.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -171,10 +168,13 @@ mod tests {
 
     #[test]
     fn command_parser_keeps_sdk_launch_semantics() {
-        let agent = BlockingAcpAgent::from_command("RUST_LOG=debug sh -c 'exit 0'", ".".into())
+        let agent = BlockingAcpAgent::from_command("RUST_LOG=debug sh -c 'exit 0'")
             .expect("parse command");
         assert_eq!(agent.launch.command().to_string_lossy(), "sh");
         assert_eq!(agent.launch.arguments(), &["-c", "exit 0"]);
-        assert_eq!(agent.launch.environment().get("RUST_LOG"), Some(&"debug".to_owned()));
+        assert_eq!(
+            agent.launch.environment().get("RUST_LOG"),
+            Some(&"debug".to_owned())
+        );
     }
 }
