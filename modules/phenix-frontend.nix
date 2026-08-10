@@ -69,15 +69,15 @@ _:
       mkPhenixWrapper =
         {
           name ? "phenix",
-          configDir ? null,
+          configPath ? null,
           loadDefaults ? true,
           extraArgs ? [ ],
         }:
         let
           wrapperArguments =
-            (pkgs.lib.optionals (configDir != null) [
-              "--config-dir"
-              (toString configDir)
+            (pkgs.lib.optionals (configPath != null) [
+              "--config"
+              (toString configPath)
             ])
             ++ (pkgs.lib.optional (!loadDefaults) "--no-default-config")
             ++ extraArgs;
@@ -94,9 +94,13 @@ _:
           '';
         };
 
-      # The ordinary package contains no orchestration policy. Users configure it
-      # through their own XDG config or an explicit --config-dir.
-      phenix = mkPhenixWrapper { };
+      # The packaged frontend has an explicit immutable authoring configuration.
+      # The path is supplied to the binary directly so runtime startup never
+      # depends on mutable XDG/HOME state for the packaged product.
+      packagedConfigPath = "${../config/phenix-harness}/config.lua";
+      phenix = mkPhenixWrapper {
+        configPath = packagedConfigPath;
+      };
 
       configuredSmokeDir = pkgs.runCommand "phenix-configured-smoke-config" { } ''
         cp -R ${../config/phenix-harness} "$out"
@@ -111,7 +115,7 @@ _:
 
       configuredSmokePackage = mkPhenixWrapper {
         name = "phenix-configured-smoke";
-        configDir = configuredSmokeDir;
+        configPath = "${configuredSmokeDir}/config.lua";
       };
 
       phenixSmoke =
@@ -133,10 +137,7 @@ _:
             mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 
             phenix --print-default-config | grep -Fq 'phenix.theme.set("Normal"'
-            if phenix --check; then
-              echo "unconfigured phenix unexpectedly accepted implicit runtime policy" >&2
-              exit 1
-            fi
+            phenix --check
             phenix-configured-smoke --check
             phenix-acp-smoke
             touch "$out"
