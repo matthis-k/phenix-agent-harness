@@ -37,7 +37,23 @@ end, 20), "streamed ACP response did not reach the transcript")
 
 local transcript = session.ui:text()
 assert(transcript:find("### Thinking", 1, true), "thinking stream was not rendered")
+assert(transcript:find("thinking about: hello from neovim", 1, true), "thinking content was not streamed")
 assert(transcript:find("### Assistant", 1, true), "assistant stream was not rendered")
+
+session.ui:follow()
+assert(session:prompt("scroll while streaming"))
+assert(vim.wait(5000, function()
+  return session.prompting and session.ui:text():find("thinking about: scroll while streaming", 1, true) ~= nil
+end, 10), "second prompt did not begin streaming")
+
+vim.api.nvim_win_set_cursor(session.ui.transcript_window, { 1, 0 })
+assert(vim.wait(5000, function()
+  return not session.prompting and session.ui:text():find("echo: scroll while streaming", 1, true) ~= nil
+end, 10), "second prompt did not finish streaming")
+assert(
+  vim.api.nvim_win_get_cursor(session.ui.transcript_window)[1] == 1,
+  "streaming output moved the transcript cursor after the user navigated away from the tail"
+)
 
 phenix.close()
 vim.wait(1000, function()
