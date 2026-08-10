@@ -188,7 +188,7 @@ impl SessionRouter for SessionPolicyRouter {
                 .catalog
                 .routers
                 .get(&router_id)
-                .ok_or_else(|| GatewayError::MissingRouter(router_id))?
+                .ok_or(GatewayError::MissingRouter(router_id))?
                 .route(request),
             SessionRoutingSelection::Model(model) => {
                 if !request
