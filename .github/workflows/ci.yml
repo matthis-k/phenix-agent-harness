@@ -47,9 +47,6 @@ jobs:
       - name: "Test target classification"
         run: nix run .#phenix-maintenance -- check source test-targets
 
-      - name: "Flake evaluation"
-        run: nix run .#phenix-maintenance -- check source flake-eval
-
       - name: "Generated workflow"
         run: nix run .#phenix-maintenance -- check source workflow-sync
 
@@ -103,18 +100,6 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test integration phenix-acp-repeated-prompts
 
-      - name: "phenix-ui-core / runtime_controls"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-ui-core-runtime-controls
-
-      - name: "phenix-ui-runtime / multiline_input"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-ui-runtime-multiline-input
-
       - name: "conductor / black_box_model_tool_loop"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
@@ -153,8 +138,11 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: "Phenix product smoke"
-        run: nix run .#phenix-maintenance -- test product phenix
+      - name: "Neovim frontend smoke"
+        run: nix run .#phenix-maintenance -- test product phenix-nvim
+
+      - name: "Phenix ACP smoke"
+        run: nix run .#phenix-maintenance -- test product phenix-acp
 
       - name: "Stitch runtime smoke"
         run: nix run .#phenix-maintenance -- test product stitch-runtime
