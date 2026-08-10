@@ -221,6 +221,11 @@ fn ui_reactions(state: &AppState, command: UiCommand) -> Vec<BusReaction> {
         UiCommand::SidebarRunChild => {
             vec![BusReaction::View(ViewMutation::MoveSidebarRunChild)]
         }
+        UiCommand::SidebarRunSetExpanded(expanded) => {
+            vec![BusReaction::View(ViewMutation::SetSidebarRunExpanded(
+                expanded,
+            ))]
+        }
         UiCommand::SidebarRunToggle => vec![BusReaction::View(ViewMutation::ToggleSidebarRun)],
         UiCommand::TranscriptTurnMove(delta) => {
             vec![BusReaction::View(ViewMutation::MoveTranscriptTurn(delta))]

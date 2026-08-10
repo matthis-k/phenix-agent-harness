@@ -327,6 +327,8 @@ fn ui_api(
     for (name, command) in [
         ("parent", UiCommand::SidebarRunParent),
         ("child", UiCommand::SidebarRunChild),
+        ("open", UiCommand::SidebarRunSetExpanded(true)),
+        ("close", UiCommand::SidebarRunSetExpanded(false)),
         ("toggle", UiCommand::SidebarRunToggle),
     ] {
         sidebar

@@ -144,6 +144,7 @@ pub enum UiCommand {
     SidebarRunMove(i32),
     SidebarRunParent,
     SidebarRunChild,
+    SidebarRunSetExpanded(bool),
     SidebarRunToggle,
     TranscriptTurnMove(i32),
     TranscriptFoldMove(i32),
