@@ -130,18 +130,7 @@ pub(crate) fn finish_prompt(
     outputs: &BackendOutputSender,
 ) -> Result<(), BackendError> {
     session.prompt_active = false;
-    for block in session.transcript_blocks.values_mut() {
-        if !block.complete {
-            block.complete = true;
-            outputs.event(BackendEvent::TranscriptUpdated(block.clone()))?;
-        }
-    }
-    // ACP message IDs are optional. Anonymous chunks are therefore keyed only for the
-    // lifetime of one prompt. Keeping those keys after completion caused the next prompt
-    // to append into the previous assistant/user message (for example `availableHi`).
-    // The frontend already owns the emitted transcript history, so this map is strictly
-    // streaming state and must be reset at the prompt boundary.
-    session.transcript_blocks.clear();
+    close_active_transcript_segment(session, outputs)?;
     match stop_reason {
         phenix_acp::acp::schema::v1::StopReason::Cancelled => {
             session.run.state = RunState::Cancelled;
@@ -176,10 +165,10 @@ fn append_chunk(
     if text.is_empty() {
         return Ok(());
     }
-    let key = chunk.message_id.as_ref().map_or_else(
-        || format!("active-{role:?}"),
-        |message_id| format!("message-{message_id}"),
-    );
+    let key = transcript_stream_key(role, chunk.message_id.as_ref().map(ToString::to_string));
+    if !session.transcript_blocks.contains_key(&key) && !session.transcript_blocks.is_empty() {
+        close_active_transcript_segment(session, outputs)?;
+    }
     let is_new = !session.transcript_blocks.contains_key(&key);
     let block = if is_new {
         let id = session.next_transcript_key("acp-message")?;
@@ -208,6 +197,30 @@ fn append_chunk(
     Ok(())
 }
 
+fn transcript_stream_key(role: TranscriptRole, message_id: Option<String>) -> String {
+    message_id.map_or_else(
+        || format!("active-{role:?}"),
+        |message_id| format!("message-{role:?}-{message_id}"),
+    )
+}
+
+fn close_active_transcript_segment(
+    session: &mut SessionState,
+    outputs: &BackendOutputSender,
+) -> Result<(), BackendError> {
+    for block in session.transcript_blocks.values_mut() {
+        if !block.complete {
+            block.complete = true;
+            outputs.event(BackendEvent::TranscriptUpdated(block.clone()))?;
+        }
+    }
+    // ACP message IDs identify streamed messages, not presentation segments. Once a
+    // different transcript event intervenes, later chunks must start a new block so
+    // the frontend can preserve the exact reasoning/tool/text chronology.
+    session.transcript_blocks.clear();
+    Ok(())
+}
+
 fn append_complete_block(
     session: &mut SessionState,
     role: TranscriptRole,
@@ -215,6 +228,7 @@ fn append_complete_block(
     text: String,
     outputs: &BackendOutputSender,
 ) -> Result<(), BackendError> {
+    close_active_transcript_segment(session, outputs)?;
     outputs.event(BackendEvent::TranscriptAppended(TranscriptBlock {
         id: session.next_transcript_key(prefix)?,
         run_id: session.run.id.clone(),
@@ -249,6 +263,7 @@ fn apply_tool_call(
     tool: ToolCall,
     outputs: &BackendOutputSender,
 ) -> Result<(), BackendError> {
+    close_active_transcript_segment(session, outputs)?;
     let id = ToolCallId::parse(tool.tool_call_id.to_string())
         .map_err(|error| BackendError::Protocol(error.to_string()))?;
     let raw_input_json = tool
@@ -367,6 +382,14 @@ mod tests {
         let summary = bounded_summary(value);
         assert!(summary.ends_with("… [truncated]"));
         assert_eq!(summary.matches('中').count(), MAX_TOOL_SUMMARY_CHARS);
+    }
+
+    #[test]
+    fn stream_keys_include_role_even_with_message_ids() {
+        assert_ne!(
+            transcript_stream_key(TranscriptRole::Thinking, Some("message-1".to_owned())),
+            transcript_stream_key(TranscriptRole::Assistant, Some("message-1".to_owned()))
+        );
     }
 
     #[test]
