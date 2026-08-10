@@ -12,7 +12,15 @@ local function default_config_file()
   if configured and configured ~= "" then
     return vim.fs.joinpath(configured, "init.lua")
   end
-  local xdg = vim.fn.stdpath("config")
+
+  local xdg = vim.env.XDG_CONFIG_HOME
+  if not xdg or xdg == "" then
+    local home = vim.env.HOME
+    if not home or home == "" then
+      return nil
+    end
+    xdg = vim.fs.joinpath(home, ".config")
+  end
   local candidate = vim.fs.joinpath(xdg, "phenix-harness", "init.lua")
   if vim.uv.fs_stat(candidate) then
     return candidate
