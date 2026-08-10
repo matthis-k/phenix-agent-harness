@@ -1083,11 +1083,7 @@ fn cursor_position(text: &str, width: u16) -> (u16, u16) {
 }
 
 fn model_selection_label(model: &phenix_runtime_api::ModelRef) -> String {
-    if model.provider == "phenix" {
-        format!("routing: {}/{}", model.provider, model.model)
-    } else {
-        format!("model: {}/{}", model.provider, model.model)
-    }
+    format!("{}/{}", model.provider, model.model)
 }
 
 fn auth_prompt_message(prompt: &AuthPrompt) -> String {
@@ -1138,17 +1134,17 @@ mod tests {
     }
 
     #[test]
-    fn routed_and_direct_models_have_distinct_status_labels() {
+    fn routing_and_concrete_models_use_canonical_status_values() {
         let routed = phenix_runtime_api::ModelRef {
-            provider: "phenix".to_owned(),
+            provider: "routing".to_owned(),
             model: "mixed".to_owned(),
         };
         let direct = phenix_runtime_api::ModelRef {
-            provider: "openai".to_owned(),
-            model: "gpt-5.6".to_owned(),
+            provider: "pi".to_owned(),
+            model: "openai/gpt-5.6".to_owned(),
         };
-        assert_eq!(model_selection_label(&routed), "routing: phenix/mixed");
-        assert_eq!(model_selection_label(&direct), "model: openai/gpt-5.6");
+        assert_eq!(model_selection_label(&routed), "routing/mixed");
+        assert_eq!(model_selection_label(&direct), "pi/openai/gpt-5.6");
     }
 
     #[test]
@@ -1176,7 +1172,7 @@ mod tests {
                 persisted_session: None,
                 session_file: None,
                 model: Some(phenix_runtime_api::ModelRef {
-                    provider: "phenix".to_owned(),
+                    provider: "routing".to_owned(),
                     model: "mixed".to_owned(),
                 }),
                 thinking_level: None,
@@ -1193,7 +1189,7 @@ mod tests {
             .and_then(|snapshot| snapshot.runs.first())
             .and_then(|run| run.model.as_ref())
             .expect("selected model");
-        assert_eq!(model_selection_label(model), "routing: phenix/mixed");
+        assert_eq!(model_selection_label(model), "routing/mixed");
     }
 
     #[test]
