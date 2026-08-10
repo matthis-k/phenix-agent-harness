@@ -1,0 +1,33 @@
+name: PR lock refresh
+
+on:
+  push:
+    branches:
+      - refactor/canonical-backend-capabilities
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: refactor/canonical-backend-capabilities
+      - name: Refresh workspace lock metadata
+        working-directory: rust
+        run: cargo metadata --format-version 1 >/dev/null
+      - name: Commit lockfile
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust/Cargo.lock
+          if git diff --cached --quiet; then
+            echo 'Cargo.lock did not change' >&2
+            exit 1
+          fi
+          git commit -m 'chore: refresh Rust lockfile'
+          git push origin HEAD:refactor/canonical-backend-capabilities
