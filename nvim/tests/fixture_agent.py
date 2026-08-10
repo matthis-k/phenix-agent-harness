@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import sys
+import time
 
 
 def send(message):
@@ -91,11 +92,13 @@ for raw_line in sys.stdin:
                     "sessionId": params["sessionId"],
                     "update": {
                         "sessionUpdate": "agent_thought_chunk",
-                        "content": {"type": "text", "text": "thinking about it"},
+                        "content": {"type": "text", "text": "thinking about: " + text},
                     },
                 },
             }
         )
+        if text == "scroll while streaming":
+            time.sleep(0.25)
         send(
             {
                 "jsonrpc": "2.0",
