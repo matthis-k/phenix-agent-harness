@@ -3,7 +3,6 @@
 mod backend;
 mod id;
 mod protocol;
-mod serde_capabilities;
 
 pub use backend::{
     AgentBackend, BackendClient, BackendError, BackendOutput, BackendOutputSender, BackendRequest,

@@ -4,16 +4,14 @@ mod auth;
 
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
-    AcpEndpoint, AcpMethod, AuthenticationCapabilities, BackendAuthMethod, BackendAuthProviderList,
+    AcpEndpoint, AcpMethod, BackendAuthMethod, BackendAuthProviderList,
     BackendAuthProviderListResult, BackendAuthProviderSummary, BackendCapabilities,
     BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
     BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendDefinition,
     BackendId, BackendModelList, BackendModelListResult, BackendModelSummary, BackendTargetParams,
-    DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, Difficulty,
-    ExtensionUiCapabilities, GatewayError, GatewayEvent, ModelCapabilities, ModelId,
-    PhenixAcpGateway, PhenixConductor, PromptCapabilities, ProviderId, ResourceCapabilities,
-    RoleId, RouterId, SessionCapabilities, SessionCommand, SessionNodeId, SessionTreeDefinition,
-    SessionTreeId, ToolConfiguration,
+    DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, Difficulty, GatewayError,
+    GatewayEvent, ModelId, PhenixAcpGateway, PhenixConductor, ProviderId, RoleId, RouterId,
+    SessionCommand, SessionNodeId, SessionTreeDefinition, SessionTreeId, ToolConfiguration,
 };
 use phenix_acp_backend::{
     AcpAgentBackend, AcpBackendConfig, AcpGatewayTransport, ConfigError as BackendConfigError,
@@ -224,8 +222,7 @@ impl ConductorRuntime {
         params: &BackendTargetParams,
     ) -> Result<BackendCapabilities, RuntimeExtensionError> {
         let mut control = self.backend_control(params)?;
-        let snapshot = control.snapshot()?;
-        Ok(map_capabilities(snapshot.capabilities))
+        Ok(control.snapshot()?.capabilities)
     }
 
     fn backend_models(
@@ -446,57 +443,6 @@ fn encode_extension_result<M: AcpMethod>(
         source,
     })?;
     Ok(ExtResponse::new(Arc::from(raw)))
-}
-
-fn map_capabilities(value: phenix_runtime_api::BackendCapabilities) -> BackendCapabilities {
-    BackendCapabilities {
-        prompting: PromptCapabilities {
-            steering: value.prompting.steering,
-            follow_ups: value.prompting.follow_ups,
-            images: value.prompting.images,
-            compaction: value.prompting.compaction,
-            retry_control: value.prompting.retry_control,
-        },
-        sessions: SessionCapabilities {
-            persistence: value.sessions.persistence,
-            switching: value.sessions.switching,
-            branching: value.sessions.branching,
-            import: value.sessions.import,
-            export: value.sessions.export,
-            tree: value.sessions.tree,
-        },
-        authentication: AuthenticationCapabilities {
-            provider_listing: value.authentication.provider_listing,
-            oauth: value.authentication.oauth,
-            api_keys: value.authentication.api_keys,
-            terminal: value.authentication.terminal,
-            device_code: value.authentication.device_code,
-            browser_callback: value.authentication.browser_callback,
-            logout: value.authentication.logout,
-        },
-        models: ModelCapabilities {
-            listing: value.models.listing,
-            selection: value.models.selection,
-            thinking_levels: value.models.thinking_levels,
-            virtual_models: value.models.virtual_models,
-        },
-        resources: ResourceCapabilities {
-            commands: value.resources.commands,
-            extensions: value.resources.extensions,
-            skills: value.resources.skills,
-            prompt_templates: value.resources.prompt_templates,
-            reload: value.resources.reload,
-        },
-        extension_ui: ExtensionUiCapabilities {
-            selection: value.extension_ui.selection,
-            confirmation: value.extension_ui.confirmation,
-            text_input: value.extension_ui.text_input,
-            secret_input: value.extension_ui.secret_input,
-            editor: value.extension_ui.editor,
-            notifications: value.extension_ui.notifications,
-            status: value.extension_ui.status,
-        },
-    }
 }
 
 fn map_model(value: RuntimeModelSummary) -> Result<BackendModelSummary, RuntimeExtensionError> {
