@@ -226,9 +226,7 @@ fn model_value(model: &ModelConfig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_acp::{
-        parse_routing_table, Difficulty, RoleId, SessionTreeId, WorkflowId,
-    };
+    use phenix_acp::{parse_routing_table, Difficulty, RoleId, SessionTreeId, WorkflowId};
 
     const ROUTER_A: &str = r#"
 # Router A
@@ -309,18 +307,18 @@ id: router.b
         let backend = BackendId::parse("test").expect("backend id");
 
         let routed = policy
-            .resolve_selection(
-                &tree_id,
-                "routing/router.b",
-                &backend,
-                ThinkingLevel::High,
-            )
+            .resolve_selection(&tree_id, "routing/router.b", &backend, ThinkingLevel::High)
             .expect("routing selection");
         policy
             .set_selection(&tree_id, routed)
             .expect("set routing selection");
         assert_eq!(
-            policy.route(&request(&tree_id)).unwrap().model.model.as_str(),
+            policy
+                .route(&request(&tree_id))
+                .unwrap()
+                .model
+                .model
+                .as_str(),
             "model-b"
         );
 
@@ -339,6 +337,9 @@ id: router.b
         let decision = policy.route(&request(&tree_id)).expect("route");
         assert_eq!(decision.model.model.as_str(), "model-a");
         assert_eq!(decision.model.thinking, ThinkingLevel::High);
-        assert_eq!(policy.current_value(&tree_id).unwrap(), "test/provider/model-a");
+        assert_eq!(
+            policy.current_value(&tree_id).unwrap(),
+            "test/provider/model-a"
+        );
     }
 }

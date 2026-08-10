@@ -11,10 +11,7 @@ impl ConductorRuntime {
     /// Values are deliberately canonical and self-describing:
     /// `routing/<profile>` keeps automatic routing enabled, while
     /// `<backend>/<provider>/<model>` is a concrete model pin.
-    pub fn standard_session_config_options(
-        &self,
-        session_id: &str,
-    ) -> Result<Value, RuntimeError> {
+    pub fn standard_session_config_options(&self, session_id: &str) -> Result<Value, RuntimeError> {
         let context = self.standard_session_routing_context(session_id)?;
         let current_value = self.routing.current_value(&context.session.tree_id)?;
         let options = self

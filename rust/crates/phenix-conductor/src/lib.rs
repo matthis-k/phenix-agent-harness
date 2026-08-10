@@ -379,7 +379,10 @@ impl ConductorBootstrap {
             return Err(BootstrapError::DuplicateBackend);
         }
         let routing_tables = definitions.routing_tables().cloned().collect::<Vec<_>>();
-        if !routing_tables.iter().any(|router| router.id() == &self.router) {
+        if !routing_tables
+            .iter()
+            .any(|router| router.id() == &self.router)
+        {
             return Err(BootstrapError::MissingRouter(self.router.clone()));
         }
         for router in &routing_tables {
