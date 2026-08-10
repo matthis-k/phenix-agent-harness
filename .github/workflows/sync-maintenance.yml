@@ -1,16 +1,20 @@
-name: Maintenance projection sync
+name: Maintenance autofix
 
 on:
   pull_request:
 
 permissions:
-  contents: read
+  actions: write
+  contents: write
 
 jobs:
-  sync:
+  autofix:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
@@ -19,24 +23,31 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
-      - name: Format Nix and regenerate workflow
+      - name: Apply deterministic maintenance fixes
         run: |
           set -euo pipefail
-          nix develop --command bash -c \
-            'find . -type f -name "*.nix" -not -path "./.git/*" -print0 | xargs -0 -r nixfmt'
+          nix run .#phenix-maintenance -- fix
+          git diff --check
 
-          system="$(nix eval --impure --raw --expr builtins.currentSystem)"
-          nix eval --raw \
-            ".#packages.$system.phenix-maintenance.phenixMaintenance.ci.github.workflow" \
-            > .github/workflows/ci.yml
+      - name: Commit autofixes
+        id: commit
+        run: |
+          set -euo pipefail
 
-          tar -czf maintenance-projection.tar.gz \
-            .github/workflows/ci.yml \
-            flake.lock \
-            flake.nix \
-            modules/development.nix
+          if test -z "$(git status --porcelain=v1 --untracked-files=all)"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: maintenance-projection
-          path: maintenance-projection.tar.gz
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: apply CI autofixes"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate corrected head
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref "${{ github.event.pull_request.head.ref }}"
