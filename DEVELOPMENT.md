@@ -88,7 +88,7 @@ The final `Maintenance checks` job remains the aggregate required status.
 
 ## Pre-commit
 
-The maintenance declaration enables the shared `phenix-flake-ci` pre-commit integration with `gitHooks.preCommit = [ "fix" ]`. Entering `nix develop` installs that generated hook into the repository's Git directory and configures the repository-local `core.hooksPath`; the harness does not carry a second `.githooks` implementation.
+The maintenance declaration enables the shared `phenix-flake-ci` pre-commit integration with `gitHooks.preCommit = [ "fix" ]`. Entering `nix develop` installs that generated hook into the repository's Git directory and configures the repository-local `core.hooksPath`; the harness does not carry a second `.githooks` implementation. If the shared integration is later disabled, entering the shell restores the hook path that preceded Phenix ownership, when one existed, and removes only the Phenix-managed hook directory.
 
 The hook records the paths staged before `maintenance fix`, applies deterministic normalization, re-stages only those original paths, and runs `git diff --cached --check`. Outside the development shell it falls back to:
 
