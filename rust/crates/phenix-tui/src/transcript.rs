@@ -47,11 +47,15 @@ pub(crate) fn transcript_document(
             });
         }
         if let Some(turn) = turns.last_mut() {
-            turn.items
-                .extend(state.notifications.iter().map(|message| TranscriptTurnItem {
-                    kind: TranscriptTurnItemKind::System,
-                    text: message.clone(),
-                }));
+            turn.items.extend(
+                state
+                    .notifications
+                    .iter()
+                    .map(|message| TranscriptTurnItem {
+                        kind: TranscriptTurnItemKind::System,
+                        text: message.clone(),
+                    }),
+            );
         }
     }
 
@@ -283,19 +287,23 @@ fn detail_summary_line(
         ),
     ];
     if show_summary {
-        if let Some(summary) = item.text.lines().next().filter(|line| !line.trim().is_empty()) {
+        if let Some(summary) = item
+            .text
+            .lines()
+            .next()
+            .filter(|line| !line.trim().is_empty())
+        {
             spans.push(Span::styled("  ", theme_style(theme, "Muted")));
-            spans.push(Span::styled(summary.to_owned(), theme_style(theme, "Muted")));
+            spans.push(Span::styled(
+                summary.to_owned(),
+                theme_style(theme, "Muted"),
+            ));
         }
     }
     Line::from(spans)
 }
 
-fn detail_lines(
-    item: &TranscriptTurnItem,
-    width: u16,
-    theme: &ThemeConfig,
-) -> Vec<Line<'static>> {
+fn detail_lines(item: &TranscriptTurnItem, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
     let group = match item.kind {
         TranscriptTurnItemKind::Thinking => "Thinking",
         TranscriptTurnItemKind::Tool => "Tool",
@@ -485,10 +493,9 @@ mod tests {
             TranscriptRole::Assistant,
             "```rust\nsecond\n```",
         ));
-        state.view.set_rich_block_view(
-            "run-1:u1:block:1".to_owned(),
-            RichBlockView::Source,
-        );
+        state
+            .view
+            .set_rich_block_view("run-1:u1:block:1".to_owned(), RichBlockView::Source);
         state
             .view
             .rich_block_viewport_mut("run-1:u1:block:1".to_owned())
