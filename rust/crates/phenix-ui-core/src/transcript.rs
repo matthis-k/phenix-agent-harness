@@ -9,6 +9,8 @@ pub enum TranscriptTurnItemKind {
     System,
 }
 
+/// One contiguous item in a conversation turn. Item order is semantic: renderers
+/// must preserve it so reasoning, tool activity, and assistant text stay interleaved.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranscriptTurnItem {
     pub kind: TranscriptTurnItemKind,
