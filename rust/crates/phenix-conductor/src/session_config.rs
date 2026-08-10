@@ -1,6 +1,8 @@
 use super::{ConductorRuntime, RuntimeError, StandardSession};
-use crate::routing::{SessionRoutingOption, SessionRoutingSelection};
-use phenix_acp::{BackendId, GatewayError, SessionCommand, ThinkingLevel};
+use crate::routing::SessionRoutingOption;
+use phenix_acp::{
+    BackendId, Difficulty, GatewayError, RoleId, SessionCommand, ThinkingLevel,
+};
 use serde_json::{json, Value};
 
 const MODEL_CONFIG_ID: &str = "model";
@@ -44,19 +46,32 @@ impl ConductorRuntime {
             &context.backend,
             context.thinking,
         )?;
-
-        // A concrete selection is both the root session's actual model and the
-        // policy used for every future child. Commit the policy only after the
-        // downstream model switch succeeds so the two cannot diverge.
-        if let SessionRoutingSelection::Model(model) = &selection {
-            self.conductor.gateway_mut().execute(
-                &context.session.tree_id,
-                &context.session.root_node_id,
-                SessionCommand::SetModel {
-                    model: model.selection(),
-                },
-            )?;
+        let root_model = self.routing.resolve_root_model(
+            &context.session.tree_id,
+            &selection,
+            context.role,
+            context.difficulty,
+            context.objective,
+            context.thinking,
+        )?;
+        if root_model.backend != context.backend {
+            return Err(GatewayError::routing(format!(
+                "routing selection {value} resolves the already-open root session from backend {} to {}; cross-backend root migration is not supported",
+                context.backend, root_model.backend
+            ))
+            .into());
         }
+
+        // Both direct-model and routing-profile selection immediately retarget
+        // the root. Only after that succeeds do we commit the policy that will
+        // govern every future workflow/delegated node in this tree.
+        self.conductor.gateway_mut().execute(
+            &context.session.tree_id,
+            &context.session.root_node_id,
+            SessionCommand::SetModel {
+                model: root_model.selection(),
+            },
+        )?;
         self.routing
             .set_selection(&context.session.tree_id, selection)?;
         self.standard_session_config_options(session_id)
@@ -78,10 +93,23 @@ impl ConductorRuntime {
                     session.tree_id, session.root_node_id
                 ))
             })?;
+        let objective = snapshot
+            .objectives
+            .iter()
+            .find(|objective| objective.id == root.objective_id)
+            .ok_or_else(|| {
+                GatewayError::Invariant(format!(
+                    "standard session root objective {} is missing from tree {}",
+                    root.objective_id, session.tree_id
+                ))
+            })?;
         Ok(StandardSessionRoutingContext {
             session,
             backend: root.model.backend.clone(),
             thinking: root.model.thinking,
+            role: root.role.clone(),
+            difficulty: root.difficulty,
+            objective: objective.title.clone(),
         })
     }
 }
@@ -110,6 +138,9 @@ struct StandardSessionRoutingContext {
     session: StandardSession,
     backend: BackendId,
     thinking: ThinkingLevel,
+    role: RoleId,
+    difficulty: Difficulty,
+    objective: String,
 }
 
 #[cfg(test)]
