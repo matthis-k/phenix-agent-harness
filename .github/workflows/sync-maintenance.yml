@@ -29,6 +29,11 @@ jobs:
           nix run .#phenix-maintenance -- fix
           git diff --check
 
+      - name: Synchronize Rust lockfile
+        run: |
+          set -euo pipefail
+          nix develop --command cargo check --manifest-path rust/Cargo.toml --workspace
+
       - name: Commit autofixes
         id: commit
         env:
@@ -44,7 +49,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "chore: apply CI autofixes"
+          git commit -m "chore: synchronize workspace lock"
           git push origin "HEAD:$HEAD_REF"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
