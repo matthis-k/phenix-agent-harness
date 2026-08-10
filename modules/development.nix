@@ -1,4 +1,5 @@
-_: {
+{ inputs, ... }:
+{
   perSystem =
     {
       pkgs,
@@ -6,7 +7,7 @@ _: {
       ...
     }:
     let
-      maintenanceLib = import ../vendor/phenix-flake-maintenance/lib;
+      maintenanceLib = inputs.phenix-flake-ci.lib;
 
       repositoryRoot = ''
         repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -135,6 +136,10 @@ _: {
         ci.github = {
           enable = true;
           outputName = "phenix-maintenance";
+        };
+        gitHooks = {
+          enable = true;
+          preCommit = [ "fix" ];
         };
 
         commands = {
@@ -467,9 +472,7 @@ _: {
           self'.packages.stitch-mcp
         ];
         shellHook = ''
-          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            git config core.hooksPath .githooks
-          fi
+          ${maintenancePackage.shellHook}
 
           echo "phenix-agent-harness dev shell"
           echo "  all:          maintenance all"
