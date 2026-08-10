@@ -42,10 +42,7 @@ impl BlockingAcpAgent {
 }
 
 impl ConnectTo<Client> for BlockingAcpAgent {
-    async fn connect_to(
-        self,
-        client: impl ConnectTo<Agent>,
-    ) -> Result<(), phenix_acp::acp::Error> {
+    async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), phenix_acp::acp::Error> {
         let mut command = Command::new(self.launch.command());
         command
             .args(self.launch.arguments())
@@ -84,7 +81,9 @@ impl ConnectTo<Client> for BlockingAcpAgent {
             return if stderr.is_empty() {
                 Err(error)
             } else {
-                Err(acp_internal_error(format!("{error}; child stderr: {stderr}")))
+                Err(acp_internal_error(format!(
+                    "{error}; child stderr: {stderr}"
+                )))
             };
         }
 
