@@ -2,23 +2,26 @@
 
 This directory is an **explicit example and authoring surface**. It is not built-in conductor policy and is not silently selected as a fallback.
 
-A user may copy, reference, or pass this directory explicitly with `--config-dir`.
+A user may copy, reference, or pass this directory explicitly with `--config DIR`. The directory entry point is always `init.lua`.
 
 ```text
-config.lua
-   │
-   │ structured Lua authoring
-   ▼
+--config DIR
+    │
+    ▼
+DIR/init.lua
+    │
+    │ structured Lua authoring
+    ▼
 typed _phenix/config/apply
-   │
-   ▼
+    │
+    ▼
 phenix-conductor
-   │
-   ▼
+    │
+    ▼
 immutable configuration revision
 ```
 
-`config.lua` demonstrates:
+`init.lua` demonstrates:
 
 - downstream ACP backend registration;
 - reusable agent roles;

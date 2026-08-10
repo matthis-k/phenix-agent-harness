@@ -6,15 +6,16 @@ The architectural boundary is described in the root [`README.md`](../README.md).
 
 ## Loading
 
-The native frontend loads built-in Lua defaults first unless `--no-default-config` is used, then evaluates the selected `config.lua`.
+The native frontend loads built-in Lua defaults first unless `--no-default-config` is used, then evaluates `init.lua` from the selected configuration directory.
 
-Configuration is discovered under the Phenix Harness config directory or selected explicitly with `-p/--config-dir`.
+Configuration is discovered under the Phenix Harness XDG config directory or selected explicitly with `-c/--config DIR`. In either case, the entry point is `<DIR>/init.lua`.
 
 ```sh
+phenix --config /nix/store/...-phenix-config
 phenix --print-default-config
 ```
 
-prints the built-in Lua defaults.
+`--print-default-config` prints the built-in Lua defaults.
 
 ## ACP authoring
 

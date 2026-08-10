@@ -79,9 +79,9 @@ impl Drop for KeyboardEnhancementGuard {
     args_override_self = true
 )]
 struct Arguments {
-    /// Read frontend Lua and ACP source descriptors from this authoring directory.
-    #[arg(short = 'p', long = "config-dir", value_name = "DIR")]
-    config_dir: Option<PathBuf>,
+    /// Read frontend Lua and ACP source descriptors from this configuration directory.
+    #[arg(short = 'c', long = "config", value_name = "DIR")]
+    config: Option<PathBuf>,
 
     /// Do not load the built-in frontend keymap and theme defaults.
     #[arg(long)]
@@ -103,8 +103,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let config_directory = resolve_config_directory(arguments.config_dir.as_deref())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot resolve the Phenix Harness configuration directory; set XDG_CONFIG_HOME or HOME, or pass -p/--config-dir"))?;
+    let config_directory = resolve_config_directory(arguments.config.as_deref()).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "cannot resolve the Phenix Harness configuration directory; set XDG_CONFIG_HOME or HOME, or pass -c/--config",
+        )
+    })?;
     let (provider, acp_config) = load_frontend_provider(&arguments, &config_directory)?;
     if arguments.check {
         return run_handshake_check(&config_directory, acp_config.as_ref());
@@ -117,11 +121,15 @@ fn load_frontend_provider(
     config_directory: &Path,
 ) -> Result<(FrontendProviderRef, Option<AcpApplicationConfig>), Box<dyn Error>> {
     let provider = LuaFrontendProvider::new(LuaFrontendOptions {
-        source_path: Some(config_directory.join("config.lua")),
+        source_path: Some(config_entrypoint(config_directory)),
         load_defaults: !arguments.no_default_config,
     })?;
     let acp_config = provider.acp_config().cloned();
     Ok((Rc::new(RefCell::new(provider)), acp_config))
+}
+
+fn config_entrypoint(config_directory: &Path) -> PathBuf {
+    config_directory.join("init.lua")
 }
 
 fn resolve_config_directory(explicit_path: Option<&Path>) -> Option<PathBuf> {
@@ -252,7 +260,7 @@ fn create_acp_backend(
             io::ErrorKind::InvalidData,
             format!(
                 "{} must call phenix.acp.configure(...) and register workflow/routing source descriptors",
-                config_directory.join("config.lua").display()
+                config_entrypoint(config_directory).display()
             ),
         )
     })?;
@@ -393,6 +401,30 @@ fn convert_modifiers(modifiers: CrosstermModifiers) -> KeyModifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_config_directory_is_authoritative() {
+        let config = Path::new("/nix/store/aaaaaaaa-phenix-config");
+        assert_eq!(
+            resolve_config_directory(Some(config)).as_deref(),
+            Some(config)
+        );
+        assert_eq!(
+            config_entrypoint(config),
+            Path::new("/nix/store/aaaaaaaa-phenix-config/init.lua")
+        );
+    }
+
+    #[test]
+    fn config_flag_accepts_store_directory() {
+        let arguments =
+            Arguments::try_parse_from(["phenix", "--config", "/nix/store/aaaaaaaa-phenix-config"])
+                .expect("config directory should parse");
+        assert_eq!(
+            arguments.config.as_deref(),
+            Some(Path::new("/nix/store/aaaaaaaa-phenix-config"))
+        );
+    }
 
     #[test]
     fn crossterm_keys_are_reduced_to_backend_neutral_values() {
