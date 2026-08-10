@@ -2,6 +2,7 @@ use blocking::Unblock;
 use phenix_acp::acp::{AcpAgent, AcpAgentConfig, Agent, ByteStreams, Client, ConnectTo};
 use std::collections::VecDeque;
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::str::FromStr;
 use std::sync::mpsc::{self, Receiver};
@@ -31,7 +32,10 @@ pub(crate) struct BlockingAcpAgent {
 }
 
 impl BlockingAcpAgent {
-    pub(crate) fn from_command(command: &str) -> Result<Self, phenix_acp::acp::Error> {
+    pub(crate) fn from_command(
+        command: &str,
+        _session_cwd: PathBuf,
+    ) -> Result<Self, phenix_acp::acp::Error> {
         let launch = AcpAgent::from_str(command)?.into_config();
         Ok(Self { launch })
     }
@@ -168,8 +172,11 @@ mod tests {
 
     #[test]
     fn command_parser_keeps_sdk_launch_semantics() {
-        let agent = BlockingAcpAgent::from_command("RUST_LOG=debug sh -c 'exit 0'")
-            .expect("parse command");
+        let agent = BlockingAcpAgent::from_command(
+            "RUST_LOG=debug sh -c 'exit 0'",
+            PathBuf::from("ignored-session-cwd"),
+        )
+        .expect("parse command");
         assert_eq!(agent.launch.command().to_string_lossy(), "sh");
         assert_eq!(agent.launch.arguments(), &["-c", "exit 0"]);
         assert_eq!(
