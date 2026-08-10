@@ -1,4 +1,5 @@
 use crate::id::{AuthFlowId, DialogId, ObjectiveId, RunId, SessionEntryId, SessionId, ToolCallId};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
 
@@ -8,7 +9,7 @@ pub struct ClientInformation {
     pub build: String,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BackendCapabilities {
     pub prompting: PromptCapabilities,
     pub sessions: SessionCapabilities,
@@ -18,7 +19,7 @@ pub struct BackendCapabilities {
     pub extension_ui: ExtensionUiCapabilities,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PromptCapabilities {
     pub steering: bool,
     pub follow_ups: bool,
@@ -27,7 +28,7 @@ pub struct PromptCapabilities {
     pub retry_control: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionCapabilities {
     pub persistence: bool,
     pub switching: bool,
@@ -37,7 +38,7 @@ pub struct SessionCapabilities {
     pub tree: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AuthenticationCapabilities {
     pub provider_listing: bool,
     pub oauth: bool,
@@ -48,7 +49,7 @@ pub struct AuthenticationCapabilities {
     pub logout: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelCapabilities {
     pub listing: bool,
     pub selection: bool,
@@ -56,7 +57,7 @@ pub struct ModelCapabilities {
     pub virtual_models: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ResourceCapabilities {
     pub commands: bool,
     pub extensions: bool,
@@ -65,7 +66,7 @@ pub struct ResourceCapabilities {
     pub reload: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExtensionUiCapabilities {
     pub selection: bool,
     pub confirmation: bool,
