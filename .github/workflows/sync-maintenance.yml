@@ -32,8 +32,9 @@ jobs:
 
           tar -czf maintenance-projection.tar.gz \
             .github/workflows/ci.yml \
-            modules/development.nix \
-            vendor/phenix-flake-maintenance/lib
+            flake.lock \
+            flake.nix \
+            modules/development.nix
 
       - uses: actions/upload-artifact@v4
         with:
