@@ -120,6 +120,21 @@
         "type": "github"
       }
     },
+    "phenix-flake-ci": {
+      "locked": {
+        "lastModified": 1786322520,
+        "narHash": "sha256-8LbEQNX1aauvL8ONqS5oOACua2J5UnaYsFtZ/+Gwj44=",
+        "owner": "matthis-k",
+        "repo": "phenix-flake-ci",
+        "rev": "aa7200c9b1a9f256543f482a835be6a44e677d02",
+        "type": "github"
+      },
+      "original": {
+        "owner": "matthis-k",
+        "repo": "phenix-flake-ci",
+        "type": "github"
+      }
+    },
     "phenix-pins": {
       "inputs": {
         "flake-file": "flake-file",
@@ -197,6 +212,7 @@
           "phenix-pins",
           "nixpkgs"
         ],
+        "phenix-flake-ci": "phenix-flake-ci",
         "phenix-pins": "phenix-pins",
         "phenix-stitch": "phenix-stitch",
         "pi-src": "pi-src"
