@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod auth;
+mod routing;
+mod session_config;
 
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
@@ -19,6 +21,7 @@ use phenix_acp_backend::{
 use phenix_runtime_api::{
     AuthMethod, BackendCommand, BackendReply, CommandSource, ModelSummary as RuntimeModelSummary,
 };
+use routing::SessionPolicyRouter;
 use serde_json::value::to_raw_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -73,15 +76,17 @@ pub struct ConductorRuntime {
     definition_id: phenix_acp::DefinitionId,
     standard_session: Option<BootstrapStandardSession>,
     backends: BTreeMap<BackendId, AcpGatewayTransport>,
+    routing: SessionPolicyRouter,
     cancelled_sessions: BTreeSet<String>,
 }
 
 impl ConductorRuntime {
-    pub fn new(
+    pub(crate) fn new(
         conductor: PhenixConductor,
         definition_id: phenix_acp::DefinitionId,
         standard_session: Option<BootstrapStandardSession>,
         backends: BTreeMap<BackendId, AcpGatewayTransport>,
+        routing: SessionPolicyRouter,
     ) -> Result<Self, RuntimeError> {
         if standard_session
             .as_ref()
@@ -97,6 +102,7 @@ impl ConductorRuntime {
             definition_id,
             standard_session,
             backends,
+            routing,
             cancelled_sessions: BTreeSet::new(),
         })
     }
@@ -202,8 +208,11 @@ impl ConductorRuntime {
 
     pub fn close_standard_session(&mut self, session_id: &str) -> Result<(), RuntimeError> {
         let tree_id = parse_tree_id(session_id)?;
-        self.conductor.gateway_mut().close_tree(&tree_id)?;
+        let close_result = self.conductor.gateway_mut().close_tree(&tree_id);
+        let routing_result = self.routing.clear(&tree_id);
         self.cancelled_sessions.remove(session_id);
+        close_result?;
+        routing_result?;
         Ok(())
     }
 
@@ -369,24 +378,30 @@ impl ConductorBootstrap {
         if configured_backends.len() != self.backends.len() {
             return Err(BootstrapError::DuplicateBackend);
         }
-        let selected_router = definitions
-            .routing_tables()
-            .find(|router| router.id() == &self.router)
-            .ok_or_else(|| BootstrapError::MissingRouter(self.router.clone()))?;
-        for rule in selected_router.rules() {
-            for (difficulty, model) in rule.models().iter() {
-                if !configured_backends.contains(&model.backend) {
-                    return Err(BootstrapError::MissingRoutedBackend {
-                        router: self.router.clone(),
-                        difficulty,
-                        backend: model.backend.clone(),
-                    });
+        let routing_tables = definitions.routing_tables().cloned().collect::<Vec<_>>();
+        if !routing_tables
+            .iter()
+            .any(|router| router.id() == &self.router)
+        {
+            return Err(BootstrapError::MissingRouter(self.router.clone()));
+        }
+        for router in &routing_tables {
+            for rule in router.rules() {
+                for (difficulty, model) in rule.models().iter() {
+                    if !configured_backends.contains(&model.backend) {
+                        return Err(BootstrapError::MissingRoutedBackend {
+                            router: router.id().clone(),
+                            difficulty,
+                            backend: model.backend.clone(),
+                        });
+                    }
                 }
             }
         }
 
-        let workflow_ids = definitions
-            .workflows()
+        let workflows = definitions.workflows().cloned().collect::<Vec<_>>();
+        let workflow_ids = workflows
+            .iter()
             .map(|workflow| workflow.id().clone())
             .collect::<Vec<_>>();
         let mut definition =
@@ -407,20 +422,27 @@ impl ConductorBootstrap {
         }
         let definition = definition.build()?;
 
+        let routing = SessionPolicyRouter::new(self.router.clone(), routing_tables)?;
         let mut transports = BTreeMap::new();
-        let mut builder = PhenixAcpGateway::builder().definition(definition)?;
+        let mut builder = PhenixAcpGateway::builder()
+            .definition(definition)?
+            .router(self.router.clone(), routing.clone())?;
+        for workflow in workflows {
+            builder = builder.workflow(workflow.id().clone(), workflow)?;
+        }
         for backend in self.backends {
             let config = AcpBackendConfig::new(backend.command, cwd.to_path_buf())?;
             let transport = AcpAgentBackend::gateway_transport(config, channel_capacity)?;
             builder = builder.backend(backend.id.clone(), transport.clone())?;
             transports.insert(backend.id, transport);
         }
-        let gateway = definitions.register(builder)?.build()?;
+        let gateway = builder.build()?;
         ConductorRuntime::new(
             PhenixConductor::new(gateway),
             self.definition_id,
             self.standard_session,
             transports,
+            routing,
         )
         .map_err(BootstrapError::Runtime)
     }

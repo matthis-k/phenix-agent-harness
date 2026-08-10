@@ -4,9 +4,9 @@ mod subscriptions;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CancelNotification, ClientRequest, CloseSessionResponse, ContentBlock,
     ContentChunk, EmbeddedResourceResource, ExtRequest, ExtResponse, InitializeResponse,
-    NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse, SessionId,
-    SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields,
+    PromptCapabilities, PromptRequest, PromptResponse, SessionId, SessionNotification,
+    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo, Stdio};
 use base64::Engine;
@@ -81,13 +81,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .map_err(agent_client_protocol::Error::into_internal_error)?
                     }
                     ClientRequest::NewSessionRequest(_request) => {
-                        let session = lock_runtime(&request_runtime)?
-                            .create_standard_session()
+                        let mut runtime = lock_runtime(&request_runtime)?;
+                        let session = runtime.create_standard_session().map_err(|error| {
+                            agent_client_protocol::util::internal_error(error.to_string())
+                        })?;
+                        let config_options = runtime
+                            .standard_session_config_options(&session.session_id)
                             .map_err(|error| {
                                 agent_client_protocol::util::internal_error(error.to_string())
                             })?;
-                        serde_json::to_value(NewSessionResponse::new(session.session_id))
-                            .map_err(agent_client_protocol::Error::into_internal_error)?
+                        serde_json::json!({
+                            "sessionId": session.session_id,
+                            "configOptions": config_options,
+                        })
+                    }
+                    ClientRequest::SetSessionConfigOptionRequest(request) => {
+                        let session_id = request.session_id.to_string();
+                        let config_id = request.config_id.to_string();
+                        let value = serde_json::to_value(&request.value)
+                            .map_err(agent_client_protocol::Error::into_internal_error)?;
+                        let config_options = lock_runtime(&request_runtime)?
+                            .set_standard_session_config_option(&session_id, &config_id, &value)
+                            .map_err(|error| {
+                                agent_client_protocol::util::internal_error(error.to_string())
+                            })?;
+                        serde_json::json!({ "configOptions": config_options })
                     }
                     ClientRequest::PromptRequest(prompt) => serde_json::to_value(
                         handle_prompt(
