@@ -82,6 +82,14 @@ function UI:_append_to_last_line(text)
   set_modifiable(self.transcript_buffer, false)
 end
 
+function UI:_should_follow()
+  if not self.transcript_window or not vim.api.nvim_win_is_valid(self.transcript_window) then
+    return false
+  end
+  local cursor = vim.api.nvim_win_get_cursor(self.transcript_window)
+  return cursor[1] == vim.api.nvim_buf_line_count(self.transcript_buffer)
+end
+
 function UI:_close_fold()
   if not self.active_fold_start or not self.transcript_window or not vim.api.nvim_win_is_valid(self.transcript_window) then
     self.active_fold_start = nil
@@ -113,12 +121,16 @@ function UI:append_stream(kind, heading, text, foldable)
   if not text or text == "" then
     return
   end
+  local follow = self:_should_follow()
   self:_begin_stream(kind, heading, foldable)
   self:_append_to_last_line(text)
-  self:follow()
+  if follow then
+    self:follow()
+  end
 end
 
 function UI:append_block(heading, value, foldable)
+  local follow = self:_should_follow()
   self:_close_fold()
   self.active_stream = nil
   self:_append_lines({ "", "### " .. heading, "" })
@@ -131,7 +143,9 @@ function UI:append_block(heading, value, foldable)
       pcall(vim.cmd, string.format("silent! %d,%dfold", start, finish))
     end)
   end
-  self:follow()
+  if follow then
+    self:follow()
+  end
 end
 
 function UI:append_update(update)
@@ -234,6 +248,7 @@ function UI:mount()
   vim.api.nvim_set_option_value("linebreak", true, { win = self.transcript_window })
   vim.api.nvim_set_option_value("foldmethod", "manual", { win = self.transcript_window })
   vim.api.nvim_set_option_value("foldenable", true, { win = self.transcript_window })
+  self:follow()
 
   self.input = Split({
     relative = "editor",
