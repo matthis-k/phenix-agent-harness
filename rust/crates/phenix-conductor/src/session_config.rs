@@ -1,5 +1,5 @@
 use super::{ConductorRuntime, RuntimeError, StandardSession};
-use crate::routing::SessionRoutingSelection;
+use crate::routing::{SessionRoutingOption, SessionRoutingSelection};
 use phenix_acp::{BackendId, GatewayError, SessionCommand, ThinkingLevel};
 use serde_json::{json, Value};
 
@@ -14,26 +14,10 @@ impl ConductorRuntime {
     pub fn standard_session_config_options(&self, session_id: &str) -> Result<Value, RuntimeError> {
         let context = self.standard_session_routing_context(session_id)?;
         let current_value = self.routing.current_value(&context.session.tree_id)?;
-        let options = self
-            .routing
-            .options(&context.backend)
-            .into_iter()
-            .map(|option| {
-                json!({
-                    "value": option.value,
-                    "name": option.display_name,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        Ok(json!([{
-            "id": MODEL_CONFIG_ID,
-            "name": "Model / routing",
-            "category": "model",
-            "type": "select",
-            "currentValue": current_value,
-            "options": options,
-        }]))
+        Ok(config_options_value(
+            current_value,
+            self.routing.options(&context.backend),
+        ))
     }
 
     pub fn set_standard_session_config_option(
@@ -102,8 +86,53 @@ impl ConductorRuntime {
     }
 }
 
+fn config_options_value(current_value: String, options: Vec<SessionRoutingOption>) -> Value {
+    let options = options
+        .into_iter()
+        .map(|option| {
+            json!({
+                "value": option.value,
+                "name": option.display_name,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!([{
+        "id": MODEL_CONFIG_ID,
+        "name": "Model / routing",
+        "category": "model",
+        "type": "select",
+        "currentValue": current_value,
+        "options": options,
+    }])
+}
+
 struct StandardSessionRoutingContext {
     session: StandardSession,
     backend: BackendId,
     thinking: ThinkingLevel,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standard_acp_model_option_preserves_canonical_selection_values() {
+        let value = config_options_value(
+            "routing/mixed".to_owned(),
+            vec![
+                SessionRoutingOption {
+                    value: "routing/mixed".to_owned(),
+                    display_name: "Routing · Mixed".to_owned(),
+                },
+                SessionRoutingOption {
+                    value: "pi/openai/gpt-5.6".to_owned(),
+                    display_name: "pi/openai/gpt-5.6".to_owned(),
+                },
+            ],
+        );
+        assert_eq!(value[0]["category"], "model");
+        assert_eq!(value[0]["currentValue"], "routing/mixed");
+        assert_eq!(value[0]["options"][1]["value"], "pi/openai/gpt-5.6");
+    }
 }
