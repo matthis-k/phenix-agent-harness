@@ -2,7 +2,7 @@ use crate::view::ViewState;
 use phenix_runtime_api::{
     AuthFlowId, AuthNotice, AuthPrompt, AuthProviderSummary, BackendCapabilities, BackendHealth,
     CommandSummary, DialogId, ExtensionUiRequest, ModelSummary, RunId, RunSummary, RuntimeSnapshot,
-    SessionId, ThinkingLevel, TranscriptBlock, TranscriptRole,
+    SessionId, ThinkingLevel, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -260,10 +260,14 @@ fn character_class(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
 }
 
+pub fn transcript_item_id(run_id: &RunId, block_id: &str) -> String {
+    format!("{run_id}:{block_id}")
+}
+
 /// Stable view identity for a transcript turn. Backend-local block IDs may repeat
 /// across independently configured runs, so the run ID is part of the key.
 pub fn transcript_turn_id(block: &TranscriptBlock) -> String {
-    format!("{}:{}", block.run_id, block.id)
+    transcript_item_id(&block.run_id, &block.id)
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -300,6 +304,14 @@ impl TranscriptState {
         }
         ids
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolCallView {
+    pub name: String,
+    pub raw_input_json: String,
+    pub output: Option<String>,
+    pub outcome: Option<ToolExecutionOutcome>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -344,6 +356,7 @@ pub struct AppState {
     pub selected_run: Option<RunId>,
     pub input: InputState,
     pub transcripts: BTreeMap<RunId, TranscriptState>,
+    pub tool_calls: BTreeMap<String, ToolCallView>,
     pub models: Vec<ModelSummary>,
     pub thinking_levels: Vec<ThinkingLevel>,
     pub auth_providers: Vec<AuthProviderSummary>,
@@ -557,6 +570,7 @@ impl Default for AppState {
             selected_run: None,
             input: InputState::default(),
             transcripts: BTreeMap::new(),
+            tool_calls: BTreeMap::new(),
             models: Vec::new(),
             thinking_levels: Vec::new(),
             auth_providers: Vec::new(),

@@ -13,6 +13,7 @@ pub enum TranscriptTurnItemKind {
 /// must preserve it so reasoning, tool activity, and assistant text stay interleaved.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranscriptTurnItem {
+    pub id: String,
     pub kind: TranscriptTurnItemKind,
     pub text: String,
 }
@@ -59,12 +60,12 @@ pub fn group_transcript_turns(blocks: &[TranscriptBlock]) -> Vec<TranscriptTurn>
             TranscriptRole::System => TranscriptTurnItemKind::System,
             TranscriptRole::User => unreachable!("handled before current turn lookup"),
         };
-        push_item(turn, kind, block.text.clone());
+        push_item(turn, kind, transcript_turn_id(block), block.text.clone());
     }
     turns
 }
 
-fn push_item(turn: &mut TranscriptTurn, kind: TranscriptTurnItemKind, text: String) {
+fn push_item(turn: &mut TranscriptTurn, kind: TranscriptTurnItemKind, id: String, text: String) {
     if text.trim().is_empty() {
         return;
     }
@@ -76,7 +77,7 @@ fn push_item(turn: &mut TranscriptTurn, kind: TranscriptTurnItemKind, text: Stri
             }
         }
     }
-    turn.items.push(TranscriptTurnItem { kind, text });
+    turn.items.push(TranscriptTurnItem { id, kind, text });
 }
 
 fn item_can_coalesce(kind: TranscriptTurnItemKind) -> bool {

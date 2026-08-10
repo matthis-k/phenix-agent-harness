@@ -1,12 +1,14 @@
 use crate::rich_document::{render_document, RichBlockPresentation, RichMedia};
 use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
+use phenix_runtime_api::ToolExecutionOutcome;
 use phenix_ui_core::{
     group_transcript_turns, parse_markdown, AppState, TranscriptTurn, TranscriptTurnItem,
     TranscriptTurnItemKind,
 };
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use serde_json::Value;
 use std::ops::Range;
 
 const DETAIL_PREFIX: &str = "  │ ";
@@ -22,6 +24,7 @@ pub(crate) struct TranscriptMediaAnchor {
 pub(crate) struct TranscriptDocument {
     pub lines: Vec<Line<'static>>,
     pub turn_ranges: Vec<Range<usize>>,
+    pub fold_lines: Vec<usize>,
     pub media: Vec<TranscriptMediaAnchor>,
 }
 
@@ -51,7 +54,9 @@ pub(crate) fn transcript_document(
                 state
                     .notifications
                     .iter()
-                    .map(|message| TranscriptTurnItem {
+                    .enumerate()
+                    .map(|(index, message)| TranscriptTurnItem {
+                        id: format!("frontend-notification:{index}"),
                         kind: TranscriptTurnItemKind::System,
                         text: message.clone(),
                     }),
@@ -74,6 +79,8 @@ pub(crate) fn transcript_document(
     let mut lines = Vec::new();
     let mut media = Vec::new();
     let mut turn_ranges = Vec::with_capacity(turns.len());
+    let mut fold_lines = Vec::new();
+    let mut fold_index = 0usize;
     for (index, turn) in turns.iter().enumerate() {
         if index > 0 {
             lines.extend((0..TURN_GAP_LINES).map(|_| Line::default()));
@@ -82,11 +89,12 @@ pub(crate) fn transcript_document(
         render_turn(
             &mut lines,
             &mut media,
+            &mut fold_lines,
+            &mut fold_index,
             turn,
             TurnRenderContext {
                 selected: selected_turn == Some(index)
                     && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
-                expanded: state.view.transcript_turn_is_expanded(&turn.id),
                 width,
                 state,
                 theme,
@@ -98,13 +106,13 @@ pub(crate) fn transcript_document(
     TranscriptDocument {
         lines,
         turn_ranges,
+        fold_lines,
         media,
     }
 }
 
 struct TurnRenderContext<'a> {
     selected: bool,
-    expanded: bool,
     width: u16,
     state: &'a AppState,
     theme: &'a ThemeConfig,
@@ -113,12 +121,13 @@ struct TurnRenderContext<'a> {
 fn render_turn(
     lines: &mut Vec<Line<'static>>,
     media: &mut Vec<TranscriptMediaAnchor>,
+    fold_lines: &mut Vec<usize>,
+    fold_index: &mut usize,
     turn: &TranscriptTurn,
     context: TurnRenderContext<'_>,
 ) {
     let TurnRenderContext {
         selected,
-        expanded,
         width,
         state,
         theme,
@@ -152,7 +161,18 @@ fn render_turn(
             TranscriptTurnItemKind::Thinking
             | TranscriptTurnItemKind::Tool
             | TranscriptTurnItemKind::System => {
-                lines.push(detail_summary_line(item, selected, expanded, theme));
+                let current_fold = *fold_index;
+                *fold_index = fold_index.saturating_add(1);
+                fold_lines.push(lines.len());
+                let expanded = state.view.transcript_item_is_expanded(&item.id);
+                let fold_selected = state.view.focus == phenix_ui_core::FocusTarget::Transcript
+                    && state.view.transcript_selected_fold == Some(current_fold);
+                if item.kind == TranscriptTurnItemKind::Tool {
+                    render_tool_item(lines, item, fold_selected, expanded, width, state, theme);
+                    rendered_any = true;
+                    continue;
+                }
+                lines.push(detail_summary_line(item, fold_selected, expanded, theme));
                 if expanded {
                     lines.extend(detail_lines(item, width, theme));
                 }
@@ -303,6 +323,155 @@ fn detail_summary_line(
     Line::from(spans)
 }
 
+fn render_tool_item(
+    lines: &mut Vec<Line<'static>>,
+    item: &TranscriptTurnItem,
+    selected: bool,
+    expanded: bool,
+    width: u16,
+    state: &AppState,
+    theme: &ThemeConfig,
+) {
+    let tool = state.tool_calls.get(&item.id);
+    let name = tool
+        .map(|tool| tool.name.as_str())
+        .or_else(|| item.text.lines().next())
+        .unwrap_or("Tool");
+    let (status, status_group) = tool.map_or(("running", "Warning"), |tool| match &tool.outcome {
+        Some(ToolExecutionOutcome::Succeeded) => ("done", "Success"),
+        Some(ToolExecutionOutcome::Failed) => ("failed", "Error"),
+        Some(ToolExecutionOutcome::Aborted) => ("aborted", "Warning"),
+        None => ("running", "Warning"),
+    });
+    let marker_style = if selected {
+        theme_style(theme, "Accent")
+    } else {
+        theme_style(theme, "Tool")
+    };
+    lines.push(Line::from(vec![
+        Span::styled(if expanded { "▾ " } else { "▸ " }, marker_style),
+        Span::styled(
+            "Tool",
+            theme_style(theme, "Tool").add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("  {name}"), theme_style(theme, "Normal")),
+        Span::styled(format!("  · {status}"), theme_style(theme, status_group)),
+    ]));
+    if !expanded {
+        return;
+    }
+    if let Some(tool) = tool {
+        let mut rows = tool_argument_rows(&tool.raw_input_json);
+        if let Some(output) = &tool.output {
+            rows.push(("output".to_owned(), text_value_lines(output)));
+        }
+        lines.extend(render_key_value_rows(&rows, width, theme));
+    }
+}
+
+fn tool_argument_rows(raw_input_json: &str) -> Vec<(String, Vec<String>)> {
+    match serde_json::from_str::<Value>(raw_input_json) {
+        Ok(Value::Object(values)) => values
+            .into_iter()
+            .map(|(key, value)| (key, json_value_lines(&value)))
+            .collect(),
+        Ok(value) => vec![("input".to_owned(), json_value_lines(&value))],
+        Err(_) => vec![("input".to_owned(), text_value_lines(raw_input_json))],
+    }
+}
+
+fn json_value_lines(value: &Value) -> Vec<String> {
+    match value {
+        Value::String(value) => text_value_lines(value),
+        _ => serde_json::to_string_pretty(value)
+            .unwrap_or_else(|_| value.to_string())
+            .lines()
+            .map(str::to_owned)
+            .collect(),
+    }
+}
+
+fn text_value_lines(value: &str) -> Vec<String> {
+    if value.is_empty() {
+        return vec![String::new()];
+    }
+    value.split('\n').map(str::to_owned).collect()
+}
+
+fn render_key_value_rows(
+    rows: &[(String, Vec<String>)],
+    width: u16,
+    theme: &ThemeConfig,
+) -> Vec<Line<'static>> {
+    if rows.is_empty() {
+        return vec![Line::styled(
+            "  (no arguments)",
+            theme_style(theme, "Muted"),
+        )];
+    }
+    let width = usize::from(width.max(1));
+    let indent = 2usize;
+    let separator_width = 3usize;
+    if width <= indent + separator_width + 4 {
+        return rows
+            .iter()
+            .flat_map(|(key, values)| {
+                values.iter().flat_map(move |value| {
+                    wrap_preserving_text(
+                        &format!("{key}: {value}"),
+                        width.saturating_sub(indent).max(1),
+                    )
+                })
+            })
+            .map(|line| Line::styled(format!("  {line}"), theme_style(theme, "Muted")))
+            .collect();
+    }
+
+    let available = width.saturating_sub(indent);
+    let max_key = rows
+        .iter()
+        .map(|(key, _)| key.chars().count())
+        .max()
+        .unwrap_or(3);
+    let key_width = max_key.min(24).min((available / 3).max(3));
+    let value_width = available.saturating_sub(key_width + separator_width).max(1);
+    let mut output = vec![Line::from(vec![
+        Span::styled("  ", theme_style(theme, "Muted")),
+        Span::styled(
+            format!("{:<key_width$}", "key"),
+            theme_style(theme, "Muted"),
+        ),
+        Span::styled(" │ ", theme_style(theme, "Border")),
+        Span::styled("value", theme_style(theme, "Muted")),
+    ])];
+
+    for (key, values) in rows {
+        let mut first = true;
+        let logical_values = if values.is_empty() {
+            vec![String::new()]
+        } else {
+            values.clone()
+        };
+        for logical in logical_values {
+            let wrapped = wrap_preserving_text(&logical, value_width);
+            for fragment in wrapped {
+                let label = if first { key.as_str() } else { "" };
+                output.push(Line::from(vec![
+                    Span::styled("  ", theme_style(theme, "Muted")),
+                    Span::styled(
+                        format!("{label:<key_width$}"),
+                        theme_style(theme, if first { "Tool" } else { "Muted" }),
+                    ),
+                    Span::styled(" │ ", theme_style(theme, "Border")),
+                    Span::styled(fragment, theme_style(theme, "Muted")),
+                ]));
+                first = false;
+            }
+        }
+    }
+    output
+}
+
 fn detail_lines(item: &TranscriptTurnItem, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
     let group = match item.kind {
         TranscriptTurnItemKind::Thinking => "Thinking",
@@ -416,10 +585,9 @@ mod tests {
         transcript.append(block("tool", TranscriptRole::Tool, "read\nfile.rs"));
         transcript.append(block("t2", TranscriptRole::Thinking, "after tool"));
         transcript.append(block("a1", TranscriptRole::Assistant, "final answer"));
-        state
-            .view
-            .expanded_transcript_turns
-            .insert("run-1:u1".to_owned());
+        for id in ["run-1:t1", "run-1:tool", "run-1:t2"] {
+            state.view.expanded_transcript_items.insert(id.to_owned());
+        }
 
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         let text = document.lines.iter().map(line_text).collect::<Vec<_>>();
@@ -440,6 +608,23 @@ mod tests {
             .position(|line| line.contains("final answer"))
             .expect("assistant answer");
         assert!(before < tool && tool < after && after < answer);
+    }
+
+    #[test]
+    fn tool_argument_rows_decode_json_newlines_without_unescaping_literal_backslashes() {
+        let rows = tool_argument_rows(
+            r#"{"script":"line one\nline two","literal":"line one\\nline two"}"#,
+        );
+        let script = rows
+            .iter()
+            .find(|(key, _)| key == "script")
+            .expect("script row");
+        assert_eq!(script.1, vec!["line one", "line two"]);
+        let literal = rows
+            .iter()
+            .find(|(key, _)| key == "literal")
+            .expect("literal row");
+        assert_eq!(literal.1, vec!["line one\\nline two"]);
     }
 
     #[test]
@@ -530,6 +715,7 @@ mod tests {
     #[test]
     fn expanded_details_keep_a_stable_hanging_indent_when_wrapped() {
         let detail = TranscriptTurnItem {
+            id: "detail-test".to_owned(),
             kind: TranscriptTurnItemKind::Thinking,
             text: "abcdefghijklmnopqrstuvwxyz".to_owned(),
         };

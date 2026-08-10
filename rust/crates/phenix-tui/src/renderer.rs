@@ -9,6 +9,10 @@ use phenix_ui_core::{
     command_completions, AppState, ElementId, FocusTarget, InputEditor, OverlayState,
 };
 use phenix_ui_runtime::UiRenderer;
+use ratatui::crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
+    execute,
+};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
@@ -20,14 +24,18 @@ pub struct RatatuiRenderer {
     terminal: Option<DefaultTerminal>,
     provider: FrontendProviderRef,
     media: TerminalMediaRenderer,
+    hit_regions: BTreeMap<ElementId, Rect>,
+    modal_open: bool,
 }
 
 impl RatatuiRenderer {
     pub fn initialize(provider: FrontendProviderRef) -> io::Result<Self> {
         Ok(Self {
-            terminal: Some(ratatui::try_init()?),
+            terminal: Some(initialize_terminal()?),
             provider,
             media: TerminalMediaRenderer::default(),
+            hit_regions: BTreeMap::new(),
+            modal_open: false,
         })
     }
 }
@@ -45,21 +53,32 @@ impl UiRenderer for RatatuiRenderer {
             })
             .map_err(|error| error.to_string())?;
 
+        self.hit_regions = application_hit_regions(screen, state, &config);
+        self.modal_open = pointer_modal_open(state);
         let images = terminal_image_placements(screen, state, &config);
         self.media
             .render(&images)
             .map_err(|error| error.to_string())
     }
 
+    fn hit_test(&self, column: u16, row: u16) -> Option<ElementId> {
+        if self.modal_open {
+            return Some(ElementId::overlay());
+        }
+        hit_test_regions(&self.hit_regions, column, row)
+    }
+
     fn suspend(&mut self) -> Result<(), String> {
         self.media.clear().map_err(|error| error.to_string())?;
+        self.hit_regions.clear();
+        self.modal_open = false;
         self.terminal.take();
-        ratatui::restore();
+        restore_terminal();
         Ok(())
     }
 
     fn resume(&mut self) -> Result<(), String> {
-        self.terminal = Some(ratatui::try_init().map_err(|error| error.to_string())?);
+        self.terminal = Some(initialize_terminal().map_err(|error| error.to_string())?);
         Ok(())
     }
 }
@@ -68,8 +87,57 @@ impl Drop for RatatuiRenderer {
     fn drop(&mut self) {
         let _ = self.media.clear();
         self.terminal.take();
-        ratatui::restore();
+        restore_terminal();
     }
+}
+
+fn initialize_terminal() -> io::Result<DefaultTerminal> {
+    let terminal = ratatui::try_init()?;
+    let mut stdout = io::stdout();
+    if let Err(error) = execute!(stdout, EnableMouseCapture) {
+        ratatui::restore();
+        return Err(error);
+    }
+    Ok(terminal)
+}
+
+fn restore_terminal() {
+    let mut stdout = io::stdout();
+    let _ = execute!(stdout, DisableMouseCapture);
+    ratatui::restore();
+}
+
+fn application_hit_regions(
+    screen: Rect,
+    state: &AppState,
+    config: &FrontendConfig,
+) -> BTreeMap<ElementId, Rect> {
+    let mut panes = BTreeMap::new();
+    collect_layout(&config.layout.root, screen, state, &mut panes);
+    panes
+}
+
+fn pointer_modal_open(state: &AppState) -> bool {
+    !state.dialogs.is_empty()
+        || state
+            .view
+            .overlay
+            .as_ref()
+            .is_some_and(|overlay| !matches!(overlay, OverlayState::CommandPalette { .. }))
+}
+
+fn hit_test_regions(
+    regions: &BTreeMap<ElementId, Rect>,
+    column: u16,
+    row: u16,
+) -> Option<ElementId> {
+    regions.iter().find_map(|(element, area)| {
+        let inside = column >= area.x
+            && column < area.x.saturating_add(area.width)
+            && row >= area.y
+            && row < area.y.saturating_add(area.height);
+        inside.then(|| element.clone())
+    })
 }
 
 fn render_application(frame: &mut Frame<'_>, state: &AppState, config: &FrontendConfig) {
@@ -180,15 +248,27 @@ fn transcript_scroll(
     viewport_height: usize,
 ) -> usize {
     let max_scroll = document.lines.len().saturating_sub(viewport_height);
-    let selected_scroll = state.view.transcript_selected_turn.and_then(|selected| {
-        if document.turn_ranges.is_empty() {
-            return None;
+    if !state.view.transcript_reveal_selection {
+        return max_scroll.saturating_sub(state.view.transcript_scroll.offset);
+    }
+    if let Some(selected) = state.view.transcript_selected_fold {
+        if let Some(line) = document.fold_lines.get(selected) {
+            return line
+                .saturating_sub(viewport_height.saturating_div(2))
+                .min(max_scroll);
         }
-        let selected = selected.min(document.turn_ranges.len() - 1);
-        let range = &document.turn_ranges[selected];
-        Some(range.end.saturating_sub(viewport_height).min(max_scroll))
-    });
-    selected_scroll
+    }
+    state
+        .view
+        .transcript_selected_turn
+        .and_then(|selected| {
+            if document.turn_ranges.is_empty() {
+                return None;
+            }
+            let selected = selected.min(document.turn_ranges.len() - 1);
+            let range = &document.turn_ranges[selected];
+            Some(range.end.saturating_sub(viewport_height).min(max_scroll))
+        })
         .unwrap_or_else(|| max_scroll.saturating_sub(state.view.transcript_scroll.offset))
 }
 
@@ -1114,6 +1194,33 @@ mod tests {
         BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot, TranscriptBlock,
         TranscriptRole,
     };
+
+    #[test]
+    fn pointer_hit_testing_uses_the_pane_under_the_cursor() {
+        let regions = BTreeMap::from([
+            (ElementId::transcript(), Rect::new(0, 0, 80, 30)),
+            (ElementId::sidebar(), Rect::new(80, 0, 20, 30)),
+        ]);
+        assert_eq!(
+            hit_test_regions(&regions, 10, 5),
+            Some(ElementId::transcript())
+        );
+        assert_eq!(
+            hit_test_regions(&regions, 90, 5),
+            Some(ElementId::sidebar())
+        );
+        assert_eq!(hit_test_regions(&regions, 100, 5), None);
+    }
+
+    #[test]
+    fn command_completion_is_not_treated_as_a_modal_pointer_blocker() {
+        let mut state = AppState::default();
+        state.view.overlay = Some(OverlayState::CommandPalette {
+            query: String::new(),
+            selected: 0,
+        });
+        assert!(!pointer_modal_open(&state));
+    }
 
     #[test]
     fn picker_window_keeps_deep_selection_visible() {

@@ -78,7 +78,9 @@ pub enum ViewMutation {
     MoveSidebarRunChild,
     ToggleSidebarRun,
     MoveTranscriptTurn(i32),
-    ToggleTranscriptTurnDetails,
+    MoveTranscriptFold(i32),
+    SetTranscriptFoldExpanded(bool),
+    ToggleTranscriptFold,
     MoveTranscriptBlock(i32),
     CycleTranscriptBlockView(i32),
     ScrollTranscriptBlock {
