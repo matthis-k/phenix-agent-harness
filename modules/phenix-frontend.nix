@@ -83,42 +83,48 @@ _:
         '';
       };
 
-      phenixNvimSmoke = pkgs.runCommand "phenix-nvim-smoke" {
-        nativeBuildInputs = [
-          pkgs.neovim
-          pkgs.python3
-        ];
-      } ''
-        export HOME="$TMPDIR/home"
-        export XDG_CACHE_HOME="$HOME/.cache"
-        export XDG_CONFIG_HOME="$HOME/.config"
-        export XDG_DATA_HOME="$HOME/.local/share"
-        export XDG_STATE_HOME="$HOME/.local/state"
-        mkdir -p "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
+      phenixNvimSmoke =
+        pkgs.runCommand "phenix-nvim-smoke"
+          {
+            nativeBuildInputs = [
+              pkgs.neovim
+              pkgs.python3
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            export XDG_CACHE_HOME="$HOME/.cache"
+            export XDG_CONFIG_HOME="$HOME/.config"
+            export XDG_DATA_HOME="$HOME/.local/share"
+            export XDG_STATE_HOME="$HOME/.local/state"
+            mkdir -p "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
 
-        export PHENIX_TEST_FIXTURE=${../nvim/tests/fixture_agent.py}
-        export PHENIX_TEST_PYTHON=${pkgs.python3}/bin/python3
-        export PHENIX_TEST_CONFIG=${../config/phenix-harness/init.lua}
+            export PHENIX_TEST_FIXTURE=${../nvim/tests/fixture_agent.py}
+            export PHENIX_TEST_PYTHON=${pkgs.python3}/bin/python3
+            export PHENIX_TEST_CONFIG=${../config/phenix-harness/init.lua}
 
-        nvim --headless -u NONE \
-          --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${pkgs.vimPlugins.nvim-nui}"} \
-          --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${phenixNvim}"} \
-          -c ${pkgs.lib.escapeShellArg "lua dofile('${../nvim/tests/smoke.lua}')"} \
-          -c 'qa!'
+            nvim --headless -u NONE \
+              --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${pkgs.vimPlugins.nvim-nui}"} \
+              --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${phenixNvim}"} \
+              -c ${pkgs.lib.escapeShellArg "lua dofile('${../nvim/tests/smoke.lua}')"} \
+              -c 'qa!'
 
-        touch "$out"
-      '';
+            touch "$out"
+          '';
 
-      phenixProductSmoke = pkgs.runCommand "phenix-product-smoke" {
-        nativeBuildInputs = [ phenixAcpSmoke ];
-      } ''
-        phenix-acp-smoke
-        touch "$out"
-      '';
+      phenixProductSmoke =
+        pkgs.runCommand "phenix-product-smoke"
+          {
+            nativeBuildInputs = [ phenixAcpSmoke ];
+          }
+          ''
+            phenix-acp-smoke
+            touch "$out"
+          '';
     in
     {
       packages = {
-        phenix = phenix;
+        inherit phenix;
         phenix-nvim = phenixNvim;
         phenix-conductor = phenixConductor;
         phenix-acp-smoke = phenixAcpSmoke;
