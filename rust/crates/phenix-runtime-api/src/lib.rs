@@ -1,12 +1,12 @@
 #![forbid(unsafe_code)]
 
-pub mod backend;
-pub mod id;
-pub mod protocol;
+mod backend;
+mod id;
+mod protocol;
 
 pub use backend::{
     AgentBackend, BackendClient, BackendError, BackendOutput, BackendOutputSender, BackendRequest,
-    BackendRuntime, BackendWorker, DynAgentBackend,
+    BackendRuntime, BackendWorker,
 };
 pub use id::{
     AuthFlowId, DialogId, InvalidId, ObjectiveId, RequestId, RunId, SessionEntryId, SessionId,

@@ -61,7 +61,7 @@ impl KeyStroke {
         Ok(Self { code, modifiers })
     }
 
-    pub fn matches(self, input: KeyInput) -> bool {
+    fn matches(self, input: KeyInput) -> bool {
         self.code == input.code && self.modifiers == input.modifiers
     }
 }
@@ -87,14 +87,6 @@ impl KeyChord {
 
     pub fn len(&self) -> usize {
         self.strokes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.strokes.is_empty()
-    }
-
-    pub fn matches(&self, input: KeyInput) -> bool {
-        self.strokes.len() == 1 && self.strokes[0].matches(input)
     }
 
     pub fn matches_inputs(&self, inputs: &[KeyInput]) -> bool {
@@ -256,12 +248,9 @@ mod tests {
     fn accepts_neovim_and_explicit_modifier_notation() {
         assert_eq!(KeyChord::parse("<C-d>"), KeyChord::parse("ctrl+d"));
         assert_eq!(KeyChord::parse("<M-CR>"), KeyChord::parse("alt+enter"));
-        assert!(KeyChord::parse("<S-Tab>").expect("shift tab").matches(key(
-            KeyCode::BackTab,
-            false,
-            false,
-            false
-        )));
+        assert!(KeyChord::parse("<S-Tab>")
+            .expect("shift tab")
+            .matches_inputs(&[key(KeyCode::BackTab, false, false, false)]));
     }
 
     #[test]
@@ -289,13 +278,13 @@ mod tests {
     #[test]
     fn final_single_character_is_always_the_key_not_a_modifier_alias() {
         let control_c = KeyChord::parse("<C-c>").expect("control-c");
-        assert!(control_c.matches(key(KeyCode::Character('c'), true, false, false)));
+        assert!(control_c.matches_inputs(&[key(KeyCode::Character('c'), true, false, false)]));
 
         let control_f = KeyChord::parse("<C-f>").expect("control-f");
-        assert!(control_f.matches(key(KeyCode::Character('f'), true, false, false)));
+        assert!(control_f.matches_inputs(&[key(KeyCode::Character('f'), true, false, false)]));
 
         let alt_m = KeyChord::parse("<M-m>").expect("alt-m");
-        assert!(alt_m.matches(key(KeyCode::Character('m'), false, true, false)));
+        assert!(alt_m.matches_inputs(&[key(KeyCode::Character('m'), false, true, false)]));
     }
 
     #[test]

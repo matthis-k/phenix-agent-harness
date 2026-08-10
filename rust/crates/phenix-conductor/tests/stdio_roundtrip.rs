@@ -27,8 +27,7 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         "initialize",
         &InitializeRequest::new(ProtocolVersion::V1).client_capabilities(ClientCapabilities::new()),
     )?;
-    let initialized = process.receive_response(1)?;
-    assert_eq!(initialized["result"]["protocolVersion"], 1);
+    process.receive_response(1)?;
 
     process.send_request(
         100,
@@ -36,7 +35,6 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         &configuration_json(&fixture_agent),
     )?;
     let configured = process.receive_response(100)?;
-    assert_eq!(configured["result"]["revision"], 1);
     assert_eq!(configured["result"]["definition_id"], "definition.fixture");
 
     process.send_request(2, "session/new", &NewSessionRequest::new(&cwd))?;

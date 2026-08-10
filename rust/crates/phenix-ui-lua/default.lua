@@ -28,8 +28,7 @@ local map = phenix.keymap.set
 map("global", "<C-q>", phenix.action.quit, { desc = "Quit Phenix" })
 map("global", "<C-c>", phenix.action.abort, { desc = "Interrupt the selected run" })
 
--- Neovim-style window navigation. Alt-hjkl remain compatibility aliases for
--- terminals/configurations that already use the old Phenix defaults.
+-- Neovim-style window navigation.
 map("global", "<C-w>h", function() phenix.ui.focus.move("left") end, { desc = "Focus window left" })
 map("global", "<C-w>j", function() phenix.ui.focus.move("down") end, { desc = "Focus window below" })
 map("global", "<C-w>k", function() phenix.ui.focus.move("up") end, { desc = "Focus window above" })
@@ -42,10 +41,6 @@ map("global", "<C-w>+", function(ctx) phenix.ui.pane.resize(ctx.focused_element,
 map("global", "<C-w>-", function(ctx) phenix.ui.pane.resize(ctx.focused_element, "vertical", -2) end, { desc = "Decrease window height" })
 map("global", "<Tab>", function() phenix.ui.focus.move("next") end, { desc = "Focus next pane" })
 map("global", "<S-Tab>", function() phenix.ui.focus.move("previous") end, { desc = "Focus previous pane" })
-map("global", "<M-h>", function() phenix.ui.focus.move("left") end)
-map("global", "<M-j>", function() phenix.ui.focus.move("down") end)
-map("global", "<M-k>", function() phenix.ui.focus.move("up") end)
-map("global", "<M-l>", function() phenix.ui.focus.move("right") end)
 
 -- Runs are the buffer-like execution unit. These change the active transcript
 -- without changing window focus. Keep the browsing cursor aligned with the

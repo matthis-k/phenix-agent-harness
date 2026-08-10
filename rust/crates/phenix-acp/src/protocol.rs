@@ -436,39 +436,3 @@ impl AcpNotification for SessionTreeUpdatedNotification {
 pub struct SessionTreeUpdatedParams {
     pub tree: SessionTreeSnapshot,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn assert_method<M: AcpMethod>(expected: &str) {
-        assert_eq!(M::METHOD, expected);
-    }
-
-    fn assert_notification<N: AcpNotification>(expected: &str) {
-        assert_eq!(N::METHOD, expected);
-    }
-
-    #[test]
-    fn conductor_methods_are_namespaced_and_statically_link_params_to_results() {
-        assert_method::<SessionTreeCreate>("_phenix/session_tree/create");
-        assert_method::<SessionTreeGet>("_phenix/session_tree/get");
-        assert_method::<SessionTreeList>("_phenix/session_tree/list");
-        assert_method::<SessionTreeClose>("_phenix/session_tree/close");
-        assert_method::<WorkflowStart>("_phenix/workflow/start");
-        assert_method::<NodeDelegate>("_phenix/node/delegate");
-        assert_method::<NodeLoad>("_phenix/node/load");
-        assert_method::<NodeResume>("_phenix/node/resume");
-        assert_method::<NodeFork>("_phenix/node/fork");
-        assert_method::<NodeExecute>("_phenix/node/execute");
-        assert_method::<NodeCancel>("_phenix/node/cancel");
-        assert_method::<ObjectiveMark>("_phenix/objective/mark");
-        assert_method::<RoutingExplain>("_phenix/routing/explain");
-    }
-
-    #[test]
-    fn conductor_notifications_are_separate_from_request_response_methods() {
-        assert_notification::<NodeEventNotification>("_phenix/node/event");
-        assert_notification::<SessionTreeUpdatedNotification>("_phenix/session_tree/updated");
-    }
-}

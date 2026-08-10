@@ -105,7 +105,6 @@ define_id!(ObjectiveId);
 define_id!(ProviderId);
 define_id!(RoleId);
 define_id!(RouterId);
-define_id!(RpcRequestId);
 define_id!(SessionNodeId);
 define_id!(SessionTreeId);
 define_id!(ToolId);

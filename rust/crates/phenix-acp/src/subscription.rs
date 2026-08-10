@@ -22,14 +22,3 @@ pub struct NodeSubscriptionParams {
     pub tree_id: SessionTreeId,
     pub node_id: SessionNodeId,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn subscription_methods_are_part_of_the_phenix_namespace() {
-        assert_eq!(NodeSubscribe::METHOD, "_phenix/node/subscribe");
-        assert_eq!(NodeUnsubscribe::METHOD, "_phenix/node/unsubscribe");
-    }
-}

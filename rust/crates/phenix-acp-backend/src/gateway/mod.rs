@@ -23,17 +23,6 @@ impl AcpAgentBackend {
     ) -> Result<AcpGatewayTransport, GatewayError> {
         AcpGatewayTransport::new(config, channel_capacity)
     }
-
-    pub fn gateway_factory(
-        config: AcpBackendConfig,
-        channel_capacity: usize,
-    ) -> AcpGatewayTransport {
-        AcpGatewayTransport {
-            config,
-            channel_capacity,
-            trees: Arc::new(Mutex::new(BTreeMap::new())),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -44,7 +33,7 @@ pub struct AcpGatewayTransport {
 }
 
 impl AcpGatewayTransport {
-    pub fn new(config: AcpBackendConfig, channel_capacity: usize) -> Result<Self, GatewayError> {
+    fn new(config: AcpBackendConfig, channel_capacity: usize) -> Result<Self, GatewayError> {
         if channel_capacity == 0 {
             return Err(GatewayError::session(
                 "ACP gateway channel capacity must be positive",

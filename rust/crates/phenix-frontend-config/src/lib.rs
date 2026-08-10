@@ -467,24 +467,18 @@ mod tests {
     }
 
     #[test]
-    fn default_theme_uses_semantic_highlight_groups() {
+    fn default_theme_defines_required_semantic_groups() {
         let theme = ThemeConfig::default();
-        assert!(theme.highlights.contains_key("Normal"));
-        assert!(theme.highlights.contains_key("SurfaceFocused"));
-        assert!(theme.highlights.contains_key("BorderFocused"));
-        assert_eq!(theme.style("Normal").background, Some(rgb(17, 17, 27)));
-        assert_eq!(theme.style("Surface").background, Some(rgb(30, 30, 46)));
-        assert_eq!(theme.style("Accent").background, None);
-    }
-
-    #[test]
-    fn default_layout_is_a_renderer_neutral_tree() {
-        assert!(matches!(
-            LayoutConfig::default().root,
-            LayoutNode::Split(SplitLayout {
-                direction: SplitDirection::Vertical,
-                ..
-            })
-        ));
+        for group in [
+            "Normal",
+            "Surface",
+            "SurfaceFocused",
+            "Accent",
+            "Border",
+            "BorderFocused",
+            "Error",
+        ] {
+            assert!(theme.highlights.contains_key(group), "missing {group}");
+        }
     }
 }

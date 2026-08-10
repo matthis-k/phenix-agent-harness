@@ -1,9 +1,7 @@
 mod gateway;
-mod host;
 mod model;
 
 pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder};
-pub use host::{GatewayCommand, GatewayEnvelope, GatewayFailure, GatewayReply};
 pub(crate) use model::objective_terminal_state;
 
 pub use model::{

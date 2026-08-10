@@ -366,27 +366,3 @@ fn live_session_controls_and_images_are_routed_to_the_selected_node() {
         .iter()
         .any(|(_, command)| matches!(command, SessionCommand::Compact { .. })));
 }
-
-#[test]
-fn json_host_surface_is_typed_and_returns_structured_errors() {
-    let factory = RecordingFactory::new();
-    let mut gateway = gateway(factory);
-    let input = serde_json::to_string(&GatewayCommand::CreateTree {
-        definition_id: definition_id(),
-        root_role: RoleId::parse("root").expect("role"),
-        difficulty: Difficulty::D2,
-        objective: "host-created tree".to_owned(),
-    })
-    .expect("command JSON");
-    let response = gateway.handle_json(&input);
-    let envelope: GatewayEnvelope = serde_json::from_str(&response).expect("response envelope");
-    assert!(matches!(envelope.reply, Some(GatewayReply::TreeCreated(_))));
-    assert!(envelope.error.is_none());
-
-    let invalid = gateway.handle_json("{not-json");
-    let envelope: GatewayEnvelope = serde_json::from_str(&invalid).expect("error envelope");
-    assert_eq!(
-        envelope.error.expect("decode failure").code,
-        "decode".to_owned()
-    );
-}

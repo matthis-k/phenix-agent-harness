@@ -382,33 +382,6 @@ impl GatewayError {
     pub fn session(message: impl Into<String>) -> Self {
         Self::Session(message.into())
     }
-
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::MissingDefinitions => "configuration.missing_definitions",
-            Self::DuplicateDefinition(_) => "configuration.duplicate_definition",
-            Self::DuplicateRouter(_) => "configuration.duplicate_router",
-            Self::DuplicateWorkflow(_) => "configuration.duplicate_workflow",
-            Self::DuplicateBackend(_) => "configuration.duplicate_backend",
-            Self::MissingRouter(_) => "configuration.missing_router",
-            Self::MissingWorkflow(_) => "configuration.missing_workflow",
-            Self::MissingBackend(_) => "configuration.missing_backend",
-            Self::UnknownDefinition(_) => "definition.unknown",
-            Self::DuplicateTree(_) => "tree.duplicate",
-            Self::UnknownTree(_) => "tree.unknown",
-            Self::UnknownNode(_) => "node.unknown",
-            Self::UnknownObjective(_) => "objective.unknown",
-            Self::WorkflowNotAllowed { .. } => "workflow.not_allowed",
-            Self::BackendNotAllowed { .. } => "routing.backend_not_allowed",
-            Self::DuplicateSession(_) => "session.duplicate",
-            Self::InvalidWorkflowPlan(_) => "workflow.invalid_plan",
-            Self::Routing(_) => "routing.failed",
-            Self::Workflow(_) => "workflow.failed",
-            Self::Session(_) => "session.failed",
-            Self::Invariant(_) => "gateway.invariant",
-            Self::IdentifierExhausted => "gateway.identifier_exhausted",
-        }
-    }
 }
 
 impl Display for GatewayError {

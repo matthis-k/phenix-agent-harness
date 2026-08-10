@@ -2,7 +2,7 @@ use crate::source;
 use crate::{
     GatewayError, PhenixAcpGatewayBuilder, RouterId, RoutingTable, WorkflowDefinition, WorkflowId,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -14,7 +14,7 @@ const FORMATS: [DefinitionFormat; 4] = [
     DefinitionFormat::Ron,
 ];
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DefinitionFormat {
     Markdown,
@@ -66,18 +66,9 @@ impl Display for DefinitionKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Definition {
+enum Definition {
     Workflow(WorkflowDefinition),
     RoutingTable(RoutingTable),
-}
-
-impl Definition {
-    pub fn kind(&self) -> DefinitionKind {
-        match self {
-            Self::Workflow(_) => DefinitionKind::Workflow,
-            Self::RoutingTable(_) => DefinitionKind::RoutingTable,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -144,24 +135,6 @@ impl Definitions {
         Self::default()
     }
 
-    pub fn add(&mut self, source: &str) -> Result<DefinitionKind, DefinitionParseError> {
-        let definition = parse_definition(source)?;
-        let kind = definition.kind();
-        self.insert(definition)?;
-        Ok(kind)
-    }
-
-    pub fn add_with_format(
-        &mut self,
-        source: &str,
-        format: DefinitionFormat,
-    ) -> Result<DefinitionKind, DefinitionParseError> {
-        let definition = parse_definition_with_format(source, format)?;
-        let kind = definition.kind();
-        self.insert(definition)?;
-        Ok(kind)
-    }
-
     pub fn add_workflow(&mut self, source: &str) -> Result<WorkflowId, DefinitionParseError> {
         let workflow = parse_workflow(source)?;
         self.insert_workflow(workflow)
@@ -211,18 +184,6 @@ impl Definitions {
         Ok(builder)
     }
 
-    fn insert(&mut self, definition: Definition) -> Result<(), DefinitionParseError> {
-        match definition {
-            Definition::Workflow(workflow) => {
-                self.insert_workflow(workflow)?;
-            }
-            Definition::RoutingTable(routing_table) => {
-                self.insert_routing_table(routing_table)?;
-            }
-        }
-        Ok(())
-    }
-
     fn insert_workflow(
         &mut self,
         workflow: WorkflowDefinition,
@@ -256,7 +217,7 @@ impl Definitions {
     }
 }
 
-pub fn parse_definition(source: &str) -> Result<Definition, DefinitionParseError> {
+fn parse_definition(source: &str) -> Result<Definition, DefinitionParseError> {
     let mut attempts = Vec::with_capacity(FORMATS.len());
     for format in FORMATS {
         match parse_definition_with_format(source, format) {
@@ -273,7 +234,7 @@ pub fn parse_definition(source: &str) -> Result<Definition, DefinitionParseError
     Err(DefinitionParseError::AutoDetect { attempts })
 }
 
-pub fn parse_definition_with_format(
+fn parse_definition_with_format(
     source: &str,
     format: DefinitionFormat,
 ) -> Result<Definition, DefinitionParseError> {
@@ -563,18 +524,6 @@ objective = "Implement {objective}"
 )"#;
 
     #[test]
-    fn parser_returns_semantic_definition_variants() {
-        assert!(matches!(
-            parse_definition(WORKFLOW_MD).expect("workflow"),
-            Definition::Workflow(_)
-        ));
-        assert!(matches!(
-            parse_definition(ROUTER_JSON).expect("routing table"),
-            Definition::RoutingTable(_)
-        ));
-    }
-
-    #[test]
     fn explicit_formats_parse_json_toml_and_ron() {
         assert!(parse_routing_table_with_format(ROUTER_JSON, DefinitionFormat::Json).is_ok());
         assert!(parse_workflow_with_format(WORKFLOW_TOML, DefinitionFormat::Toml).is_ok());
@@ -582,14 +531,13 @@ objective = "Implement {objective}"
     }
 
     #[test]
-    fn automatic_detection_tries_all_supported_formats() {
+    fn automatic_detection_accepts_supported_formats_and_rejects_invalid_sources() {
         assert!(parse_workflow(WORKFLOW_TOML).is_ok());
         assert!(parse_routing_table(ROUTER_RON).is_ok());
-        let error = parse_definition("not a definition").expect_err("invalid source");
-        let DefinitionParseError::AutoDetect { attempts } = error else {
-            panic!("auto-detection error expected")
-        };
-        assert_eq!(attempts.len(), FORMATS.len());
+        assert!(matches!(
+            parse_workflow("not a definition"),
+            Err(DefinitionParseError::AutoDetect { .. })
+        ));
     }
 
     #[test]

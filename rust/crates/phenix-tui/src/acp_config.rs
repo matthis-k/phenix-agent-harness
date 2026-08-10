@@ -1,8 +1,7 @@
 use phenix_acp::{
     encode_extension_request, ConfigurationApply, ConfigurationApplyParams,
-    ConfigurationBackendInput, ConfigurationDefinitionInput, ConfigurationFormat,
-    ConfigurationInput, ConfigurationSource, ConfigurationStandardSessionInput, DefinitionFormat,
-    ToolConfiguration,
+    ConfigurationBackendInput, ConfigurationDefinitionInput, ConfigurationInput,
+    ConfigurationSource, ConfigurationStandardSessionInput, ToolConfiguration,
 };
 use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig, ConfigError as BackendConfigError};
 use phenix_ui_lua::{AcpApplicationConfig, AcpDefinitionInput, AcpDefinitionSource};
@@ -81,17 +80,8 @@ fn map_source(source: &AcpDefinitionSource) -> ConfigurationSource {
         AcpDefinitionSource::Path(path) => ConfigurationSource::Path { path: path.clone() },
         AcpDefinitionSource::Inline { source, format } => ConfigurationSource::Inline {
             source: source.clone(),
-            format: format.map(map_format),
+            format: *format,
         },
-    }
-}
-
-fn map_format(format: DefinitionFormat) -> ConfigurationFormat {
-    match format {
-        DefinitionFormat::Markdown => ConfigurationFormat::Markdown,
-        DefinitionFormat::Json => ConfigurationFormat::Json,
-        DefinitionFormat::Toml => ConfigurationFormat::Toml,
-        DefinitionFormat::Ron => ConfigurationFormat::Ron,
     }
 }
 
@@ -125,13 +115,5 @@ impl Error for AcpConfigLoadError {
             Self::BackendConfig(source) => Some(source),
             Self::Protocol(_) => None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn frontend_configuration_uses_the_wire_control_plane_not_a_temp_file() {
-        assert!(!include_str!("acp_config.rs").contains(concat!("PHENIX_CONFIGURATION_", "FILE")));
     }
 }

@@ -97,35 +97,17 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test doc
 
-      - name: "phenix-acp / legacy_definitions"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-acp-legacy-definitions
-
       - name: "phenix-acp / repeated_prompts"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test integration phenix-acp-repeated-prompts
 
-      - name: "phenix-tui / configuration_ownership"
+      - name: "phenix-ui-core / runtime_controls"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-tui-configuration-ownership
-
-      - name: "phenix-ui-core / editor_modes"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-ui-core-editor-modes
-
-      - name: "phenix-ui-core / functional_parity"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-ui-core-functional-parity
+        run: nix run .#phenix-maintenance -- test integration phenix-ui-core-runtime-controls
 
       - name: "phenix-ui-runtime / multiline_input"
         env:

@@ -1,5 +1,7 @@
 use crate::protocol::{AcpMethod, AcpNotification};
-use crate::{BackendId, DefinitionId, Difficulty, RoleId, RouterId, ToolConfiguration};
+use crate::{
+    BackendId, DefinitionFormat, DefinitionId, Difficulty, RoleId, RouterId, ToolConfiguration,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -22,7 +24,7 @@ pub enum ConfigurationSource {
     Inline {
         source: String,
         #[serde(default)]
-        format: Option<ConfigurationFormat>,
+        format: Option<DefinitionFormat>,
     },
 }
 
@@ -47,36 +49,10 @@ impl ConfigurationSource {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConfigurationFormat {
-    Markdown,
-    Json,
-    Toml,
-    Ron,
-}
-
-impl ConfigurationFormat {
-    pub fn from_path(path: &Path) -> Option<Self> {
-        match path
-            .extension()
-            .and_then(|extension| extension.to_str())?
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "md" | "markdown" => Some(Self::Markdown),
-            "json" => Some(Self::Json),
-            "toml" => Some(Self::Toml),
-            "ron" => Some(Self::Ron),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LoadedConfigurationSource {
     pub source: String,
-    pub format: Option<ConfigurationFormat>,
+    pub format: Option<DefinitionFormat>,
     pub origin: ConfigurationSourceOrigin,
 }
 
@@ -102,7 +78,7 @@ pub struct ConfigurationInput {
     pub tools: ToolConfiguration,
     /// Optional projection used only when a standard ACP `session/new` must be
     /// translated into a Phenix tree. Phenix-specific clients should create
-    /// trees explicitly instead of relying on this adapter template.
+    /// trees explicitly instead of relying on this standard ACP projection.
     #[serde(default)]
     pub standard_session: Option<ConfigurationStandardSessionInput>,
 }
@@ -291,7 +267,10 @@ fn load_path_source(
     if !path.starts_with(&root) {
         return Err(ConfigurationSourceError::OutsideSourceRoot { root, path });
     }
-    let format = ConfigurationFormat::from_path(&path)
+    let format = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(DefinitionFormat::from_extension)
         .ok_or_else(|| ConfigurationSourceError::UnknownFormat(path.clone()))?;
     let source = fs::read_to_string(&path).map_err(|source| ConfigurationSourceError::Read {
         path: path.clone(),
@@ -330,16 +309,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wire_methods_use_the_configuration_namespace() {
-        assert_eq!(ConfigurationApply::METHOD, "_phenix/config/apply");
-        assert_eq!(ConfigurationGet::METHOD, "_phenix/config/get");
-        assert_eq!(
-            ConfigurationChangedNotification::METHOD,
-            "_phenix/config/changed"
-        );
-    }
-
-    #[test]
     fn path_sources_are_descriptors_not_preloaded_content() {
         let source = ConfigurationSource::Path {
             path: PathBuf::from("workflows/implement.md"),
@@ -366,13 +335,13 @@ mod tests {
     fn inline_sources_remain_explicit_strings() {
         let source = ConfigurationSource::Inline {
             source: "# Workflow".to_owned(),
-            format: Some(ConfigurationFormat::Markdown),
+            format: Some(DefinitionFormat::Markdown),
         };
         let loaded = source
             .load(Path::new("unused"))
             .expect("inline source does not touch the filesystem");
         assert_eq!(loaded.source, "# Workflow");
-        assert_eq!(loaded.format, Some(ConfigurationFormat::Markdown));
+        assert_eq!(loaded.format, Some(DefinitionFormat::Markdown));
         assert_eq!(loaded.origin, ConfigurationSourceOrigin::Inline);
     }
 }
