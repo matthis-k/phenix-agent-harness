@@ -1,11 +1,13 @@
 {
-  description = "Phenix agent harness with a native Rust frontend and ACP backend orchestration";
+  description = "Phenix agent harness with a Neovim frontend and ACP backend orchestration";
 
   inputs = {
-    phenix-pins.url = "github:matthis-k/phenix-pins";
-    nixpkgs.follows = "phenix-pins/nixpkgs";
-
     phenix-flake-ci.url = "github:matthis-k/phenix-flake-ci";
+    phenix-pins = {
+      url = "github:matthis-k/phenix-pins";
+      inputs.phenix-flake-ci.follows = "phenix-flake-ci";
+    };
+    nixpkgs.follows = "phenix-pins/nixpkgs";
 
     pi-src = {
       url = "github:earendil-works/pi/v0.80.10";
@@ -16,6 +18,7 @@
       url = "github:matthis-k/phenix-stitch";
       inputs = {
         flake-parts.follows = "phenix-pins/flake-parts";
+        phenix-flake-ci.follows = "phenix-flake-ci";
         phenix-pins.follows = "phenix-pins";
       };
     };
