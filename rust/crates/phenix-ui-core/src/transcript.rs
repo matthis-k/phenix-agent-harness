@@ -68,13 +68,22 @@ fn push_item(turn: &mut TranscriptTurn, kind: TranscriptTurnItemKind, text: Stri
     if text.trim().is_empty() {
         return;
     }
-    if let Some(last) = turn.items.last_mut() {
-        if last.kind == kind {
-            append_document_text(&mut last.text, &text);
-            return;
+    if item_can_coalesce(kind) {
+        if let Some(last) = turn.items.last_mut() {
+            if last.kind == kind {
+                append_document_text(&mut last.text, &text);
+                return;
+            }
         }
     }
     turn.items.push(TranscriptTurnItem { kind, text });
+}
+
+fn item_can_coalesce(kind: TranscriptTurnItemKind) -> bool {
+    matches!(
+        kind,
+        TranscriptTurnItemKind::Assistant | TranscriptTurnItemKind::Thinking
+    )
 }
 
 fn append_document_text(target: &mut String, source: &str) {
@@ -141,6 +150,18 @@ mod tests {
         assert_eq!(turns[0].items.len(), 1);
         assert_eq!(turns[0].items[0].kind, TranscriptTurnItemKind::Assistant);
         assert_eq!(turns[0].items[0].text, "first\n\nsecond");
+    }
+
+    #[test]
+    fn consecutive_tool_calls_keep_individual_timeline_entries() {
+        let turns = group_transcript_turns(&[
+            block("u1", TranscriptRole::User, "one"),
+            block("tool-1", TranscriptRole::Tool, "read"),
+            block("tool-2", TranscriptRole::Tool, "grep"),
+        ]);
+        assert_eq!(turns[0].items.len(), 2);
+        assert_eq!(turns[0].items[0].text, "read");
+        assert_eq!(turns[0].items[1].text, "grep");
     }
 
     #[test]
