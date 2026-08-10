@@ -74,12 +74,9 @@ _:
           extraArgs ? [ ],
         }:
         let
+          configArgument = pkgs.lib.optionalString (configDir != null) ''--config "${configDir}"'';
           wrapperArguments =
-            (pkgs.lib.optionals (configDir != null) [
-              "--config"
-              (toString configDir)
-            ])
-            ++ (pkgs.lib.optional (!loadDefaults) "--no-default-config")
+            (pkgs.lib.optional (!loadDefaults) "--no-default-config")
             ++ extraArgs;
         in
         pkgs.writeShellApplication {
@@ -90,14 +87,20 @@ _:
           ];
           text = ''
             export PHENIX_CONDUCTOR_COMMAND="${phenixRustRuntime}/bin/phenix-conductor"
-            exec "${phenixRustRuntime}/bin/phenix" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
+            exec "${phenixRustRuntime}/bin/phenix" ${configArgument} ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
           '';
         };
 
-      # The packaged frontend has an explicit immutable authoring configuration.
-      # Pass its Nix-store directory directly; init.lua is the canonical entrypoint.
+      # Copy the authoring configuration into its own immutable store output.
+      # The package wrapper references this derivation directly so the config is
+      # part of the runtime closure rather than a textual path into flake source.
+      packagedConfigDir = pkgs.runCommand "phenix-harness-config" { } ''
+        mkdir -p "$out"
+        cp -R ${../config/phenix-harness}/. "$out/"
+      '';
+
       phenix = mkPhenixWrapper {
-        configDir = ../config/phenix-harness;
+        configDir = packagedConfigDir;
       };
 
       configuredSmokeDir = pkgs.runCommand "phenix-configured-smoke-config" { } ''
