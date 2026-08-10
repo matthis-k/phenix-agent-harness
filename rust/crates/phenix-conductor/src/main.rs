@@ -111,6 +111,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .map_err(agent_client_protocol::Error::into_internal_error)?
                     }
                     ClientRequest::ExtMethodRequest(extension) => {
+                        let extension = restore_sdk_extension_wire_method(extension);
                         let response = dispatch_extension(
                             &request_runtime,
                             &request_subscriptions,
@@ -423,6 +424,17 @@ fn send_update(
     update: SessionUpdate,
 ) -> Result<(), agent_client_protocol::Error> {
     connection.send_notification(SessionNotification::new(session_id.clone(), update))
+}
+
+/// `agent-client-protocol` classifies unknown extension methods by removing the
+/// leading wire-level `_`. Restore that marker immediately at the SDK boundary
+/// so the rest of Phenix sees only the canonical `_phenix/...` method names.
+fn restore_sdk_extension_wire_method(extension: ExtRequest) -> ExtRequest {
+    if extension.method.starts_with('_') {
+        extension
+    } else {
+        ExtRequest::new(format!("_{}", extension.method), extension.params)
+    }
 }
 
 #[cfg(test)]
