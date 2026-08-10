@@ -428,23 +428,24 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
                 state.view.focus = FocusTarget::Input;
             }
         }
-        ViewMutation::ScrollPane { element, lines } => {
-            let scroll = match element.as_str() {
-                "ui.sidebar" => Some(&mut state.view.sidebar_scroll),
-                "ui.transcript" => {
-                    state.view.transcript_reveal_selection = false;
-                    Some(&mut state.view.transcript_scroll)
-                }
-                _ => None,
-            };
-            if let Some(scroll) = scroll {
+        ViewMutation::ScrollPane { element, lines } => match element.as_str() {
+            "ui.transcript" => {
+                state.view.transcript_reveal_selection = false;
+                let scroll = &mut state.view.transcript_scroll;
+                scroll.offset = scroll.offset.saturating_add_signed(lines as isize);
+                scroll.follow_end = scroll.offset == 0;
+            }
+            "ui.sidebar" => {
+                let scroll = &mut state.view.sidebar_scroll;
                 scroll.follow_end = false;
                 scroll.offset = scroll.offset.saturating_add_signed(lines as isize);
             }
-        }
+            _ => {}
+        },
         ViewMutation::MoveSidebarRun(delta) => move_sidebar_run(state, delta),
         ViewMutation::MoveSidebarRunParent => move_sidebar_run_parent(state),
         ViewMutation::MoveSidebarRunChild => move_sidebar_run_child(state),
+        ViewMutation::SetSidebarRunExpanded(expanded) => set_sidebar_run_expanded(state, expanded),
         ViewMutation::ToggleSidebarRun => toggle_sidebar_run(state),
         ViewMutation::MoveTranscriptTurn(delta) => move_transcript_turn(state, delta),
         ViewMutation::MoveTranscriptFold(delta) => move_transcript_fold(state, delta),
@@ -525,6 +526,28 @@ fn move_sidebar_run_child(state: &mut AppState) {
     }
     if let Some(child) = state.first_run_child(&run_id) {
         set_sidebar_cursor(state, &child);
+    }
+}
+
+fn set_sidebar_run_expanded(state: &mut AppState, expanded: bool) {
+    let Some(run_id) = state.sidebar_cursor_run_id() else {
+        return;
+    };
+    let has_children = state
+        .visible_runs()
+        .iter()
+        .find(|entry| entry.id == run_id)
+        .is_some_and(|entry| entry.has_children);
+    if !has_children {
+        return;
+    }
+    state.view.set_run_collapsed(run_id, !expanded);
+    if !expanded {
+        let visible = state.visible_runs();
+        state.view.sidebar_index = state
+            .view
+            .sidebar_index
+            .min(visible.len().saturating_sub(1));
     }
 }
 
@@ -1007,6 +1030,37 @@ mod tests {
         state.view.transcript_selected_fold = None;
         apply_view_mutation(&mut state, ViewMutation::MoveTranscriptFold(-1));
         assert_eq!(state.view.transcript_selected_fold, Some(1));
+    }
+
+    #[test]
+    fn transcript_viewport_scroll_resumes_follow_at_bottom_without_dropping_selection() {
+        let mut state = AppState::default();
+        state.view.transcript_selected_turn = Some(3);
+        state.view.transcript_selected_block = Some(1);
+        state.view.transcript_reveal_selection = true;
+
+        apply_view_mutation(
+            &mut state,
+            ViewMutation::ScrollPane {
+                element: ElementId::transcript(),
+                lines: 1,
+            },
+        );
+        assert_eq!(state.view.transcript_selected_turn, Some(3));
+        assert_eq!(state.view.transcript_selected_block, Some(1));
+        assert!(!state.view.transcript_reveal_selection);
+        assert_eq!(state.view.transcript_scroll.offset, 1);
+        assert!(!state.view.transcript_scroll.follow_end);
+
+        apply_view_mutation(
+            &mut state,
+            ViewMutation::ScrollPane {
+                element: ElementId::transcript(),
+                lines: -1,
+            },
+        );
+        assert_eq!(state.view.transcript_scroll.offset, 0);
+        assert!(state.view.transcript_scroll.follow_end);
     }
 
     #[test]

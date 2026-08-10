@@ -76,6 +76,7 @@ pub enum ViewMutation {
     MoveSidebarRun(i32),
     MoveSidebarRunParent,
     MoveSidebarRunChild,
+    SetSidebarRunExpanded(bool),
     ToggleSidebarRun,
     MoveTranscriptTurn(i32),
     MoveTranscriptFold(i32),
