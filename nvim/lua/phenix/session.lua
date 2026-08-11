@@ -21,6 +21,7 @@ local function default_config_file()
     end
     xdg = vim.fs.joinpath(home, ".config")
   end
+
   local candidate = vim.fs.joinpath(xdg, "phenix-harness", "init.lua")
   if vim.uv.fs_stat(candidate) then
     return candidate
@@ -38,6 +39,7 @@ local function conductor_command(options, cwd)
     end
     return command
   end
+
   local command = vim.env.PHENIX_CONDUCTOR_COMMAND
   if not command or command == "" then
     command = "phenix-conductor"
@@ -61,18 +63,16 @@ function M.new(options)
     client = nil,
     ui = nil,
     session_id = nil,
-    config_options = {},
     ready = false,
     prompting = false,
     closed = false,
   }, Session)
 
   session.ui = Ui.new({
+    width = options.width,
+    input_height = options.input_height,
     on_submit = function(text)
-      session:prompt(text)
-    end,
-    on_close = function()
-      session:close(false)
+      return session:prompt(text)
     end,
   })
 
@@ -86,15 +86,12 @@ function M.new(options)
       session.ui:permission(params, respond)
     end,
     on_stderr = function(message)
-      session.ui:append_block("Conductor stderr", message, true)
+      session.ui:append_error(vim.trim(message))
     end,
     on_exit = function(result)
       session.ready = false
-      if not session.closed then
-        session.ui:update_status("stopped")
-        if result.code ~= 0 then
-          session.ui:append_block("Conductor exited", result, true)
-        end
+      if not session.closed and result.code ~= 0 then
+        session.ui:append_error("conductor exited: " .. vim.inspect(result))
       end
     end,
   })
@@ -115,8 +112,7 @@ end
 
 function Session:_fail(message, error_value)
   self.ready = false
-  self.ui:update_status("error")
-  self.ui:append_block("Error", format_rpc_error(message, error_value), false)
+  self.ui:append_error(format_rpc_error(message, error_value))
 end
 
 function Session:_new_standard_session()
@@ -128,11 +124,9 @@ function Session:_new_standard_session()
       self:_fail("failed to create ACP session", error_value)
       return
     end
+
     self.session_id = assert(result and result.sessionId, "session/new did not return sessionId")
-    self.config_options = result.configOptions or {}
-    self.ui:set_config_options(self.config_options)
     self.ready = true
-    self.ui:update_status("ready")
     if self.options.on_ready then
       self.options.on_ready(self)
     end
@@ -185,96 +179,50 @@ function Session:prompt(text)
     return false
   end
   if self.prompting then
-    vim.notify("Phenix: a prompt is already running; cancel or wait for it to finish", vim.log.levels.WARN)
+    vim.notify("Phenix: wait for the current prompt to finish", vim.log.levels.WARN)
     return false
   end
 
   self.prompting = true
-  self.ui:append_stream("user-local", "You", text, false)
-  self.ui:update_status("running")
+  self.ui:append_user(text)
   self.client:request("session/prompt", {
     sessionId = self.session_id,
     prompt = {
       { type = "text", text = text },
     },
-  }, function(result, error_value)
+  }, function(_, error_value)
     self.prompting = false
+    self.ui:finish_response()
     if error_value then
       self:_fail("prompt failed", error_value)
-      return
     end
-    self.ui:_close_fold()
-    self.ui.active_stream = nil
-    self.ui:update_status((result and result.stopReason) or "complete")
   end)
-  return true
-end
-
-function Session:cancel()
-  if not self.session_id or not self.prompting then
-    return false
-  end
-  self.client:notify("session/cancel", { sessionId = self.session_id })
-  self.ui:update_status("cancelling")
   return true
 end
 
 function Session:_notification(method, params)
-  if method == "session/update" then
-    if self.session_id and params.sessionId ~= self.session_id then
-      return
-    end
-    local update = params.update or params
-    self.ui:append_update(update)
-    if update.sessionUpdate == "config_option_update" or update.sessionUpdate == "config_options_update" then
-      self.config_options = update.configOptions or self.config_options
-    end
+  if method ~= "session/update" then
     return
   end
-
-  if method == "_phenix/config/changed" then
-    local configuration = params.configuration or {}
-    local label = configuration.router and ("routing: " .. configuration.router) or "configured"
-    self.ui:update_status(label)
+  if self.session_id and params.sessionId ~= self.session_id then
     return
   end
-
-  self.ui:append_block("Notification · " .. method, params, true)
+  self.ui:append_update(params.update or params)
 end
 
-function Session:set_config_option(option, value)
-  if not self.session_id then
-    return
-  end
-  local params = {
-    sessionId = self.session_id,
-    configId = option.id,
-    value = value,
-  }
-  if option.type == "boolean" then
-    params.type = "boolean"
-  end
-  self.client:request("session/set_config_option", params, function(result, error_value)
-    if error_value then
-      self:_fail("failed to change session configuration", error_value)
-      return
-    end
-    self.config_options = (result and result.configOptions) or self.config_options
-    self.ui:set_config_options(self.config_options)
-  end)
-end
-
-function Session:config_menu()
-  self.ui:config_menu(function(option, value)
-    self:set_config_option(option, value)
-  end)
+function Session:toggle_ui()
+  self.ui:toggle()
 end
 
 function Session:focus_input()
-  self.ui:focus_input()
+  if not self.ui:is_visible() then
+    self.ui:mount()
+  else
+    self.ui:focus_input()
+  end
 end
 
-function Session:close(close_ui)
+function Session:shutdown(close_ui)
   if self.closed then
     return
   end
