@@ -2,9 +2,7 @@
 
 Phenix is an ACP-native agent harness built around a **headless conductor** and a **Neovim frontend**.
 
-The conductor owns orchestration. Neovim owns interaction. The frontend deliberately uses editor-native buffers, windows, editing, navigation, folds, syntax, and keymaps instead of recreating an editor inside a terminal UI.
-
-The project is under active architectural development. Prefer the current typed Rust/ACP implementation over compatibility layers or historical design documents. Superseded APIs and duplicated runtime paths should be removed rather than preserved.
+The conductor owns orchestration. Neovim owns interaction. The project is under active architectural development; prefer the current typed Rust/ACP implementation over compatibility layers or historical APIs.
 
 ## Architecture
 
@@ -15,11 +13,10 @@ The project is under active architectural development. Prefer the current typed 
 ┌──────────────────────────────┐       ┌──────────────────────────────┐
 │ phenix-nvim                  │       │ phenix-conductor             │
 │                              │       │                              │
-│ native buffers + windows     │ ACP   │ Phenix ACP server            │
-│ transcript + composer        ├──────►│ configuration revisions      │
-│ native motions + folds       │       │ session trees + objectives   │
-│ NUI transient surfaces       │       │ routing + workflows          │
-│ session interaction          │       │ downstream session bindings  │
+│ native sidebar windows       │ ACP   │ Phenix ACP server            │
+│ transcript + prompt buffer   ├──────►│ configuration revisions      │
+│ one persistent ACP session   │       │ session trees + objectives   │
+│ plain text projection        │       │ routing + workflows          │
 └──────────────────────────────┘       └──────────────┬───────────────┘
                                                      │ standard ACP
                                                      ▼
@@ -30,7 +27,7 @@ The project is under active architectural development. Prefer the current typed 
 
 The boundary is intentionally narrow:
 
-> **The conductor owns orchestration. Neovim owns editor behavior. `phenix-nvim` only bridges semantic agent interaction into those native editor primitives.**
+> **The conductor owns orchestration. Neovim owns editor behavior. `phenix-nvim` only bridges semantic agent interaction into native editor primitives.**
 
 A frontend may author configuration and request operations, but it must not become a second implementation of routing, workflows, session-tree state, or downstream agent management.
 
@@ -54,44 +51,37 @@ The conductor is mechanism, not policy. It validates and executes user-supplied 
 
 ## Neovim frontend
 
-`phenix-nvim` is the interactive frontend under [`nvim/`](nvim/). It talks to `phenix-conductor` directly over ACP stdio.
+`phenix-nvim` is the interactive frontend under [`nvim/`](nvim/). The first implementation is deliberately minimal.
 
-The frontend uses Neovim itself for concerns that are already editor behavior:
+`require("phenix").setup()` installs `<leader>pp` by default. It toggles a right-hand sidebar containing:
 
-- the transcript is a normal Markdown scratch buffer;
-- the composer is a normal editable buffer in a split;
-- ordinary motions and scrolling work without a Phenix navigation layer;
-- thinking and tool sections use native folds, so normal fold commands such as `zo` and `zc` apply;
-- syntax, selection, copy, search, marks, registers, macros, window commands, and user keymaps remain Neovim features;
-- status is projected into editor window metadata rather than a custom terminal renderer.
+- a plain transcript buffer on top;
+- a normal editable prompt buffer below it.
 
-[`nui.nvim`](https://github.com/MunifTanjim/nui.nvim) is used for transient composition such as selectors and dialogs. It is not a replacement editor or a second layout/runtime model.
+Type one prompt and press `<CR>`, or `:write` the prompt buffer, to submit it. The transcript currently projects only submitted user text, streamed assistant text, and errors. Thinking, tool calls, plans, rich rendering, follow-up controls, steering controls, model pickers, and other richer surfaces are intentionally deferred.
 
-The plugin must not reimplement:
+The ACP process and standard session are **not** tied to sidebar visibility. Hiding the sidebar keeps `phenix-conductor`, the ACP session, the transcript, and the input buffer alive. Toggling it again recreates the windows around the same state. The session stops only on `require("phenix").shutdown()` or Neovim exit.
 
-- text editing or cursor movement;
-- Vim/Neovim modes and motions;
-- terminal-cell rendering;
-- syntax/highlight parsing that Neovim already owns;
-- a parallel pane/layout engine;
-- workflow execution, routing decisions, or authoritative session state.
-
-### Commands
-
-The plugin currently exposes:
+The public command surface is intentionally small:
 
 ```vim
-:PhenixOpen [cwd]
-:PhenixNew [cwd]
-:PhenixPrompt [text]
-:PhenixConfig
-:PhenixCancel
-:PhenixClose
+:PhenixToggle [cwd]
 ```
 
-`require("phenix").setup({...})` may override the conductor command, working directory behavior, or configuration file for embedding in an existing Neovim setup.
+The Lua surface is correspondingly small:
 
-The packaged `phenix` executable is a convenience launcher for Neovim with `phenix-nvim`, `nui.nvim`, the packaged conductor, and the packaged example configuration on the runtime path/closure. The plugin can also be consumed directly from an existing Neovim configuration.
+```lua
+local phenix = require("phenix")
+
+phenix.setup()
+phenix.toggle({ cwd = vim.fn.getcwd() })
+phenix.current()
+phenix.shutdown()
+```
+
+The frontend does not reimplement text editing, cursor movement, Vim modes, terminal-cell rendering, a pane/layout engine, workflow execution, routing decisions, or authoritative session state.
+
+The packaged `phenix` executable supplies the packaged conductor, plugin runtime path, and example configuration. The plugin can also be consumed directly from an existing Neovim configuration.
 
 The plugin package is exported both as `packages.<system>.phenix-nvim` and through the traditional Nixpkgs plugin namespace as `legacyPackages.<system>.vimPlugins.phenix-nvim`. Consumers that apply this flake's default overlay can use `pkgs.vimPlugins.phenix-nvim` directly.
 
@@ -107,7 +97,7 @@ See [`docs/frontend-lua.md`](docs/frontend-lua.md) for the authoring and plugin 
 
 ## Rust boundaries
 
-The Rust workspace now contains only headless protocol/orchestration machinery:
+The Rust workspace contains only headless protocol/orchestration machinery:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -126,8 +116,8 @@ There is intentionally no Rust UI crate. Frontend state that exists only to emul
 - Preserve typed failure modes across configuration, transport, protocol, runtime, and UI boundaries.
 - Standard ACP remains authoritative for singular-agent behavior; Phenix extensions cover aggregate orchestration concepts.
 - Do not add parallel frontend-to-agent protocols or duplicate orchestration implementations.
-- Prefer native Neovim behavior over plugin abstractions whenever the problem is fundamentally editing, navigation, windows, buffers, folds, syntax, or selection.
-- Use NUI for semantic transient UI where Neovim does not already provide the desired interaction surface.
+- Prefer native Neovim behavior over plugin abstractions whenever the problem is fundamentally editing, navigation, windows, buffers, or selection.
+- Add richer frontend behavior only when a concrete interaction requires it.
 - Tests should assert domain behavior, user-visible semantics, or cross-boundary integration, not declarations or duplicated configuration facts.
 
 ## Development
@@ -150,6 +140,6 @@ Run the complete validation graph:
 maintenance all
 ```
 
-The product layer includes a headless Neovim/ACP smoke test that exercises the actual plugin transport, configuration authoring, session creation, config-option mutation, prompt streaming, transcript projection, and shutdown.
+The product layer includes a headless Neovim/ACP smoke test that exercises the actual plugin transport, prompt-buffer submission, plain transcript projection, sidebar toggling, process persistence, and shutdown.
 
 See [`DEVELOPMENT.md`](DEVELOPMENT.md) for focused validation commands.

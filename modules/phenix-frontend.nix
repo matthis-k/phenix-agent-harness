@@ -3,9 +3,7 @@
 {
   flake.overlays.default = final: prev: {
     vimPlugins = prev.vimPlugins // {
-      phenix-nvim = final.callPackage ../packages/phenix-nvim.nix {
-        inherit (prev) vimPlugins;
-      };
+      phenix-nvim = final.callPackage ../packages/phenix-nvim.nix { };
     };
   };
 
@@ -63,7 +61,6 @@
       };
 
       phenixPkgs = pkgs.extend self.overlays.default;
-      nuiNvim = phenixPkgs.vimPlugins.nui-nvim;
       phenixNvim = phenixPkgs.vimPlugins.phenix-nvim;
 
       packagedConfigDir = pkgs.runCommand "phenix-harness-config" { } ''
@@ -82,9 +79,9 @@
           export PHENIX_CONDUCTOR_COMMAND="''${PHENIX_CONDUCTOR_COMMAND:-${phenixConductor}/bin/phenix-conductor}"
           export PHENIX_CONFIG_DIR="''${PHENIX_CONFIG_DIR:-${packagedConfigDir}}"
           exec nvim \
-            --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${nuiNvim}"} \
             --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${phenixNvim}"} \
-            -c PhenixOpen \
+            -c ${pkgs.lib.escapeShellArg "lua require('phenix').setup()"} \
+            -c PhenixToggle \
             "$@"
         '';
       };
@@ -110,7 +107,6 @@
             export PHENIX_TEST_CONFIG=${../config/phenix-harness/init.lua}
 
             nvim --headless -u NONE \
-              --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${nuiNvim}"} \
               --cmd ${pkgs.lib.escapeShellArg "set runtimepath^=${phenixNvim}"} \
               -c ${pkgs.lib.escapeShellArg "lua dofile('${../nvim/tests/smoke.lua}')"} \
               -c 'qa!'
