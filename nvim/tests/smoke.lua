@@ -26,11 +26,12 @@ end, 20), "Phenix ACP fixture session did not become ready")
 assert(session.session_id == "fixture-session")
 assert(session.ui:is_visible(), "sidebar was not visible after the first toggle")
 
+vim.api.nvim_set_current_win(session.ui.input_window)
 vim.api.nvim_buf_set_lines(session.ui.input_buffer, 0, -1, false, { "hello from neovim" })
-assert(session.ui:submit_input(), "input buffer did not submit the prompt")
+vim.cmd("write")
 assert(vim.wait(5000, function()
   return not session.prompting and session.ui:text():find("echo: hello from neovim", 1, true) ~= nil
-end, 20), "streamed ACP response did not reach the transcript")
+end, 20), "writing the input buffer did not send the prompt")
 
 local transcript = session.ui:text()
 assert(transcript:find("You: hello from neovim", 1, true), "submitted input was not echoed in the transcript")
