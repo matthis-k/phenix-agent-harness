@@ -4,7 +4,7 @@
   flake.overlays.default = final: prev: {
     vimPlugins = prev.vimPlugins // {
       phenix-nvim = final.callPackage ../packages/phenix-nvim.nix {
-        vimPlugins = prev.vimPlugins;
+        inherit (prev) vimPlugins;
       };
     };
   };
