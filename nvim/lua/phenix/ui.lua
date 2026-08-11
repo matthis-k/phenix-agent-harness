@@ -177,6 +177,8 @@ function UI:mount()
     return
   end
 
+  self:hide()
+
   vim.cmd("botright vsplit")
   self.transcript_window = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(self.transcript_window, self.transcript_buffer)
