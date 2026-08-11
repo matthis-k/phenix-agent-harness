@@ -13,7 +13,7 @@ The project is under active architectural development. Prefer the current typed 
 
        Neovim frontend                         orchestration core
 ┌──────────────────────────────┐       ┌──────────────────────────────┐
-│ phenix.nvim                  │       │ phenix-conductor             │
+│ phenix-nvim                  │       │ phenix-conductor             │
 │                              │       │                              │
 │ native buffers + windows     │ ACP   │ Phenix ACP server            │
 │ transcript + composer        ├──────►│ configuration revisions      │
@@ -30,7 +30,7 @@ The project is under active architectural development. Prefer the current typed 
 
 The boundary is intentionally narrow:
 
-> **The conductor owns orchestration. Neovim owns editor behavior. `phenix.nvim` only bridges semantic agent interaction into those native editor primitives.**
+> **The conductor owns orchestration. Neovim owns editor behavior. `phenix-nvim` only bridges semantic agent interaction into those native editor primitives.**
 
 A frontend may author configuration and request operations, but it must not become a second implementation of routing, workflows, session-tree state, or downstream agent management.
 
@@ -54,7 +54,7 @@ The conductor is mechanism, not policy. It validates and executes user-supplied 
 
 ## Neovim frontend
 
-`phenix.nvim` is the interactive frontend under [`nvim/`](nvim/). It talks to `phenix-conductor` directly over ACP stdio.
+`phenix-nvim` is the interactive frontend under [`nvim/`](nvim/). It talks to `phenix-conductor` directly over ACP stdio.
 
 The frontend uses Neovim itself for concerns that are already editor behavior:
 
@@ -91,7 +91,9 @@ The plugin currently exposes:
 
 `require("phenix").setup({...})` may override the conductor command, working directory behavior, or configuration file for embedding in an existing Neovim setup.
 
-The packaged `phenix` executable is a convenience launcher for Neovim with `phenix.nvim`, `nui.nvim`, the packaged conductor, and the packaged example configuration on the runtime path/closure. The plugin can also be consumed directly from an existing Neovim configuration.
+The packaged `phenix` executable is a convenience launcher for Neovim with `phenix-nvim`, `nui.nvim`, the packaged conductor, and the packaged example configuration on the runtime path/closure. The plugin can also be consumed directly from an existing Neovim configuration.
+
+The plugin package is exported both as `packages.<system>.phenix-nvim` and through the traditional Nixpkgs plugin namespace as `legacyPackages.<system>.vimPlugins.phenix-nvim`. Consumers that apply this flake's default overlay can use `pkgs.vimPlugins.phenix-nvim` directly.
 
 ## Configuration
 

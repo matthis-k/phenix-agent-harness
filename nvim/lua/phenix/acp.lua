@@ -214,7 +214,7 @@ function Client:start(callback)
     protocolVersion = 1,
     clientCapabilities = {},
     clientInfo = {
-      name = "phenix.nvim",
+      name = "phenix-nvim",
       version = "0",
     },
   }, callback)
