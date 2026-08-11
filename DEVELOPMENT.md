@@ -1,6 +1,6 @@
 # Development
 
-The flake is the single owner of the development toolchain, maintenance provider, Nix package checks, and shipped products. There is no separate devenv environment or lockfile.
+The flake is the single owner of the development toolchain, maintenance provider, Nix package checks, and shipped ACP products. There is no separate devenv environment or lockfile.
 
 Repository maintenance is declared once in Nix through `phenix-flake-ci` and materialized as `packages.<system>.phenix-maintenance`. The generated executable is `maintenance`; local development, git hooks, and CI invoke the same command implementations.
 
@@ -10,7 +10,7 @@ Repository maintenance is declared once in Nix through `phenix-flake-ci` and mat
 nix develop
 ```
 
-The shell contains Rust, Nix, Neovim/Lua, actionlint, Statix, Stitch, and generated maintenance tooling.
+The shell contains Rust, Nix, actionlint, Statix, Stitch, and generated maintenance tooling.
 
 ## Canonical commands
 
@@ -36,9 +36,9 @@ Run one boundary or focused layer directly:
 | `maintenance test doc` | Rust documentation tests |
 | `maintenance test integration` | Cargo integration-test targets that exercise crate/API boundaries |
 | `maintenance test system` | Black-box conductor/process/protocol tests across real Rust binaries and deterministic ACP fixtures |
-| `maintenance test product` | Realized Neovim/ACP and packaged-product behavior |
+| `maintenance test product` | Realized ACP and packaged-product behavior |
 
-Aggregate nodes run their children in declared order. Leaf commands can also be selected directly, for example `maintenance test integration phenix-acp-repeated-prompts` or `maintenance test product phenix-nvim`.
+Aggregate nodes run their children in declared order. Leaf commands can also be selected directly, for example `maintenance test integration phenix-acp-repeated-prompts` or `maintenance test product phenix-acp`.
 
 ## Test ownership
 
@@ -62,11 +62,9 @@ The conductor's `black_box_model_tool_loop` and `stdio_roundtrip` targets are in
 
 ### Product
 
-`maintenance test product` owns realized application/package behavior.
+`maintenance test product` owns realized ACP/package behavior. The `phenix-acp` leaf runs the installed ACP smoke fixture. Stitch runtime/package validation remains separate.
 
-The `phenix-nvim` leaf starts real headless Neovim with the actual plugin and `nui.nvim`, launches a deterministic ACP fixture through the plugin's `vim.system()` transport, changes a session configuration option, sends a prompt, observes streamed thinking/assistant updates in the transcript, and closes the session. It also evaluates the repository's real `config/phenix-harness/init.lua` through the plugin authoring surface.
-
-The `phenix-acp` leaf runs the installed ACP smoke fixture. Stitch runtime/package validation remains separate.
+Frontend product behavior belongs to the frontend repository, currently `matthis-k/phenix-nvim` for Neovim.
 
 Product derivations do not rerun the Rust unit/integration/system suites. Cargo owns Rust behavioral tests; the product layer owns behavior that exists only after application composition/packaging.
 
@@ -82,11 +80,11 @@ For the same reason this repository does not carry a generic `nix flake check --
 
 ## CI provider
 
-The Nix maintenance declaration controls both what runs and how granularly it is presented in CI. Reusable command/rendering machinery comes from the `phenix-flake-ci` input; the harness keeps its source, Rust, integration, system, and product policy in `modules/development.nix`.
+The Nix maintenance declaration controls both what runs and how granularly it is presented in CI. Reusable command/rendering machinery comes from the `phenix-flake-ci` input; `phenix-acp` keeps its source, Rust, integration, system, and product policy in `modules/development.nix`.
 
 A command opts into CI with `ci.enable`. An enabled command is one visible CI step. `ci.stage` assigns that step to a job; commands with the same stage share a job, while different stages become different jobs.
 
-The harness keeps Rust leaves in one `Rust` job so they share `CARGO_HOME` and `CARGO_TARGET_DIR`, while Clippy, unit tests, doc tests, every declared Cargo integration/system target, and product checks remain separately attributable steps.
+Rust leaves remain in one `Rust` job so they share `CARGO_HOME` and `CARGO_TARGET_DIR`, while Clippy, unit tests, doc tests, every declared Cargo integration/system target, and product checks remain separately attributable steps.
 
 GitHub Actions must know its topology before runtime execution, so `phenix-flake-ci` renders `.github/workflows/ci.yml` from the Nix declaration. The committed YAML is a generated projection, not a second command graph. `maintenance check source workflow-sync` evaluates the generated workflow and fails if the committed file differs.
 

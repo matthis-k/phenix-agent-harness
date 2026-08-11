@@ -1,5 +1,5 @@
 {
-  description = "Phenix agent harness with a Neovim frontend and ACP backend orchestration";
+  description = "Phenix ACP protocol, conductor, and backend orchestration";
 
   inputs = {
     phenix-flake-ci.url = "github:matthis-k/phenix-flake-ci";
@@ -38,7 +38,7 @@
 
       imports = [
         ./modules/pi-packages.nix
-        ./modules/phenix-frontend.nix
+        ./modules/phenix-acp.nix
         ./modules/development.nix
         ./modules/stitch.nix
       ];

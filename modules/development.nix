@@ -120,7 +120,7 @@
 
       maintenance = maintenanceLib.mkMaintenance {
         name = "maintenance";
-        description = "Phenix agent harness maintenance";
+        description = "Phenix ACP maintenance";
         ci.github = {
           enable = true;
           outputName = "phenix-maintenance";
@@ -360,19 +360,13 @@
               };
 
               product = {
-                description = "Installed product behavior and package realization";
+                description = "Installed ACP behavior and package realization";
                 order = [
-                  "phenix-nvim"
                   "phenix-acp"
                   "stitch-runtime"
                   "stitch-mcp"
                 ];
                 commands = {
-                  phenix-nvim = mkProductCommand {
-                    check = "phenix-nvim-smoke";
-                    description = "Run the Neovim frontend against an ACP fixture";
-                    stepName = "Neovim frontend smoke";
-                  };
                   phenix-acp = mkProductCommand {
                     check = "phenix-product-smoke";
                     description = "Run the installed Phenix ACP smoke fixture";
@@ -431,7 +425,7 @@
       apps.phenix-maintenance = maintenancePackage.app;
 
       devShells.default = pkgs.mkShell {
-        name = "phenix-agent-harness-dev";
+        name = "phenix-acp-dev";
         packages = [
           pkgs.actionlint
           pkgs.cargo
@@ -439,7 +433,6 @@
           pkgs.git
           pkgs.jq
           pkgs.lua-language-server
-          pkgs.neovim
           pkgs.nixd
           pkgs.nixfmt
           pkgs.rust-analyzer
@@ -454,7 +447,7 @@
         shellHook = ''
           ${maintenancePackage.shellHook}
 
-          echo "phenix-agent-harness dev shell"
+          echo "phenix-acp dev shell"
           echo "  all:          maintenance all"
           echo "  static:       maintenance check"
           echo "  tests:        maintenance test"

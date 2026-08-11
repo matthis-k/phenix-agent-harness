@@ -138,9 +138,6 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: "Neovim frontend smoke"
-        run: nix run .#phenix-maintenance -- test product phenix-nvim
-
       - name: "Phenix ACP smoke"
         run: nix run .#phenix-maintenance -- test product phenix-acp
 
