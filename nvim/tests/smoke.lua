@@ -38,6 +38,23 @@ assert(transcript:find("You: hello from neovim", 1, true), "submitted input was 
 assert(transcript:find("Phenix: echo: hello from neovim", 1, true), "assistant text was not rendered plainly")
 assert(not transcript:find("thinking about:", 1, true), "thinking should not be rendered in the minimal frontend")
 
+vim.api.nvim_buf_set_lines(session.ui.input_buffer, 0, -1, false, { "scroll while streaming" })
+vim.cmd("write")
+assert(vim.wait(1000, function()
+  return session.prompting
+end, 10), "fixture prompt did not begin streaming")
+
+vim.api.nvim_buf_set_lines(session.ui.input_buffer, 0, -1, false, { "do not steer" })
+vim.cmd("write")
+assert(
+  table.concat(vim.api.nvim_buf_get_lines(session.ui.input_buffer, 0, -1, false), "\n") == "do not steer",
+  "input was cleared even though steering is not supported"
+)
+assert(not session.ui:text():find("You: do not steer", 1, true), "busy input was incorrectly sent as steering")
+assert(vim.wait(5000, function()
+  return not session.prompting and session.ui:text():find("echo: scroll while streaming", 1, true) ~= nil
+end, 10), "fixture prompt did not finish")
+
 local process = session.client.process
 assert(process ~= nil and not session.client.stopped, "ACP process was not running")
 
@@ -49,6 +66,10 @@ phenix.toggle()
 assert(session.ui:is_visible(), "third toggle did not restore the sidebar")
 assert(session.client.process == process and not session.client.stopped, "showing the sidebar restarted the ACP process")
 assert(session.ui:text():find("echo: hello from neovim", 1, true), "transcript did not survive a sidebar toggle")
+assert(
+  table.concat(vim.api.nvim_buf_get_lines(session.ui.input_buffer, 0, -1, false), "\n") == "do not steer",
+  "unsent input did not survive a sidebar toggle"
+)
 
 phenix.shutdown()
 assert(vim.wait(1000, function()
