@@ -13,6 +13,19 @@ def response(request_id, result):
     send({"jsonrpc": "2.0", "id": request_id, "result": result})
 
 
+def update(session_id, payload):
+    send(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": session_id,
+                "update": payload,
+            },
+        }
+    )
+
+
 for raw_line in sys.stdin:
     raw_line = raw_line.strip()
     if not raw_line:
@@ -59,6 +72,18 @@ for raw_line in sys.stdin:
                 ],
             },
         )
+    elif method == "_phenix/session_tree/get":
+        response(
+            request_id,
+            {
+                "id": params["tree_id"],
+                "definition_id": "phenix.harness",
+                "root": "fixture-root",
+                "nodes": [],
+                "objectives": [],
+                "active_workflow": None,
+            },
+        )
     elif method == "session/set_config_option":
         response(
             request_id,
@@ -78,39 +103,67 @@ for raw_line in sys.stdin:
                 ]
             },
         )
+    elif method == "_phenix/node/execute":
+        command = params.get("command") or {}
+        if command.get("kind") == "steer":
+            update(
+                params["tree_id"],
+                {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": "steered: " + command.get("text", ""),
+                    },
+                },
+            )
+        response(request_id, {"events": []})
     elif method == "session/prompt":
         text = "\n\n".join(
             block.get("text", "")
             for block in params.get("prompt", [])
             if block.get("type") == "text"
         )
-        send(
+        update(
+            params["sessionId"],
             {
-                "jsonrpc": "2.0",
-                "method": "session/update",
-                "params": {
-                    "sessionId": params["sessionId"],
-                    "update": {
-                        "sessionUpdate": "agent_thought_chunk",
-                        "content": {"type": "text", "text": "thinking about: " + text},
-                    },
-                },
-            }
+                "sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "thinking about: " + text},
+            },
         )
+
         if text == "scroll while streaming":
             time.sleep(0.25)
-        send(
-            {
-                "jsonrpc": "2.0",
-                "method": "session/update",
-                "params": {
-                    "sessionId": params["sessionId"],
-                    "update": {
-                        "sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": "echo: " + text},
-                    },
+
+        if text == "rich transcript":
+            update(
+                params["sessionId"],
+                {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "fixture-tool",
+                    "title": "read README",
+                    "status": "in_progress",
+                    "rawInput": {"path": "README.md"},
                 },
-            }
+            )
+            update(
+                params["sessionId"],
+                {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "fixture-tool",
+                    "status": "completed",
+                    "rawOutput": {"summary": "README contents"},
+                },
+            )
+            assistant_text = "**done** with the tool call"
+        else:
+            assistant_text = "echo: " + text
+
+        update(
+            params["sessionId"],
+            {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": assistant_text},
+            },
         )
         response(request_id, {"stopReason": "end_turn"})
     elif method == "session/close":
