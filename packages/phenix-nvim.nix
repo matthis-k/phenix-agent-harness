@@ -8,4 +8,6 @@ vimUtils.buildVimPlugin {
   version = "0";
   src = ../nvim;
   dependencies = [ vimPlugins.nui-nvim ];
+
+  meta.description = "Neovim frontend for the Phenix agent harness";
 }
