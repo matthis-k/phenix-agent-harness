@@ -1,6 +1,6 @@
 # Neovim frontend and Lua authoring
 
-`phenix.nvim` is the interactive Phenix frontend. It uses Neovim's native buffers, windows, editing, navigation, folds, and keymaps and communicates with `phenix-conductor` over ACP stdio.
+`phenix-nvim` is the interactive Phenix frontend. It uses Neovim's native buffers, windows, editing, navigation, folds, and keymaps and communicates with `phenix-conductor` over ACP stdio.
 
 Lua has two distinct roles:
 
@@ -151,6 +151,6 @@ Model, mode, thinking-level, and future ACP configuration categories therefore d
 
 There is deliberately no `phenix.keymap`, `phenix.theme`, `phenix.layout`, `phenix.input`, or generic pane API.
 
-Those previous frontend abstractions existed to recreate editor behavior inside Ratatui. In the Neovim frontend they would duplicate native facilities. Configure Neovim directly for presentation and editor behavior; keep `phenix.nvim` APIs semantic and agent-specific.
+Those previous frontend abstractions existed to recreate editor behavior inside Ratatui. In the Neovim frontend they would duplicate native facilities. Configure Neovim directly for presentation and editor behavior; keep `phenix-nvim` APIs semantic and agent-specific.
 
 NUI is currently used for bounded menus/dialogs. It should not grow into a parallel editor, renderer, or authoritative layout model.
