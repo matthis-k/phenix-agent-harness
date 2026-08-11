@@ -26,6 +26,7 @@ function M.new(options)
   vim.api.nvim_buf_set_name(input_buffer, "phenix://prompt/" .. tostring(input_buffer))
   configure_buffer(input_buffer, "text", true)
   vim.api.nvim_buf_set_lines(input_buffer, 0, -1, false, { "" })
+  vim.api.nvim_set_option_value("modified", false, { buf = input_buffer })
 
   local ui = setmetatable({
     transcript_buffer = transcript_buffer,
@@ -40,11 +41,11 @@ function M.new(options)
     end,
   }, UI)
 
-  ui:_install_input_keymaps()
+  ui:_install_input_actions()
   return ui
 end
 
-function UI:_install_input_keymaps()
+function UI:_install_input_actions()
   local function submit()
     self:submit_input()
   end
@@ -57,12 +58,12 @@ function UI:_install_input_keymaps()
     buffer = self.input_buffer,
     desc = "Phenix: send prompt",
   })
-end
 
-function UI:_set_transcript(lines)
-  vim.api.nvim_set_option_value("modifiable", true, { buf = self.transcript_buffer })
-  vim.api.nvim_buf_set_lines(self.transcript_buffer, 0, -1, false, lines)
-  vim.api.nvim_set_option_value("modifiable", false, { buf = self.transcript_buffer })
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = self.input_buffer,
+    callback = submit,
+    desc = "Phenix: send prompt when the prompt buffer is written",
+  })
 end
 
 function UI:_append_lines(lines)
@@ -166,6 +167,7 @@ function UI:submit_input()
   end
 
   vim.api.nvim_buf_set_lines(self.input_buffer, 0, -1, false, { "" })
+  vim.api.nvim_set_option_value("modified", false, { buf = self.input_buffer })
   return true
 end
 
