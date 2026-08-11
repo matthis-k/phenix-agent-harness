@@ -16,12 +16,12 @@ When documentation and code disagree, fix or remove the stale documentation in t
 
 ## Architecture discipline
 
-The root README defines the intended split: **the conductor owns orchestration; Neovim owns editor behavior; `phenix.nvim` owns only semantic interaction with the conductor.**
+The root README defines the intended split: **the conductor owns orchestration; Neovim owns editor behavior; `phenix-nvim` owns only semantic interaction with the conductor.**
 
 Keep that boundary explicit:
 
 - `phenix-conductor` is the authoritative aggregate runtime and Phenix ACP server.
-- `phenix.nvim` is an ACP client; it must not grow a second routing, workflow, session-tree, or downstream-process implementation.
+- `phenix-nvim` is an ACP client; it must not grow a second routing, workflow, session-tree, or downstream-process implementation.
 - `phenix-acp-backend` adapts ordinary ACP agents through the official Rust SDK.
 - Lua is an authoring/configuration surface and frontend integration language, not a second orchestration runtime.
 - A running session tree has immutable configuration; multiple independently configured trees may coexist.
