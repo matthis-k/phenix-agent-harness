@@ -19,7 +19,7 @@ require("phenix").setup()
 
 By default, `<leader>pp` toggles the Phenix sidebar. The sidebar is a right-hand vertical split with a transcript buffer on top and an input buffer below it.
 
-The input buffer is intentionally simple: type one prompt and press `<CR>` to send it. While that prompt is running, another prompt is rejected. Follow-up and steering interaction is not implemented yet.
+The input buffer is intentionally simple: type one prompt and press `<CR>` to send it, or use `:write`. While that prompt is running, another prompt is rejected. Follow-up and steering interaction is not implemented yet.
 
 Supported setup overrides include:
 
@@ -63,7 +63,7 @@ phenix.shutdown()
 
 The first frontend version renders only submitted user text, streamed assistant text, and errors. Thinking, tool calls, plans, rich Markdown treatment, folds, follow-up controls, steering controls, model pickers, and other richer interaction surfaces are intentionally deferred.
 
-The transcript is a normal unmodifiable text buffer. The prompt is a normal editable text buffer. Neovim remains responsible for ordinary navigation, scrolling, selection, registers, window movement, and presentation.
+The transcript is a normal unmodifiable text buffer. The prompt is a normal editable `acwrite` buffer. Neovim remains responsible for ordinary navigation, scrolling, selection, registers, window movement, and presentation.
 
 ## ACP authoring
 
@@ -86,7 +86,63 @@ phenix.acp.backend({
 })
 ```
 
-Structured Lua workflow and routing-table definitions remain conductor configuration. They are converted into canonical definition sources and parsed and validated by the conductor-side Phenix domain boundary; the Neovim plugin does not implement separate workflow or routing semantics.
+### Workflows
+
+Structured Lua definitions are accepted directly:
+
+```lua
+phenix.acp.workflow({
+  id = "workflow.implement",
+  title = "Implementation",
+  steps = {
+    {
+      key = "plan",
+      role = "planner",
+      objective = "Plan {objective}",
+    },
+    {
+      key = "implement",
+      parent = "plan",
+      role = "implementer",
+      objective = "Implement {objective}",
+    },
+  },
+})
+```
+
+External definition sources may also be referenced:
+
+```lua
+phenix.acp.workflow("workflows/custom.md")
+phenix.acp.routing_table({ source = source, format = "markdown" })
+```
+
+Structured definitions are converted into canonical definition sources and parsed and validated by the conductor-side Phenix domain boundary. Lua does not maintain separate workflow execution semantics.
+
+### Routing tables
+
+Routing tables select a complete `backend/provider/model/thinking` target for each difficulty level:
+
+```lua
+phenix.acp.routing_table({
+  id = "router.mixed",
+  title = "Mixed routing",
+  routes = {
+    {
+      role = "*",
+      workflow = "*",
+      d0 = "pi/provider/model/minimal",
+      d1 = "pi/provider/model/low",
+      d2 = "pi/provider/model/medium",
+      d3 = "pi/provider/model/high",
+      d4 = "pi/provider/model/max",
+      explanation = "fallback",
+    },
+  },
+})
+```
+
+Difficulty is typed runtime policy, not prompt text. Routing policy belongs to the conductor after configuration is applied.
 
 ## UI boundary
 
