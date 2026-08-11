@@ -3,8 +3,8 @@ local M = {}
 local UI = {}
 UI.__index = UI
 
-local function configure_buffer(buffer, filetype, modifiable)
-  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buffer })
+local function configure_buffer(buffer, filetype, modifiable, buftype)
+  vim.api.nvim_set_option_value("buftype", buftype or "nofile", { buf = buffer })
   vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buffer })
   vim.api.nvim_set_option_value("swapfile", false, { buf = buffer })
   vim.api.nvim_set_option_value("filetype", filetype, { buf = buffer })
@@ -24,7 +24,7 @@ function M.new(options)
 
   local input_buffer = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_name(input_buffer, "phenix://prompt/" .. tostring(input_buffer))
-  configure_buffer(input_buffer, "text", true)
+  configure_buffer(input_buffer, "text", true, "acwrite")
   vim.api.nvim_buf_set_lines(input_buffer, 0, -1, false, { "" })
   vim.api.nvim_set_option_value("modified", false, { buf = input_buffer })
 
