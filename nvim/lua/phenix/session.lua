@@ -230,7 +230,11 @@ function Session:shutdown(close_ui)
   self.ready = false
 
   local client = self.client
-  if self.session_id and client and not client.stopped then
+  if close_ui == false then
+    if client then
+      client:stop()
+    end
+  elseif self.session_id and client and not client.stopped then
     client:request("session/close", { sessionId = self.session_id }, function()
       client:stop()
     end)
