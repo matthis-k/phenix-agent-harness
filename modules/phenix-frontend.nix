@@ -1,6 +1,14 @@
-_:
+{ self, ... }:
 
 {
+  flake.overlays.default = final: prev: {
+    vimPlugins = prev.vimPlugins // {
+      phenix-nvim = final.callPackage ../packages/phenix-nvim.nix {
+        vimPlugins = prev.vimPlugins;
+      };
+    };
+  };
+
   perSystem =
     { config, pkgs, ... }:
     let
@@ -54,14 +62,9 @@ _:
         '';
       };
 
-      nuiNvim = pkgs.vimPlugins.nui-nvim;
-
-      phenixNvim = pkgs.vimUtils.buildVimPlugin {
-        pname = "phenix.nvim";
-        version = "0";
-        src = ../nvim;
-        dependencies = [ nuiNvim ];
-      };
+      phenixPkgs = pkgs.extend self.overlays.default;
+      nuiNvim = phenixPkgs.vimPlugins.nui-nvim;
+      phenixNvim = phenixPkgs.vimPlugins.phenix-nvim;
 
       packagedConfigDir = pkgs.runCommand "phenix-harness-config" { } ''
         mkdir -p "$out"
@@ -133,6 +136,8 @@ _:
         phenix-acp-smoke = phenixAcpSmoke;
         default = pkgs.lib.mkForce phenix;
       };
+
+      legacyPackages = phenixPkgs;
 
       apps.phenix.program = pkgs.lib.getExe phenix;
       apps.default.program = pkgs.lib.getExe phenix;
