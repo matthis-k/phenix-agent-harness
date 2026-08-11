@@ -1,6 +1,6 @@
 # Neovim frontend and Lua authoring
 
-`phenix-nvim` is a minimal Neovim frontend for `phenix-conductor`. It uses ordinary Neovim buffers and windows and communicates with the conductor over ACP stdio.
+`phenix-nvim` is a deliberately minimal Neovim frontend for `phenix-conductor`. It uses ordinary Neovim buffers and windows and communicates with the conductor over ACP stdio.
 
 Lua has two distinct roles:
 
@@ -17,9 +17,7 @@ The minimal setup is:
 require("phenix").setup()
 ```
 
-By default, `<leader>pp` toggles the Phenix sidebar. The sidebar is a right-hand vertical split with a transcript buffer on top and an input buffer below it.
-
-The input buffer is intentionally simple: type one prompt and press `<CR>` to send it, or use `:write`. While that prompt is running, another prompt is rejected. Follow-up and steering interaction is not implemented yet.
+By default, `<leader>pp` toggles the only main UI surface: a right-hand sidebar split with a transcript window on top and an input window below it.
 
 Supported setup overrides include:
 
@@ -37,11 +35,22 @@ Set `keymap = false` to leave mapping ownership entirely to the surrounding Neov
 
 Without `config_file`, the plugin checks `PHENIX_CONFIG_DIR/init.lua`, then `$XDG_CONFIG_HOME/phenix-harness/init.lua` (or `~/.config/phenix-harness/init.lua`). A missing configuration is allowed, but `session/new` still requires the conductor to have enough configuration for its standard session projection.
 
+## Input
+
+The input window is an ordinary editable `acwrite` buffer. Insert-mode `<CR>` remains a normal newline; submission happens from Normal mode or through an explicit write:
+
+- `<CR>` sends the prompt;
+- `<S-CR>` steers the currently running response;
+- `<M-CR>` queues a follow-up for the next turn;
+- `:write` sends the prompt.
+
+Steering is only meaningful while a response is active. Follow-ups entered while a response is active are queued locally and submitted as the next ordinary ACP prompt when the current turn completes. When no response is active, Alt-Enter behaves as an immediate follow-up turn.
+
 ## Runtime model
 
 The frontend owns one long-lived ACP client/session for the Neovim process.
 
-Toggling the sidebar only hides or recreates its windows. It does not close the ACP session, stop `phenix-conductor`, or discard the transcript/input buffers. The conductor is stopped when `require("phenix").shutdown()` is called or Neovim exits.
+Toggling the sidebar only hides or recreates its two windows. It does not close the ACP session, stop `phenix-conductor`, or discard the transcript/input buffers. The conductor is stopped when `require("phenix").shutdown()` is called or Neovim exits.
 
 The public command surface is deliberately small:
 
@@ -59,11 +68,22 @@ phenix.current()
 phenix.shutdown()
 ```
 
-## Transcript boundary
+## Transcript
 
-The first frontend version renders only submitted user text, streamed assistant text, and errors. Thinking, tool calls, plans, rich Markdown treatment, folds, follow-up controls, steering controls, model pickers, and other richer interaction surfaces are intentionally deferred.
+The transcript is a normal unmodifiable Markdown buffer. Standard Markdown syntax remains visible to Neovim's normal Markdown highlighting/rendering stack; the plugin only layers Phenix-specific presentation on top.
 
-The transcript is a normal unmodifiable text buffer. The prompt is a normal editable `acwrite` buffer. Neovim remains responsible for ordinary navigation, scrolling, selection, registers, window movement, and presentation.
+User messages, assistant messages, thinking, errors, plans, and tool calls are represented as distinct transcript blocks. Tool calls render their structured input and output as fenced Markdown blocks. Thinking bodies and tool-call details receive native manual folds and start closed, so normal Neovim fold commands such as `zo`, `zc`, and `za` work without a custom navigation framework.
+
+Phenix-specific highlight groups are linked to ordinary Neovim highlight groups so colors remain theme-owned:
+
+- `PhenixTranscriptUser`
+- `PhenixTranscriptAssistant`
+- `PhenixTranscriptThinking`
+- `PhenixTranscriptTool`
+- `PhenixTranscriptSystem`
+- `PhenixTranscriptError`
+
+Neovim remains responsible for ordinary navigation, scrolling, selection, registers, window movement, Markdown presentation, and fold interaction.
 
 ## ACP authoring
 
