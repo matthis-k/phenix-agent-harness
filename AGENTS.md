@@ -8,7 +8,7 @@ Use this order:
 
 1. Executable Rust code and deterministic tests.
 2. `README.md` for the intended architecture and subsystem boundaries.
-3. `config/phenix-harness/` for the explicit example application configuration.
+3. `config/phenix-acp/` for the explicit example application configuration.
 4. This file for repository working rules.
 
 When documentation and code disagree, fix or remove the stale documentation in the same change.
