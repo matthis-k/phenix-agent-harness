@@ -1,8 +1,8 @@
 use crate::state::{AdapterState, SessionState};
 use crate::terminal::TerminalEvent;
 use phenix_acp::acp::schema::v1::{
-    ContentBlock, ContentChunk, SessionNotification, SessionUpdate, ToolCall, ToolCallStatus,
-    ToolCallUpdate,
+    ContentBlock, ContentChunk, SessionNotification, SessionUpdate, ToolCall, ToolCallContent,
+    ToolCallStatus, ToolCallUpdate,
 };
 use phenix_runtime_api::{
     BackendError, BackendEvent, BackendOutputSender, RunOutcome, RunState, ToolCallId,
@@ -258,6 +258,106 @@ fn content_markdown(content: &ContentBlock) -> Result<String, BackendError> {
     }
 }
 
+fn terminal_id(tool: &ToolCall) -> Option<String> {
+    tool.content.iter().find_map(|content| match content {
+        ToolCallContent::Terminal(terminal) => Some(terminal.terminal_id.to_string()),
+        _ => None,
+    })
+}
+
+fn raw_input_is_meaningful(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::Object(object) => !object.is_empty(),
+        _ => true,
+    }
+}
+
+/// Some ACP agents model shell execution as terminal content rather than raw
+/// input. In particular, pi-acp uses the tool title for the command and terminal
+/// content for the terminal identity. Preserve that information in the
+/// renderer-neutral runtime instead of projecting the call as an empty `{}`.
+fn normalized_tool_input(tool: &ToolCall) -> String {
+    if let Some(raw_input) = tool.raw_input.as_ref().filter(|value| raw_input_is_meaningful(value)) {
+        return raw_input.to_string();
+    }
+    terminal_id(tool).map_or_else(
+        || "{}".to_owned(),
+        |terminal_id| {
+            serde_json::json!({
+                "command": tool.title,
+                "terminalId": terminal_id,
+            })
+            .to_string()
+        },
+    )
+}
+
+fn terminal_meta<'a>(
+    update: &'a ToolCallUpdate,
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    update.meta.as_ref()?.get(key)
+}
+
+fn previous_terminal_output(tool: Option<&ToolCall>) -> String {
+    let Some(raw_output) = tool.and_then(|tool| tool.raw_output.as_ref()) else {
+        return String::new();
+    };
+    raw_output
+        .get("output")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| raw_output.as_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// pi-acp streams bash output and exit state in `_meta` instead of rawOutput.
+/// Normalize those extension fields into cumulative raw output before applying
+/// the update. This keeps the runtime/backend boundary generic while preserving
+/// the complete ACP tool lifecycle for frontends.
+fn normalize_terminal_update(previous: Option<&ToolCall>, update: &mut ToolCallUpdate) {
+    let output_meta = terminal_meta(update, "terminal_output");
+    let exit_meta = terminal_meta(update, "terminal_exit");
+    if output_meta.is_none() && exit_meta.is_none() {
+        return;
+    }
+
+    let mut output = previous_terminal_output(previous);
+    if let Some(delta) = output_meta
+        .and_then(|value| value.get("data"))
+        .and_then(serde_json::Value::as_str)
+    {
+        output.push_str(delta);
+    }
+
+    let terminal_id = output_meta
+        .or(exit_meta)
+        .and_then(|value| value.get("terminal_id").or_else(|| value.get("terminalId")))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| previous.and_then(terminal_id));
+    let exit_code = exit_meta
+        .and_then(|value| value.get("exit_code").or_else(|| value.get("exitCode")))
+        .and_then(serde_json::Value::as_i64);
+
+    let mut raw_output = serde_json::Map::new();
+    raw_output.insert("output".to_owned(), serde_json::Value::String(output));
+    if let Some(terminal_id) = terminal_id {
+        raw_output.insert(
+            "terminalId".to_owned(),
+            serde_json::Value::String(terminal_id),
+        );
+    }
+    if let Some(exit_code) = exit_code {
+        raw_output.insert(
+            "exitCode".to_owned(),
+            serde_json::Value::Number(exit_code.into()),
+        );
+    }
+    update.fields.raw_output = Some(serde_json::Value::Object(raw_output));
+}
+
 fn apply_tool_call(
     session: &mut SessionState,
     tool: ToolCall,
@@ -266,10 +366,7 @@ fn apply_tool_call(
     close_active_transcript_segment(session, outputs)?;
     let id = ToolCallId::parse(tool.tool_call_id.to_string())
         .map_err(|error| BackendError::Protocol(error.to_string()))?;
-    let raw_input_json = tool
-        .raw_input
-        .as_ref()
-        .map_or_else(|| "{}".to_owned(), serde_json::Value::to_string);
+    let raw_input_json = normalized_tool_input(&tool);
     session
         .tools
         .insert(tool.tool_call_id.to_string(), tool.clone());
@@ -285,10 +382,11 @@ fn apply_tool_call(
 
 fn apply_tool_update(
     session: &mut SessionState,
-    update: ToolCallUpdate,
+    mut update: ToolCallUpdate,
     outputs: &BackendOutputSender,
 ) -> Result<(), BackendError> {
     let key = update.tool_call_id.to_string();
+    normalize_terminal_update(session.tools.get(&key), &mut update);
     let call = if let Some(call) = session.tools.get_mut(&key) {
         call.update(update.fields);
         call.clone()
@@ -299,6 +397,23 @@ fn apply_tool_update(
     let id = ToolCallId::parse(call.tool_call_id.to_string())
         .map_err(|error| BackendError::Protocol(error.to_string()))?;
     emit_tool_state(session, id, &call, outputs)
+}
+
+fn terminal_output(tool: &ToolCall) -> Option<String> {
+    let raw_output = tool.raw_output.as_ref()?;
+    if raw_output.get("terminalId").is_none() {
+        return None;
+    }
+    let output = raw_output
+        .get("output")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let exit_code = raw_output.get("exitCode").and_then(serde_json::Value::as_i64);
+    match (output.is_empty(), exit_code) {
+        (false, _) => Some(output.to_owned()),
+        (true, Some(exit_code)) => Some(format!("exit code {exit_code}")),
+        (true, None) => Some(String::new()),
+    }
 }
 
 fn emit_tool_state(
@@ -321,6 +436,16 @@ fn emit_tool_state(
             output_summary: tool_output(tool),
         }),
         ToolCallStatus::Pending | ToolCallStatus::InProgress => {
+            if let Some(output) = terminal_output(tool) {
+                if output.is_empty() {
+                    return Ok(());
+                }
+                return outputs.event(BackendEvent::ToolUpdated {
+                    run_id: session.run.id.clone(),
+                    tool_call_id: id,
+                    output: bounded_summary(output),
+                });
+            }
             outputs.event(BackendEvent::ToolUpdated {
                 run_id: session.run.id.clone(),
                 tool_call_id: id,
@@ -332,9 +457,12 @@ fn emit_tool_state(
 }
 
 fn tool_output(tool: &ToolCall) -> String {
+    if let Some(output) = terminal_output(tool) {
+        return bounded_summary(output);
+    }
     bounded_summary(tool.raw_output.as_ref().map_or_else(
         || serde_json::to_string_pretty(&tool.content).unwrap_or_else(|_| "[]".to_owned()),
-        |output| output.to_string(),
+        serde_json::Value::to_string,
     ))
 }
 
@@ -374,7 +502,9 @@ fn apply_session_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_acp::acp::schema::v1::ImageContent;
+    use phenix_acp::acp::schema::v1::{
+        ImageContent, Terminal, ToolCallUpdateFields,
+    };
 
     #[test]
     fn tool_summaries_are_bounded_on_character_boundaries() {
@@ -400,5 +530,60 @@ mod tests {
             content_markdown(&image).expect("image projection"),
             "![ACP image](data:image/png;base64,Zm9v)"
         );
+    }
+
+    #[test]
+    fn terminal_tool_input_preserves_command_title_and_terminal_id() {
+        let tool = ToolCall::new("bash-1", "printf hello").content(vec![
+            ToolCallContent::Terminal(Terminal::new("bash-1")),
+        ]);
+        let input: serde_json::Value =
+            serde_json::from_str(&normalized_tool_input(&tool)).expect("normalized tool input");
+        assert_eq!(input["command"], "printf hello");
+        assert_eq!(input["terminalId"], "bash-1");
+    }
+
+    #[test]
+    fn terminal_metadata_becomes_cumulative_tool_output() {
+        let mut tool = ToolCall::new("bash-1", "printf hello").content(vec![
+            ToolCallContent::Terminal(Terminal::new("bash-1")),
+        ]);
+
+        let mut first_meta = serde_json::Map::new();
+        first_meta.insert(
+            "terminal_output".to_owned(),
+            serde_json::json!({ "terminal_id": "bash-1", "data": "hello" }),
+        );
+        let mut first = ToolCallUpdate::new(
+            "bash-1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::InProgress),
+        )
+        .meta(first_meta);
+        normalize_terminal_update(Some(&tool), &mut first);
+        tool.update(first.fields);
+        assert_eq!(terminal_output(&tool).as_deref(), Some("hello"));
+
+        let mut second_meta = serde_json::Map::new();
+        second_meta.insert(
+            "terminal_output".to_owned(),
+            serde_json::json!({ "terminal_id": "bash-1", "data": " world" }),
+        );
+        second_meta.insert(
+            "terminal_exit".to_owned(),
+            serde_json::json!({ "terminal_id": "bash-1", "exit_code": 0, "signal": null }),
+        );
+        let mut second = ToolCallUpdate::new(
+            "bash-1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )
+        .meta(second_meta);
+        normalize_terminal_update(Some(&tool), &mut second);
+        tool.update(second.fields);
+
+        let raw_output = tool.raw_output.as_ref().expect("terminal raw output");
+        assert_eq!(raw_output["output"], "hello world");
+        assert_eq!(raw_output["terminalId"], "bash-1");
+        assert_eq!(raw_output["exitCode"], 0);
+        assert_eq!(tool_output(&tool), "hello world");
     }
 }
