@@ -278,7 +278,11 @@ fn raw_input_is_meaningful(value: &serde_json::Value) -> bool {
 /// content for the terminal identity. Preserve that information in the
 /// renderer-neutral runtime instead of projecting the call as an empty `{}`.
 fn normalized_tool_input(tool: &ToolCall) -> String {
-    if let Some(raw_input) = tool.raw_input.as_ref().filter(|value| raw_input_is_meaningful(value)) {
+    if let Some(raw_input) = tool
+        .raw_input
+        .as_ref()
+        .filter(|value| raw_input_is_meaningful(value))
+    {
         return raw_input.to_string();
     }
     terminal_id(tool).map_or_else(
@@ -293,10 +297,7 @@ fn normalized_tool_input(tool: &ToolCall) -> String {
     )
 }
 
-fn terminal_meta<'a>(
-    update: &'a ToolCallUpdate,
-    key: &str,
-) -> Option<&'a serde_json::Value> {
+fn terminal_meta<'a>(update: &'a ToolCallUpdate, key: &str) -> Option<&'a serde_json::Value> {
     update.meta.as_ref()?.get(key)
 }
 
@@ -408,7 +409,9 @@ fn terminal_output(tool: &ToolCall) -> Option<String> {
         .get("output")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let exit_code = raw_output.get("exitCode").and_then(serde_json::Value::as_i64);
+    let exit_code = raw_output
+        .get("exitCode")
+        .and_then(serde_json::Value::as_i64);
     match (output.is_empty(), exit_code) {
         (false, _) => Some(output.to_owned()),
         (true, Some(exit_code)) => Some(format!("exit code {exit_code}")),
@@ -502,9 +505,7 @@ fn apply_session_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_acp::acp::schema::v1::{
-        ImageContent, Terminal, ToolCallUpdateFields,
-    };
+    use phenix_acp::acp::schema::v1::{ImageContent, Terminal, ToolCallUpdateFields};
 
     #[test]
     fn tool_summaries_are_bounded_on_character_boundaries() {
@@ -534,9 +535,8 @@ mod tests {
 
     #[test]
     fn terminal_tool_input_preserves_command_title_and_terminal_id() {
-        let tool = ToolCall::new("bash-1", "printf hello").content(vec![
-            ToolCallContent::Terminal(Terminal::new("bash-1")),
-        ]);
+        let tool = ToolCall::new("bash-1", "printf hello")
+            .content(vec![ToolCallContent::Terminal(Terminal::new("bash-1"))]);
         let input: serde_json::Value =
             serde_json::from_str(&normalized_tool_input(&tool)).expect("normalized tool input");
         assert_eq!(input["command"], "printf hello");
@@ -545,9 +545,8 @@ mod tests {
 
     #[test]
     fn terminal_metadata_becomes_cumulative_tool_output() {
-        let mut tool = ToolCall::new("bash-1", "printf hello").content(vec![
-            ToolCallContent::Terminal(Terminal::new("bash-1")),
-        ]);
+        let mut tool = ToolCall::new("bash-1", "printf hello")
+            .content(vec![ToolCallContent::Terminal(Terminal::new("bash-1"))]);
 
         let mut first_meta = serde_json::Map::new();
         first_meta.insert(
