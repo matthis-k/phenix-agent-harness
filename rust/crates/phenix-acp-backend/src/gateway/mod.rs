@@ -237,70 +237,100 @@ impl AcpSession for GatewayAcpSession {
             .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?;
         match command {
             SessionCommand::Prompt { text, images } => {
-                connection.submit(BackendCommand::PromptSubmit {
-                    run_id: self.run_id.clone(),
-                    text,
-                    images: runtime_images(images),
-                    streaming_behavior: None,
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::PromptSubmit {
+                        run_id: self.run_id.clone(),
+                        text,
+                        images: runtime_images(images),
+                        streaming_behavior: None,
+                    },
+                )?;
             }
             SessionCommand::Steer { text, images } => {
-                connection.submit(BackendCommand::PromptSteer {
-                    run_id: self.run_id.clone(),
-                    text,
-                    images: runtime_images(images),
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::PromptSteer {
+                        run_id: self.run_id.clone(),
+                        text,
+                        images: runtime_images(images),
+                    },
+                )?;
             }
             SessionCommand::FollowUp { text, images } => {
-                connection.submit(BackendCommand::PromptFollowUp {
-                    run_id: self.run_id.clone(),
-                    text,
-                    images: runtime_images(images),
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::PromptFollowUp {
+                        run_id: self.run_id.clone(),
+                        text,
+                        images: runtime_images(images),
+                    },
+                )?;
             }
             SessionCommand::Compact { instructions } => {
-                connection.submit(BackendCommand::CompactionStart {
-                    run_id: self.run_id.clone(),
-                    instructions,
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::CompactionStart {
+                        run_id: self.run_id.clone(),
+                        instructions,
+                    },
+                )?;
                 connection.push(self.run_id.clone(), SessionEvent::Compacted);
             }
             SessionCommand::Poll => connection.drain_available()?,
             SessionCommand::Cancel => {
-                connection.submit(BackendCommand::ExecutionAbort {
-                    run_id: Some(self.run_id.clone()),
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::ExecutionAbort {
+                        run_id: Some(self.run_id.clone()),
+                    },
+                )?;
             }
             SessionCommand::Rename { name } => {
-                connection.submit(BackendCommand::SessionRename {
-                    session_id: self.session_id.clone(),
-                    name,
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::SessionRename {
+                        session_id: self.session_id.clone(),
+                        name,
+                    },
+                )?;
             }
             SessionCommand::SetModel { model } => {
-                connection.submit(BackendCommand::ModelSelect {
-                    run_id: self.run_id.clone(),
-                    model: runtime_model(&model),
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::ModelSelect {
+                        run_id: self.run_id.clone(),
+                        model: runtime_model(&model),
+                    },
+                )?;
             }
             SessionCommand::SetMode { mode_id } => {
-                connection.submit(BackendCommand::SessionModeSelect {
-                    run_id: self.run_id.clone(),
-                    mode_id,
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::SessionModeSelect {
+                        run_id: self.run_id.clone(),
+                        mode_id,
+                    },
+                )?;
             }
             SessionCommand::SetThinking { level } => {
-                connection.submit(BackendCommand::ThinkingSelect {
-                    run_id: self.run_id.clone(),
-                    level: parse_thinking_level(&level.to_string())?,
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::ThinkingSelect {
+                        run_id: self.run_id.clone(),
+                        level: parse_thinking_level(&level.to_string())?,
+                    },
+                )?;
             }
             SessionCommand::Invoke { name, arguments } => {
-                connection.submit(BackendCommand::CommandInvoke {
-                    run_id: self.run_id.clone(),
-                    name,
-                    arguments,
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::CommandInvoke {
+                        run_id: self.run_id.clone(),
+                        name,
+                        arguments,
+                    },
+                )?;
             }
             SessionCommand::RespondInteraction {
                 request_id,
@@ -308,10 +338,13 @@ impl AcpSession for GatewayAcpSession {
             } => {
                 let dialog_id = DialogId::parse(request_id)
                     .map_err(|error| GatewayError::session(error.to_string()))?;
-                connection.submit(BackendCommand::ExtensionUiRespond {
-                    dialog_id,
-                    response: runtime_interaction_response(response),
-                })?;
+                connection.submit_deferred(
+                    &self.run_id,
+                    BackendCommand::ExtensionUiRespond {
+                        dialog_id,
+                        response: runtime_interaction_response(response),
+                    },
+                )?;
             }
             SessionCommand::Close => unreachable!("close handled before connection lock"),
         }

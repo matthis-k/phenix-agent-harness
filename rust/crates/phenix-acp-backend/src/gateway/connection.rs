@@ -5,8 +5,8 @@ use crate::{AcpAgentBackend, AcpBackendConfig};
 use phenix_acp::{AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest};
 use phenix_runtime_api::{
     BackendCommand, BackendEvent, BackendHealth, BackendOutput, BackendReply, BackendRuntime,
-    ClientInformation, NotificationLevel, RunId, RuntimeSnapshot, SessionId, ToolExecutionOutcome,
-    TranscriptBlock, TranscriptRole,
+    ClientInformation, NotificationLevel, RequestId, RunId, RuntimeSnapshot, SessionId,
+    ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
@@ -25,6 +25,7 @@ pub(super) struct TreeConnection {
     snapshot: RuntimeSnapshot,
     sessions: BTreeMap<SessionId, RunId>,
     pending: BTreeMap<RunId, VecDeque<SessionEvent>>,
+    deferred_replies: BTreeMap<RequestId, RunId>,
     control_events: VecDeque<BackendEvent>,
     transcript_lengths: BTreeMap<(RunId, String), usize>,
     controls: usize,
@@ -39,16 +40,7 @@ impl TreeConnection {
         let runtime =
             BackendRuntime::spawn(Box::new(AcpAgentBackend::new(config)), channel_capacity)
                 .map_err(backend_error)?;
-        let mut connection = Self {
-            runtime: Some(runtime),
-            snapshot: empty_snapshot(),
-            sessions: BTreeMap::new(),
-            pending: BTreeMap::new(),
-            control_events: VecDeque::new(),
-            transcript_lengths: BTreeMap::new(),
-            controls: 0,
-            stopped: false,
-        };
+        let mut connection = Self::from_runtime(runtime);
         match connection.submit(BackendCommand::Initialize {
             client: ClientInformation {
                 name: "phenix-acp-gateway".to_owned(),
@@ -63,6 +55,20 @@ impl TreeConnection {
             }
         }
         Ok(connection)
+    }
+
+    fn from_runtime(runtime: BackendRuntime) -> Self {
+        Self {
+            runtime: Some(runtime),
+            snapshot: empty_snapshot(),
+            sessions: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            deferred_replies: BTreeMap::new(),
+            control_events: VecDeque::new(),
+            transcript_lengths: BTreeMap::new(),
+            controls: 0,
+            stopped: false,
+        }
     }
 
     pub(super) fn open(
@@ -175,11 +181,15 @@ impl TreeConnection {
                 }
                 BackendOutput::Reply {
                     request_id: reply_id,
-                    ..
+                    result,
                 } => {
-                    return Err(GatewayError::session(format!(
-                        "ACP backend replied to unexpected request {reply_id}"
-                    )))
+                    if self.deferred_replies.remove(&reply_id).is_none() {
+                        return Err(GatewayError::session(format!(
+                            "ACP backend replied to unexpected request {reply_id}"
+                        )));
+                    }
+                    let reply = result.map_err(backend_error)?;
+                    self.apply_reply(&reply);
                 }
                 BackendOutput::Event(event) => self.dispatch(event)?,
                 BackendOutput::Stopped { result } => {
@@ -189,6 +199,39 @@ impl TreeConnection {
                 }
             }
         }
+    }
+
+    /// Queue an acknowledgement-only backend command without waiting for its reply.
+    ///
+    /// Prompt, steering, follow-up, and cancellation commands are long-lived at
+    /// the ACP layer even though the runtime acknowledgement should be immediate.
+    /// Keeping their acknowledgement asynchronous prevents one damaged backend
+    /// request from monopolizing the tree mutex and blocking cancellation/control.
+    pub(super) fn submit_deferred(
+        &mut self,
+        run_id: &RunId,
+        command: BackendCommand,
+    ) -> Result<(), GatewayError> {
+        if self.stopped {
+            return Err(GatewayError::session("ACP backend has stopped"));
+        }
+        let request_id = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| GatewayError::session("ACP backend runtime is unavailable"))?
+            .client
+            .submit(command)
+            .map_err(backend_error)?;
+        if self
+            .deferred_replies
+            .insert(request_id.clone(), run_id.clone())
+            .is_some()
+        {
+            return Err(GatewayError::session(format!(
+                "duplicate deferred ACP backend request {request_id}"
+            )));
+        }
+        Ok(())
     }
 
     fn apply_reply(&mut self, reply: &BackendReply) {
@@ -236,10 +279,14 @@ impl TreeConnection {
                     result.map_err(backend_error)?;
                     return Ok(());
                 }
-                BackendOutput::Reply { request_id, .. } => {
-                    return Err(GatewayError::session(format!(
-                        "ACP backend produced an unclaimed reply for {request_id}"
-                    )))
+                BackendOutput::Reply { request_id, result } => {
+                    if self.deferred_replies.remove(&request_id).is_none() {
+                        return Err(GatewayError::session(format!(
+                            "ACP backend produced an unclaimed reply for {request_id}"
+                        )));
+                    }
+                    let reply = result.map_err(backend_error)?;
+                    self.apply_reply(&reply);
                 }
             }
         }
@@ -508,5 +555,75 @@ impl TreeConnection {
             runtime.join().map_err(backend_error)?;
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_runtime_api::{
+        AgentBackend, BackendError, BackendOutputSender, BackendRequest, StreamingBehavior,
+    };
+    use std::sync::mpsc::Receiver;
+
+    struct MissingPromptAckBackend;
+
+    impl AgentBackend for MissingPromptAckBackend {
+        fn run(
+            self: Box<Self>,
+            requests: Receiver<BackendRequest>,
+            outputs: BackendOutputSender,
+        ) -> Result<(), BackendError> {
+            for request in requests {
+                match request.command {
+                    BackendCommand::PromptSubmit { .. } => {
+                        // Simulate a damaged adapter that accepted work but lost
+                        // the acknowledgement. It must not prevent later control.
+                    }
+                    BackendCommand::SnapshotRequest => {
+                        outputs.reply(request.id, Ok(BackendReply::Snapshot(empty_snapshot())))?;
+                    }
+                    BackendCommand::Shutdown => {
+                        outputs.reply(request.id, Ok(BackendReply::Completed))?;
+                        return Ok(());
+                    }
+                    _ => outputs.reply(request.id, Ok(BackendReply::Accepted))?,
+                }
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn missing_prompt_ack_does_not_block_later_control_requests() {
+        let runtime = BackendRuntime::spawn(Box::new(MissingPromptAckBackend), 8)
+            .expect("spawn missing-ack backend");
+        let mut connection = TreeConnection::from_runtime(runtime);
+        let run_id = RunId::parse("run-stall-test").expect("run id");
+
+        connection
+            .submit_deferred(
+                &run_id,
+                BackendCommand::PromptSubmit {
+                    run_id: run_id.clone(),
+                    text: "stall".to_owned(),
+                    images: Vec::new(),
+                    streaming_behavior: Some(StreamingBehavior::Steer),
+                },
+            )
+            .expect("queue prompt without waiting for ack");
+        connection
+            .submit_deferred(
+                &run_id,
+                BackendCommand::ExecutionAbort {
+                    run_id: Some(run_id.clone()),
+                },
+            )
+            .expect("queue cancellation behind missing prompt ack");
+
+        let reply = connection
+            .submit(BackendCommand::SnapshotRequest)
+            .expect("later control request remains responsive");
+        assert!(matches!(reply, BackendReply::Snapshot(_)));
     }
 }
