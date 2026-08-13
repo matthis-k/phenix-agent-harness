@@ -38,10 +38,10 @@ pub use client::{
 };
 pub use conductor::{ConductorError, PhenixConductor};
 pub use configuration::{
-    ConfigurationApply, ConfigurationApplyParams, ConfigurationApplyResult,
     ConfigurationBackendInput, ConfigurationChangedNotification, ConfigurationChangedParams,
     ConfigurationDefinitionInput, ConfigurationGet, ConfigurationGetParams, ConfigurationGetResult,
-    ConfigurationInput, ConfigurationSnapshot, ConfigurationSource, ConfigurationSourceError,
+    ConfigurationInput, ConfigurationLoad, ConfigurationLoadParams, ConfigurationLoadResult,
+    ConfigurationSnapshot, ConfigurationSource, ConfigurationSourceError,
     ConfigurationSourceOrigin, ConfigurationStandardSessionInput, LoadedConfigurationSource,
 };
 pub use definition::{

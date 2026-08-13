@@ -107,26 +107,30 @@ pub enum ConfigurationDefinitionInput {
     RoutingTable { source: ConfigurationSource },
 }
 
-pub struct ConfigurationApply;
+/// Atomically load client-selected configuration sources into a new immutable
+/// conductor revision. The client chooses descriptors and a source root; the
+/// conductor alone resolves paths, parses, validates, and publishes them.
+pub struct ConfigurationLoad;
 
-impl AcpMethod for ConfigurationApply {
-    const METHOD: &'static str = "_phenix/config/apply";
-    type Params = ConfigurationApplyParams;
-    type Result = ConfigurationApplyResult;
+impl AcpMethod for ConfigurationLoad {
+    const METHOD: &'static str = "_phenix/config/load";
+    type Params = ConfigurationLoadParams;
+    type Result = ConfigurationLoadResult;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ConfigurationApplyParams {
-    /// Filesystem root used by Phenix ACP when resolving path sources.
+pub struct ConfigurationLoadParams {
+    /// Client-selected filesystem root used by Phenix ACP when resolving path
+    /// sources. Every path descriptor must be relative to this root.
     pub source_root: PathBuf,
-    /// Application-provided source descriptors. Phenix ACP constructs the actual
-    /// immutable configuration revision from this input.
+    /// Client-selected source descriptors and policy. Phenix ACP constructs the
+    /// actual immutable configuration revision from this input.
     pub input: ConfigurationInput,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ConfigurationApplyResult {
+pub struct ConfigurationLoadResult {
     pub revision: u64,
     pub definition_id: DefinitionId,
     pub router: RouterId,

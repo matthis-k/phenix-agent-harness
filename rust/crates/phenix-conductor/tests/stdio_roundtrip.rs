@@ -31,7 +31,7 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
 
     process.send_request(
         100,
-        "_phenix/config/apply",
+        "_phenix/config/load",
         &configuration_json(&fixture_agent),
     )?;
     let configured = process.receive_response(100)?;

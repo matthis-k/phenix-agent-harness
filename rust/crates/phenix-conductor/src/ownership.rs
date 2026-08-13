@@ -1,11 +1,10 @@
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
-    decode_extension_response, encode_extension_request, AcpMethod, ConfigurationApply,
-    ConfigurationApplyParams, ConfigurationApplyResult, ConfigurationDefinitionInput,
-    ConfigurationGet, ConfigurationGetResult, ConfigurationSnapshot, ConfigurationSourceError,
-    GatewayEvent, SessionCommand, SessionNodeId, SessionTreeClose, SessionTreeCreate,
-    SessionTreeCreateParams, SessionTreeId, SessionTreeList, SessionTreeListResult,
-    SessionTreeSnapshot,
+    decode_extension_response, encode_extension_request, AcpMethod, ConfigurationDefinitionInput,
+    ConfigurationGet, ConfigurationGetResult, ConfigurationLoad, ConfigurationLoadParams,
+    ConfigurationLoadResult, ConfigurationSnapshot, ConfigurationSourceError, GatewayEvent,
+    SessionCommand, SessionNodeId, SessionTreeClose, SessionTreeCreate, SessionTreeCreateParams,
+    SessionTreeId, SessionTreeList, SessionTreeListResult, SessionTreeSnapshot,
 };
 use phenix_conductor::{
     BootstrapBackend, BootstrapDefinition, BootstrapStandardSession, ConductorBootstrap,
@@ -21,7 +20,7 @@ use std::sync::Arc;
 
 /// ACP-process owner for user-supplied immutable configuration revisions.
 ///
-/// Applying configuration creates a new revision and makes it active for future
+/// Loading configuration creates a new revision and makes it active for future
 /// trees. Existing trees remain bound to the revision under which they were
 /// created; neither their routing nor workflow registry mutates in place.
 pub struct ConductorOwner {
@@ -60,7 +59,7 @@ impl ConductorOwner {
         request: &ExtRequest,
     ) -> Result<Option<ExtResponse>, ConductorOwnerError> {
         match request.method.as_ref() {
-            ConfigurationApply::METHOD => self.apply(request).map(Some),
+            ConfigurationLoad::METHOD => self.load(request).map(Some),
             ConfigurationGet::METHOD => self.get().map(Some),
             _ => Ok(None),
         }
@@ -250,17 +249,17 @@ impl ConductorOwner {
         Ok(response)
     }
 
-    fn apply(&mut self, request: &ExtRequest) -> Result<ExtResponse, ConductorOwnerError> {
-        let params: ConfigurationApplyParams = serde_json::from_str(request.params.get())
+    fn load(&mut self, request: &ExtRequest) -> Result<ExtResponse, ConductorOwnerError> {
+        let params: ConfigurationLoadParams = serde_json::from_str(request.params.get())
             .map_err(ConductorOwnerError::DecodeConfiguration)?;
-        let result = self.apply_params(params)?;
+        let result = self.load_params(params)?;
         encode_response(&result)
     }
 
-    fn apply_params(
+    fn load_params(
         &mut self,
-        params: ConfigurationApplyParams,
-    ) -> Result<ConfigurationApplyResult, ConductorOwnerError> {
+        params: ConfigurationLoadParams,
+    ) -> Result<ConfigurationLoadResult, ConductorOwnerError> {
         let revision = self.next_revision;
         let source_root = resolve_source_root(&self.cwd, &params.source_root);
         let (bootstrap, snapshot) = build_bootstrap(params, &source_root, revision)?;
@@ -271,7 +270,7 @@ impl ConductorOwner {
         let runtime = bootstrap
             .build(&self.cwd, self.channel_capacity)
             .map_err(|error| ConductorOwnerError::Build(error.to_string()))?;
-        let result = ConfigurationApplyResult {
+        let result = ConfigurationLoadResult {
             revision,
             definition_id: snapshot.definition_id.clone(),
             router: snapshot.router.clone(),
@@ -380,7 +379,7 @@ fn resolve_source_root(cwd: &Path, configured: &Path) -> PathBuf {
 }
 
 fn build_bootstrap(
-    params: ConfigurationApplyParams,
+    params: ConfigurationLoadParams,
     source_root: &Path,
     revision: u64,
 ) -> Result<(ConductorBootstrap, ConfigurationSnapshot), ConductorOwnerError> {
@@ -534,7 +533,7 @@ impl Display for ConductorOwnerError {
                 formatter.write_str("ACP downstream channel capacity must be greater than zero")
             }
             Self::NotConfigured => formatter.write_str(
-                "Phenix ACP has no active user configuration; submit _phenix/config/apply first",
+                "Phenix ACP has no active user configuration; submit _phenix/config/load first",
             ),
             Self::UnknownRevision(revision) => {
                 write!(

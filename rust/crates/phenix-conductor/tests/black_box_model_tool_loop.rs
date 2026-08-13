@@ -35,7 +35,7 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
 
     process.send_request(
         100,
-        "_phenix/config/apply",
+        "_phenix/config/load",
         &configuration_json(&mock_agent, &coordinator_log, &specialist_log),
     )?;
     let configured = process.receive_response(100)?;
