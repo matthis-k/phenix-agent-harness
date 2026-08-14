@@ -15,6 +15,7 @@ mod runtime;
 mod source;
 mod subscription;
 mod tools;
+mod workflow_ir;
 
 pub use authoring::{
     parse_routing_table, parse_routing_table_with_format, parse_workflow,
@@ -85,4 +86,8 @@ pub use source::{
 pub use subscription::{NodeSubscribe, NodeSubscriptionParams, NodeUnsubscribe};
 pub use tools::{
     BuiltinToolPolicy, McpServerDefinition, McpServerTransport, ToolConfigError, ToolConfiguration,
+};
+pub use workflow_ir::{
+    CallableWorkflowDefinition, DependencyFailurePolicy, WorkflowDefinitionError,
+    WorkflowInputBinding, WorkflowNodeDefinition, WorkflowPort, WorkflowValueSource,
 };
