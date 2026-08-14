@@ -2,18 +2,18 @@
 
 This directory is an **explicit example and authoring surface**. It is not built-in conductor policy and is not silently selected as a conductor fallback.
 
-`phenix-nvim` evaluates `init.lua` as an authoring file and submits the resulting typed input to `phenix-conductor` through `_phenix/config/apply`.
+A client may evaluate `init.lua` as an authoring file and submit the resulting typed input to `phenix-conductor` through `_phenix/config/load`. The client selects the source root; the conductor resolves, validates, and freezes the resulting revision.
 
-The packaged `phenix` launcher points `PHENIX_CONFIG_DIR` at this immutable packaged directory. Existing Neovim setups can instead configure `require("phenix").setup({ config_file = ... })` or place the file at `$XDG_CONFIG_HOME/phenix-harness/init.lua`.
+This repository does not package or select frontend configuration. `phenix-nvim` owns its packaged configuration and may instead be configured with `require("phenix").setup({ config_file = ... })`.
 
 ```text
 init.lua
     │
     │ phenix.acp.* authoring
     ▼
-phenix-nvim
+client-selected source descriptors
     │
-    │ typed _phenix/config/apply
+    │ typed _phenix/config/load
     ▼
 phenix-conductor
     │
@@ -27,7 +27,6 @@ immutable configuration revision
 - reusable agent roles;
 - Phenix workflow definitions;
 - D0-D4 routing/model/thinking policy;
-- the same Lua authoring API documented in [`docs/frontend-lua.md`](../../docs/frontend-lua.md).
 
 Lua is only the authoring boundary. The conductor parses, validates, owns, and freezes the resulting configuration. Existing session trees remain pinned to the revision under which they were created.
 
