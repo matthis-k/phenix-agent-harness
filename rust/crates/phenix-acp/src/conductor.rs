@@ -1,8 +1,8 @@
 use crate::{
     AcpMethod, EmptyResult, GatewayError, NodeAttachResult, NodeCancel, NodeDelegate, NodeExecute,
-    NodeExecuteResult, NodeFork, NodeLoad, NodeResume, ObjectiveMark, PhenixAcpGateway, RoleId,
-    RoutingExplain, RoutingExplainParams, SessionTreeClose, SessionTreeCreate,
-    SessionTreeCreateResult, SessionTreeGet, SessionTreeList, WorkflowStart,
+    NodeExecuteResult, NodeFork, NodeLoad, NodeResume, NodeTranscriptGet, ObjectiveMark,
+    PhenixAcpGateway, RoleId, RoutingExplain, RoutingExplainParams, SessionTreeClose,
+    SessionTreeCreate, SessionTreeCreateResult, SessionTreeGet, SessionTreeList, WorkflowStart,
 };
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use serde::Serialize;
@@ -63,6 +63,10 @@ impl PhenixConductor {
             SessionTreeGet::METHOD => self
                 .dispatch::<SessionTreeGet, _>(&request, |gateway, params| {
                     gateway.snapshot(&params.tree_id)
+                }),
+            NodeTranscriptGet::METHOD => self
+                .dispatch::<NodeTranscriptGet, _>(&request, |gateway, params| {
+                    gateway.transcript(&params.tree_id, &params.node_id)
                 }),
             SessionTreeList::METHOD => self
                 .dispatch::<SessionTreeList, _>(&request, |gateway, _params| {

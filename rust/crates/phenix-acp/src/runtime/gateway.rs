@@ -4,12 +4,13 @@ use super::{
     SessionRouter, TreeStartResult, Workflow, WorkflowRequest,
 };
 use crate::{
-    AcpSessionId, BackendId, DefinitionId, Difficulty, ModelConfig, ObjectiveId, ObjectiveSnapshot,
-    ObjectiveState, RoleId, RouterId, RoutingExplainResult, SessionNodeId, SessionNodeSnapshot,
-    SessionNodeState, SessionTreeDefinition, SessionTreeId, SessionTreeListResult,
-    SessionTreeSnapshot, SessionTreeSummary, WorkflowId, WorkflowStartResult,
+    AcpSessionId, BackendId, DefinitionId, Difficulty, ModelConfig, NodeTranscript, ObjectiveId,
+    ObjectiveSnapshot, ObjectiveState, RoleId, RouterId, RoutingExplainResult, SessionNodeId,
+    SessionNodeSnapshot, SessionNodeState, SessionTreeDefinition, SessionTreeId,
+    SessionTreeListResult, SessionTreeSnapshot, SessionTreeSummary, WorkflowId,
+    WorkflowStartResult,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 #[derive(Clone, Default)]
@@ -194,6 +195,7 @@ impl PhenixAcpGateway {
             state: SessionNodeState::Running,
             model: routing.model,
             objective_id: objective_id.clone(),
+            events: Vec::new(),
             session,
         };
         let mut nodes = BTreeMap::new();
@@ -329,6 +331,7 @@ impl PhenixAcpGateway {
                     state: SessionNodeState::Running,
                     model: routing.model,
                     objective_id: objective_id.clone(),
+                    events: Vec::new(),
                     session,
                 },
                 objective: ObjectiveSnapshot {
@@ -474,6 +477,7 @@ impl PhenixAcpGateway {
             let session_id = node.session.id().clone();
             let objective_id = node.objective_id.clone();
             let events = node.session.execute(command)?;
+            node.events.extend(events.iter().cloned());
             for event in &events {
                 match event {
                     super::SessionEvent::Completed => node.state = SessionNodeState::Completed,
@@ -580,6 +584,19 @@ impl PhenixAcpGateway {
 
     pub fn snapshot(&self, tree_id: &SessionTreeId) -> Result<SessionTreeSnapshot, GatewayError> {
         Ok(self.tree(tree_id)?.snapshot(tree_id.clone()))
+    }
+
+    pub fn transcript(
+        &self,
+        tree_id: &SessionTreeId,
+        node_id: &SessionNodeId,
+    ) -> Result<NodeTranscript, GatewayError> {
+        let node = self.node(tree_id, node_id)?;
+        Ok(NodeTranscript {
+            node_id: node.id.clone(),
+            edited_paths: edited_paths(&node.events),
+            events: node.events.clone(),
+        })
     }
 
     pub fn list_trees(&self) -> SessionTreeListResult {
@@ -706,6 +723,7 @@ impl PhenixAcpGateway {
                 state: SessionNodeState::Running,
                 model: routing.model,
                 objective_id,
+                events: Vec::new(),
                 session,
             },
         );
@@ -876,6 +894,7 @@ struct NodeRuntime {
     state: SessionNodeState,
     model: ModelConfig,
     objective_id: ObjectiveId,
+    events: Vec<super::SessionEvent>,
     session: Box<dyn AcpSession>,
 }
 
@@ -891,6 +910,53 @@ impl NodeRuntime {
             objective_id: self.objective_id.clone(),
             downstream_session: Some(self.session.id().clone()),
         }
+    }
+}
+
+fn edited_paths(events: &[super::SessionEvent]) -> Vec<String> {
+    let mut paths = BTreeSet::new();
+    for event in events {
+        let super::SessionEvent::ToolStarted {
+            name,
+            raw_input_json,
+            ..
+        } = event
+        else {
+            continue;
+        };
+        let name = name.to_ascii_lowercase();
+        if !["write", "edit", "patch", "apply"]
+            .iter()
+            .any(|verb| name.contains(verb))
+        {
+            continue;
+        }
+        let Ok(input) = serde_json::from_str::<serde_json::Value>(raw_input_json) else {
+            continue;
+        };
+        collect_paths(&input, &mut paths);
+    }
+    paths.into_iter().collect()
+}
+
+fn collect_paths(value: &serde_json::Value, paths: &mut BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                if matches!(key.as_str(), "path" | "file_path" | "filepath" | "filename") {
+                    if let Some(path) = value.as_str().filter(|path| !path.is_empty()) {
+                        paths.insert(path.to_owned());
+                    }
+                }
+                collect_paths(value, paths);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_paths(value, paths);
+            }
+        }
+        _ => {}
     }
 }
 

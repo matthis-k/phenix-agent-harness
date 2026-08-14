@@ -205,6 +205,30 @@ pub struct SessionTreeGetParams {
     pub tree_id: SessionTreeId,
 }
 
+/// Retrieves the accumulated event transcript for one session-tree node.
+pub struct NodeTranscriptGet;
+
+impl AcpMethod for NodeTranscriptGet {
+    const METHOD: &'static str = "_phenix/node/transcript/get";
+    type Params = NodeTranscriptGetParams;
+    type Result = NodeTranscript;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NodeTranscriptGetParams {
+    pub tree_id: SessionTreeId,
+    pub node_id: SessionNodeId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NodeTranscript {
+    pub node_id: SessionNodeId,
+    /// Ordered, typed events suitable for transcript rendering.
+    pub events: Vec<crate::SessionEvent>,
+    /// Paths reported to write-like tool calls in this node.
+    pub edited_paths: Vec<String>,
+}
+
 pub struct SessionTreeList;
 
 impl AcpMethod for SessionTreeList {
