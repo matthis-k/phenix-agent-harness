@@ -29,17 +29,12 @@ pub struct WorkflowInputBinding {
 }
 
 /// Failure handling is declarative workflow policy, never agent reasoning.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DependencyFailurePolicy {
+    #[default]
     Abort,
     Continue,
-}
-
-impl Default for DependencyFailurePolicy {
-    fn default() -> Self {
-        Self::Abort
-    }
 }
 
 /// A callable invocation in a static workflow graph.  The conductor creates
