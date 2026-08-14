@@ -16,6 +16,7 @@ mod source;
 mod subscription;
 mod tools;
 mod workflow_ir;
+mod workflow_runtime;
 
 pub use authoring::{
     parse_routing_table, parse_routing_table_with_format, parse_workflow,
@@ -91,4 +92,8 @@ pub use tools::{
 pub use workflow_ir::{
     CallableWorkflowDefinition, DependencyFailurePolicy, WorkflowDefinitionError,
     WorkflowInputBinding, WorkflowNodeDefinition, WorkflowPort, WorkflowValueSource,
+};
+pub use workflow_runtime::{
+    ArtifactStore, ReadyInvocation, StoredArtifact, WorkflowNodeRunState, WorkflowOutput,
+    WorkflowRuntime, WorkflowRuntimeError,
 };
