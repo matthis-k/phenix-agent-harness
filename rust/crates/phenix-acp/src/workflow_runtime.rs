@@ -10,7 +10,7 @@ use std::fmt::{self, Display, Formatter};
 
 /// An immutable artifact plus the value retained by the conductor. Transcripts
 /// are intentionally absent: only schema-labelled values cross run boundaries.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StoredArtifact {
     pub reference: ArtifactRef,
     pub value: Value,
@@ -60,14 +60,14 @@ pub enum WorkflowNodeRunState {
 
 /// A fully hydrated invocation ready for an executor. All orchestration data
 /// has been resolved before this reaches an agent/ACP adapter.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReadyInvocation {
     pub node: String,
     pub invocation: CallableInvocation,
 }
 
 /// Names an immutable result artifact by the static port it satisfies.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WorkflowOutput {
     pub port: String,
     pub artifact: StoredArtifact,
@@ -334,6 +334,7 @@ pub enum WorkflowRuntimeError {
         actual: SchemaId,
     },
     UnknownNode(String),
+    UnknownRun(RunId),
     NodeNotReady(String),
     NodeNotRunning(String),
     OutputCount {
@@ -382,6 +383,7 @@ impl Display for WorkflowRuntimeError {
                 "workflow input {port} expects {expected}, received {actual}"
             ),
             Self::UnknownNode(node) => write!(f, "unknown workflow node {node}"),
+            Self::UnknownRun(run) => write!(f, "unknown or completed run {run}"),
             Self::NodeNotReady(node) => write!(f, "workflow node {node} is not ready"),
             Self::NodeNotRunning(node) => write!(f, "workflow node {node} is not running"),
             Self::OutputCount {

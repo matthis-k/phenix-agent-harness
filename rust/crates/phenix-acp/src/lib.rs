@@ -11,6 +11,7 @@ mod configuration;
 mod definition;
 mod id;
 mod protocol;
+mod run_coordinator;
 mod runtime;
 mod source;
 mod subscription;
@@ -75,6 +76,7 @@ pub use protocol::{
     SessionTreeUpdatedParams, ThinkingLevel, WorkflowStart, WorkflowStartParams,
     WorkflowStartResult,
 };
+pub use run_coordinator::{StartedRun, WorkflowRunCoordinator};
 pub use runtime::{
     AcpSession, AcpSessionFactory, FixedRouter, GatewayError, GatewayEvent, InteractionResponse,
     PhenixAcpGateway, PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand,
