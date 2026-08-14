@@ -37,7 +37,8 @@ pub use backend::{
 };
 pub use callable::{
     ArtifactRef, CallableCatalog, CallableCatalogError, CallableDefinition, CallableExecutor,
-    CallableInput, CallableInvocation, InvocationPolicy, RunFailure, RunOutcome, SelectionMetadata,
+    CallableInput, CallableInvocation, DispatchDecision, ExecutionPolicy, IntentDecomposition,
+    InvocationPolicy, OutcomeRequest, RetryPolicy, RunFailure, RunOutcome, SelectionMetadata,
 };
 pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
@@ -56,8 +57,8 @@ pub use definition::{
 };
 pub use id::{
     AcpSessionId, ArtifactId, BackendId, CallableId, DefinitionId, IdError, McpServerName, ModelId,
-    ObjectiveId, ProviderId, RoleId, RouterId, RunId, SchemaId, SessionNodeId, SessionTreeId,
-    ToolId, WorkflowId,
+    ObjectiveId, OutcomeId, ProviderId, RoleId, RouterId, RunId, SchemaId, SessionNodeId,
+    SessionTreeId, ToolId, WorkflowId,
 };
 pub use protocol::{
     AcpMethod, AcpNotification, Difficulty, EmptyResult, ModelConfig, ModelSelection,

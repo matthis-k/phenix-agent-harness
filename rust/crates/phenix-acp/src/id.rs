@@ -104,6 +104,7 @@ define_id!(DefinitionId);
 define_id!(McpServerName);
 define_id!(ModelId);
 define_id!(ObjectiveId);
+define_id!(OutcomeId);
 define_id!(ProviderId);
 define_id!(RoleId);
 define_id!(RunId);

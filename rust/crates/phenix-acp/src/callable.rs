@@ -1,4 +1,4 @@
-use crate::{ArtifactId, CallableId, RoleId, RunId, SchemaId, WorkflowId};
+use crate::{ArtifactId, CallableId, OutcomeId, RoleId, RunId, SchemaId, ToolId, WorkflowId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -46,14 +46,55 @@ pub struct SelectionMetadata {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InvocationPolicy {
+    /// The only nested Phenix callables this principal may request. Ordinary
+    /// agents receive an empty set and are therefore orchestration leaves.
     #[serde(default)]
     pub callable_allowlist: BTreeSet<CallableId>,
+    /// ACP/model tools are a separate authority domain from Phenix callables.
+    #[serde(default)]
+    pub tool_allowlist: BTreeSet<ToolId>,
 }
 
 impl InvocationPolicy {
     pub fn permits(&self, callable: &CallableId) -> bool {
         self.callable_allowlist.contains(callable)
     }
+
+    pub fn permits_tool(&self, tool: &ToolId) -> bool {
+        self.tool_allowlist.contains(tool)
+    }
+}
+
+/// Runtime policy is evaluated by the conductor. It is deliberately absent
+/// from selector and agent contracts.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionPolicy {
+    #[serde(default)]
+    pub retry: RetryPolicy,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub max_concurrency: Option<u16>,
+}
+
+impl Default for ExecutionPolicy {
+    fn default() -> Self {
+        Self {
+            retry: RetryPolicy::Never,
+            timeout_ms: None,
+            max_concurrency: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RetryPolicy {
+    #[default]
+    Never,
+    Transient {
+        max_attempts: u8,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -68,12 +109,50 @@ pub struct CallableDefinition {
     pub selection: SelectionMetadata,
     #[serde(default)]
     pub invocation: InvocationPolicy,
+    #[serde(default)]
+    pub execution: ExecutionPolicy,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CallableInvocation {
     pub callable: CallableId,
     pub input: CallableInput,
+}
+
+/// The sole model/grammar boundary for turning a request into requested
+/// outcomes. All later orchestration consumes this structured form.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct IntentDecomposition {
+    pub outcomes: Vec<OutcomeRequest>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OutcomeRequest {
+    Question { id: OutcomeId, question: String },
+    Change { id: OutcomeId, objective: String },
+    Review { id: OutcomeId, objective: String },
+    Investigation { id: OutcomeId, objective: String },
+}
+
+impl OutcomeRequest {
+    pub fn id(&self) -> &OutcomeId {
+        match self {
+            Self::Question { id, .. }
+            | Self::Change { id, .. }
+            | Self::Review { id, .. }
+            | Self::Investigation { id, .. } => id,
+        }
+    }
+}
+
+/// A selector's complete authority: choose a catalogued callable and provide
+/// its typed input. It cannot allocate runs, schedule dependencies, select a
+/// model, or create sessions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DispatchDecision {
+    pub outcome: OutcomeId,
+    pub invocation: CallableInvocation,
 }
 
 /// Validates catalog membership, caller authority, and the declared input
@@ -104,6 +183,53 @@ impl CallableCatalog {
             .collect()
     }
 
+    /// Returns only callables that are both visible to the selector and
+    /// authorized for its principal. Capability labels never grant authority.
+    pub fn available_with_capabilities(
+        &self,
+        policy: &InvocationPolicy,
+        capabilities: &BTreeSet<String>,
+    ) -> Vec<&CallableDefinition> {
+        self.available_to(policy)
+            .into_iter()
+            .filter(|definition| capabilities.is_subset(&definition.selection.capabilities))
+            .collect()
+    }
+
+    pub fn validate_dispatch(
+        &self,
+        policy: &InvocationPolicy,
+        decomposition: &IntentDecomposition,
+        decisions: &[DispatchDecision],
+    ) -> Result<(), CallableCatalogError> {
+        let outcomes = decomposition
+            .outcomes
+            .iter()
+            .map(OutcomeRequest::id)
+            .collect::<BTreeSet<_>>();
+        if outcomes.len() != decomposition.outcomes.len() {
+            return Err(CallableCatalogError::DuplicateOutcome);
+        }
+        let mut selected = BTreeSet::new();
+        for decision in decisions {
+            if !outcomes.contains(&decision.outcome) {
+                return Err(CallableCatalogError::UnknownOutcome(
+                    decision.outcome.clone(),
+                ));
+            }
+            if !selected.insert(&decision.outcome) {
+                return Err(CallableCatalogError::DuplicateDispatch(
+                    decision.outcome.clone(),
+                ));
+            }
+            self.validate_invocation(policy, &decision.invocation)?;
+        }
+        if selected.len() != outcomes.len() {
+            return Err(CallableCatalogError::IncompleteDispatch);
+        }
+        Ok(())
+    }
+
     pub fn validate_invocation(
         &self,
         policy: &InvocationPolicy,
@@ -131,6 +257,10 @@ impl CallableCatalog {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CallableCatalogError {
     DuplicateCallable(CallableId),
+    DuplicateOutcome,
+    UnknownOutcome(OutcomeId),
+    DuplicateDispatch(OutcomeId),
+    IncompleteDispatch,
     UnknownCallable(CallableId),
     InvocationDenied(CallableId),
     InputSchemaMismatch {
@@ -144,6 +274,16 @@ impl Display for CallableCatalogError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateCallable(id) => write!(formatter, "duplicate callable {id}"),
+            Self::DuplicateOutcome => {
+                formatter.write_str("intent decomposition has duplicate outcomes")
+            }
+            Self::UnknownOutcome(id) => write!(formatter, "dispatch selected unknown outcome {id}"),
+            Self::DuplicateDispatch(id) => {
+                write!(formatter, "outcome {id} was selected more than once")
+            }
+            Self::IncompleteDispatch => {
+                formatter.write_str("dispatch must select exactly one callable per outcome")
+            }
             Self::UnknownCallable(id) => write!(formatter, "unknown callable {id}"),
             Self::InvocationDenied(id) => write!(formatter, "invocation of {id} is denied"),
             Self::InputSchemaMismatch {
@@ -203,6 +343,7 @@ mod tests {
             },
             selection: SelectionMetadata::default(),
             invocation: InvocationPolicy::default(),
+            execution: ExecutionPolicy::default(),
         }
     }
 
@@ -214,6 +355,7 @@ mod tests {
 
         let policy = InvocationPolicy {
             callable_allowlist: BTreeSet::from([callable.clone()]),
+            ..InvocationPolicy::default()
         };
         assert!(policy.permits(&callable));
     }
@@ -223,6 +365,7 @@ mod tests {
         let definition = definition();
         let policy = InvocationPolicy {
             callable_allowlist: BTreeSet::from([definition.id.clone()]),
+            ..InvocationPolicy::default()
         };
         let mut catalog = CallableCatalog::default();
         catalog.insert(definition.clone()).expect("insert callable");
@@ -258,6 +401,38 @@ mod tests {
             catalog.validate_invocation(&policy, &mismatch),
             Err(CallableCatalogError::InputSchemaMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn dispatch_must_cover_each_typed_outcome_once_with_authorized_callables() {
+        let definition = definition();
+        let policy = InvocationPolicy {
+            callable_allowlist: BTreeSet::from([definition.id.clone()]),
+            ..InvocationPolicy::default()
+        };
+        let mut catalog = CallableCatalog::default();
+        catalog.insert(definition.clone()).expect("insert callable");
+        let outcome = OutcomeId::parse("question-1").expect("outcome identifier");
+        let decomposition = IntentDecomposition {
+            outcomes: vec![OutcomeRequest::Question {
+                id: outcome.clone(),
+                question: "Where is this configured?".to_owned(),
+            }],
+        };
+        let decisions = vec![DispatchDecision {
+            outcome,
+            invocation: CallableInvocation {
+                callable: definition.id,
+                input: CallableInput {
+                    schema: definition.input_schema,
+                    value: serde_json::json!({ "question": "Where is this configured?" }),
+                    artifacts: Vec::new(),
+                },
+            },
+        }];
+        catalog
+            .validate_dispatch(&policy, &decomposition, &decisions)
+            .expect("complete authorized dispatch");
     }
 
     #[test]

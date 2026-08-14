@@ -305,7 +305,8 @@ impl Error for WorkflowDefinitionError {}
 mod tests {
     use super::*;
     use crate::{
-        CallableDefinition, CallableExecutor, InvocationPolicy, RoleId, SelectionMetadata,
+        CallableDefinition, CallableExecutor, ExecutionPolicy, InvocationPolicy, RoleId,
+        SelectionMetadata,
     };
 
     fn schema(value: &str) -> SchemaId {
@@ -416,6 +417,7 @@ mod tests {
                     },
                     selection: SelectionMetadata::default(),
                     invocation: InvocationPolicy::default(),
+                    execution: ExecutionPolicy::default(),
                 })
                 .unwrap();
         }
