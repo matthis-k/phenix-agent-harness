@@ -37,6 +37,13 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     let configured = process.receive_response(100)?;
     assert_eq!(configured["result"]["definition_id"], "definition.fixture");
 
+    process.send_request(101, "_phenix/config/get", &json!({}))?;
+    let configuration = process.receive_response(101)?;
+    assert_eq!(
+        configuration["result"]["active"]["workflows"],
+        json!([{ "id": "workflow.fixture", "title": "Fixture workflow" }])
+    );
+
     process.send_request(2, "session/new", &NewSessionRequest::new(&cwd))?;
     let created = process.receive_response(2)?;
     let session_id = created["result"]["sessionId"]
@@ -177,6 +184,19 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
 }
 
 fn configuration_json(fixture_agent: &Path) -> Value {
+    let workflow = r#"
+# Fixture workflow
+
+```phenix-workflow
+id: workflow.fixture
+```
+
+## Steps
+
+| Key | Parent | Role | Objective |
+|---|---|---|---|
+| `inspect` | `-` | `scout` | inspect {objective} |
+"#;
     let routing = r#"
 # Fixture routing
 
@@ -204,14 +224,24 @@ id: router.fixture
                 "id": "fixture",
                 "command": format!("{:?}", fixture_agent)
             }],
-            "definitions": [{
-                "kind": "routing_table",
-                "source": {
-                    "kind": "inline",
-                    "source": routing,
-                    "format": "markdown"
+            "definitions": [
+                {
+                    "kind": "workflow",
+                    "source": {
+                        "kind": "inline",
+                        "source": workflow,
+                        "format": "markdown"
+                    }
+                },
+                {
+                    "kind": "routing_table",
+                    "source": {
+                        "kind": "inline",
+                        "source": routing,
+                        "format": "markdown"
+                    }
                 }
-            }]
+            ]
         }
     })
 }

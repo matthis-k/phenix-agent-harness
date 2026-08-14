@@ -52,6 +52,7 @@ pub use configuration::{
     ConfigurationInput, ConfigurationLoad, ConfigurationLoadParams, ConfigurationLoadResult,
     ConfigurationSnapshot, ConfigurationSource, ConfigurationSourceError,
     ConfigurationSourceOrigin, ConfigurationStandardSessionInput, LoadedConfigurationSource,
+    WorkflowSummary,
 };
 pub use definition::{
     AcpEndpoint, BackendDefinition, DefinitionError, SessionTreeDefinition,

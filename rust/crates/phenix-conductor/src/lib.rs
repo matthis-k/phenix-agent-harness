@@ -14,6 +14,7 @@ use phenix_acp::{
     DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, Difficulty, GatewayError,
     GatewayEvent, ModelId, PhenixAcpGateway, PhenixConductor, ProviderId, RoleId, RouterId,
     SessionCommand, SessionNodeId, SessionTreeDefinition, SessionTreeId, ToolConfiguration,
+    WorkflowSummary,
 };
 use phenix_acp_backend::{
     AcpAgentBackend, AcpBackendConfig, AcpGatewayTransport, ConfigError as BackendConfigError,
@@ -77,6 +78,7 @@ pub struct ConductorRuntime {
     standard_session: Option<BootstrapStandardSession>,
     backends: BTreeMap<BackendId, AcpGatewayTransport>,
     routing: SessionPolicyRouter,
+    workflows: Vec<WorkflowSummary>,
     cancelled_sessions: BTreeSet<String>,
 }
 
@@ -87,6 +89,7 @@ impl ConductorRuntime {
         standard_session: Option<BootstrapStandardSession>,
         backends: BTreeMap<BackendId, AcpGatewayTransport>,
         routing: SessionPolicyRouter,
+        workflows: Vec<WorkflowSummary>,
     ) -> Result<Self, RuntimeError> {
         if standard_session
             .as_ref()
@@ -103,6 +106,7 @@ impl ConductorRuntime {
             standard_session,
             backends,
             routing,
+            workflows,
             cancelled_sessions: BTreeSet::new(),
         })
     }
@@ -113,6 +117,10 @@ impl ConductorRuntime {
 
     pub fn conductor_mut(&mut self) -> &mut PhenixConductor {
         &mut self.conductor
+    }
+
+    pub fn workflows(&self) -> &[WorkflowSummary] {
+        &self.workflows
     }
 
     pub fn handle_extension(
@@ -404,6 +412,13 @@ impl ConductorBootstrap {
             .iter()
             .map(|workflow| workflow.id().clone())
             .collect::<Vec<_>>();
+        let workflow_summaries = workflows
+            .iter()
+            .map(|workflow| WorkflowSummary {
+                id: workflow.id().clone(),
+                title: workflow.title().to_owned(),
+            })
+            .collect::<Vec<_>>();
         let mut definition =
             SessionTreeDefinition::builder(self.definition_id.clone(), self.router.clone())
                 .tools(self.tools);
@@ -443,6 +458,7 @@ impl ConductorBootstrap {
             self.standard_session,
             transports,
             routing,
+            workflow_summaries,
         )
         .map_err(BootstrapError::Runtime)
     }

@@ -270,6 +270,8 @@ impl ConductorOwner {
         let runtime = bootstrap
             .build(&self.cwd, self.channel_capacity)
             .map_err(|error| ConductorOwnerError::Build(error.to_string()))?;
+        let mut snapshot = snapshot;
+        snapshot.workflows = runtime.workflows().to_vec();
         let result = ConfigurationLoadResult {
             revision,
             definition_id: snapshot.definition_id.clone(),
@@ -454,6 +456,7 @@ fn build_bootstrap(
         definition_id: input.definition_id.clone(),
         router: input.router.clone(),
         backend_ids,
+        workflows: Vec::new(),
         workflow_count,
         routing_table_count,
         has_standard_session_template: standard_session.is_some(),

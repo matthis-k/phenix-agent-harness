@@ -153,11 +153,21 @@ pub struct ConfigurationGetResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowSummary {
+    pub id: crate::WorkflowId,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ConfigurationSnapshot {
     pub revision: u64,
     pub definition_id: DefinitionId,
     pub router: RouterId,
     pub backend_ids: Vec<BackendId>,
+    /// Workflows accepted by the active immutable revision. Clients must use
+    /// this conductor-owned catalog rather than reconstructing it from their
+    /// authoring input.
+    pub workflows: Vec<WorkflowSummary>,
     pub workflow_count: usize,
     pub routing_table_count: usize,
     pub has_standard_session_template: bool,

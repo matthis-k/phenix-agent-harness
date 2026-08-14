@@ -48,7 +48,7 @@ There is intentionally no UI crate or Neovim plugin in this repository.
 
 A fresh conductor is unconfigured. A client selects a source root and descriptors, then calls `_phenix/config/load`; the conductor resolves relative paths beneath that root, validates every source, and atomically creates an immutable revision. New session trees use the active revision; existing trees remain pinned to the revision under which they were created. The conductor does not implicitly discover XDG configuration or repository examples.
 
-For the standard ACP projection, initialization order is explicit: `initialize`, then `_phenix/config/load`, then `session/new`. `session/new` cannot create a standard Phenix session before an active configuration revision exists. Frontends are responsible for supplying their selected configuration before requesting the session.
+For the standard ACP projection, initialization order is explicit: `initialize`, then `_phenix/config/load`, then `session/new`. `session/new` cannot create a standard Phenix session before an active configuration revision exists. Frontends are responsible for supplying their selected configuration before requesting the session. After loading, `_phenix/config/get` returns the active revision and its callable workflow catalog; integrations must use that conductor-owned catalog rather than re-derive workflows from their authoring input.
 
 The example authoring configuration under `config/phenix-harness/` is retained as an explicit application configuration. Its name is not the repository name.
 
