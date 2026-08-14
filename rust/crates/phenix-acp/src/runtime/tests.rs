@@ -2,17 +2,21 @@ use super::*;
 use crate::{
     AcpEndpoint, AcpSessionId, BackendDefinition, BackendId, DefinitionId, Difficulty, IdError,
     ModelConfig, ModelId, ProviderId, RoleId, RouterId, SessionTreeDefinition, ThinkingLevel,
-    WorkflowId,
+    ToolBinding, ToolInvocation, ToolInvocationError, ToolInvoker, WorkflowId,
 };
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+type RecordedTools = Vec<(ToolBinding, Vec<String>)>;
 
 #[derive(Clone)]
 struct RecordingFactory {
     next: Arc<AtomicU64>,
     opens: Arc<Mutex<Vec<SessionOpenRequest>>>,
     commands: Arc<Mutex<Vec<(AcpSessionId, SessionCommand)>>>,
+    tools: Arc<Mutex<RecordedTools>>,
 }
 
 impl RecordingFactory {
@@ -21,12 +25,25 @@ impl RecordingFactory {
             next: Arc::new(AtomicU64::new(1)),
             opens: Arc::new(Mutex::new(Vec::new())),
             commands: Arc::new(Mutex::new(Vec::new())),
+            tools: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
 
 impl AcpSessionFactory for RecordingFactory {
-    fn open(&self, request: SessionOpenRequest) -> Result<Box<dyn AcpSession>, GatewayError> {
+    fn open(
+        &self,
+        request: SessionOpenRequest,
+        tools: crate::ToolProvision,
+    ) -> Result<Box<dyn AcpSession>, GatewayError> {
+        self.tools.lock().expect("tool log").push((
+            tools.binding().clone(),
+            tools
+                .descriptors()
+                .iter()
+                .map(|descriptor| descriptor.id.to_string())
+                .collect(),
+        ));
         self.opens.lock().expect("open log").push(request);
         let sequence = self.next.fetch_add(1, Ordering::Relaxed);
         let id = AcpSessionId::parse(format!("acp-session-{sequence}"))
@@ -87,7 +104,7 @@ fn id<T>(value: &str, parse: impl FnOnce(String) -> Result<T, IdError>) -> T {
 }
 
 fn backend_id() -> BackendId {
-    id("pi", BackendId::parse)
+    id("backend", BackendId::parse)
 }
 
 fn router_id() -> RouterId {
@@ -115,7 +132,8 @@ fn definition() -> SessionTreeDefinition {
     SessionTreeDefinition::builder(definition_id(), router_id())
         .backend(BackendDefinition::new(
             backend_id(),
-            AcpEndpoint::stdio("pi-acp", Vec::new(), BTreeMap::new()).expect("test endpoint"),
+            AcpEndpoint::stdio("example-acp-agent", Vec::new(), BTreeMap::new())
+                .expect("test endpoint"),
         ))
         .expect("backend")
         .workflow(workflow_id())
@@ -159,6 +177,18 @@ fn gateway(factory: RecordingFactory) -> PhenixAcpGateway {
         .expect("gateway")
 }
 
+struct RecordingInvoker;
+
+impl ToolInvoker for RecordingInvoker {
+    fn invoke(
+        &self,
+        _binding: &ToolBinding,
+        _invocation: ToolInvocation,
+    ) -> Result<Value, ToolInvocationError> {
+        Ok(Value::Null)
+    }
+}
+
 #[test]
 fn build_rejects_unbound_executable_policy() {
     let error = PhenixAcpGateway::builder()
@@ -197,6 +227,55 @@ fn separately_configured_trees_own_distinct_downstream_sessions() {
     assert_eq!(trees.trees.len(), 2);
     assert_ne!(trees.trees[0].root_session, trees.trees[1].root_session);
     assert_eq!(factory.opens.lock().expect("open log").len(), 2);
+}
+
+#[test]
+fn conductor_tools_are_bound_to_the_root_session_and_not_delegated_siblings() {
+    let factory = RecordingFactory::new();
+    let mut gateway = PhenixAcpGateway::builder()
+        .definition(definition())
+        .expect("definition")
+        .router(router_id(), FixedRouter::new(model_config()))
+        .expect("router")
+        .workflow(workflow_id(), workflow())
+        .expect("workflow")
+        .backend(backend_id(), factory.clone())
+        .expect("backend")
+        .tool_service(19, Arc::new(RecordingInvoker))
+        .build()
+        .expect("gateway");
+    let root = gateway
+        .create_tree(
+            &definition_id(),
+            RoleId::parse("coordinator").expect("role"),
+            Difficulty::D2,
+            "coordinate",
+        )
+        .expect("tree");
+    gateway
+        .delegate(
+            &root.tree_id,
+            &root.root_node_id,
+            RoleId::parse("implementer").expect("role"),
+            None,
+            "implement",
+        )
+        .expect("delegate");
+
+    let provisions = factory.tools.lock().expect("tool log");
+    assert_eq!(provisions.len(), 2);
+    assert_eq!(provisions[0].0.revision, 19);
+    assert_eq!(provisions[0].0.tree_id, root.tree_id);
+    assert_eq!(provisions[0].0.caller_node, root.root_node_id);
+    assert_eq!(
+        provisions[0].1,
+        [
+            "phenix_delegate",
+            "phenix_workflow_list",
+            "phenix_workflow_start"
+        ]
+    );
+    assert!(provisions[1].1.is_empty());
 }
 
 #[test]

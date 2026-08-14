@@ -6,6 +6,7 @@ mod process_transport;
 mod projection;
 mod state;
 mod terminal;
+mod tool_host;
 
 pub use gateway::{AcpGatewayTransport, AcpTreeControl};
 
@@ -30,8 +31,8 @@ use phenix_acp::acp::{Agent, Client, ConnectionTo};
 use phenix_runtime_api::{
     AgentBackend, AuthFlowId, BackendCommand, BackendError, BackendEvent, BackendOutputSender,
     BackendReply, BackendRequest, CommandSource, CommandSummary, ExternalCommand,
-    NotificationLevel, PersistedSessionTreeSnapshot, RunId, RunState, SessionEntrySummary,
-    SessionId, StreamingBehavior, TranscriptBlock, TranscriptRole,
+    PersistedSessionTreeSnapshot, RunId, RunState, SessionEntrySummary, SessionId,
+    StreamingBehavior, TranscriptBlock, TranscriptRole,
 };
 use process_transport::BlockingAcpAgent;
 use projection::{apply_session_notification, apply_terminal_event, finish_prompt};
@@ -46,6 +47,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use terminal::{TerminalEvent, TerminalManager};
+use tool_host::provisioned_agent;
 
 const RELAY_POLL_PERIOD: Duration = Duration::from_millis(100);
 
@@ -90,6 +92,7 @@ impl Error for ConfigError {}
 pub struct AcpAgentBackend {
     config: AcpBackendConfig,
     startup_requests: Vec<ExtRequest>,
+    tool_provision: Option<phenix_acp::ToolProvision>,
 }
 
 impl AcpAgentBackend {
@@ -97,11 +100,17 @@ impl AcpAgentBackend {
         Self {
             config,
             startup_requests: Vec::new(),
+            tool_provision: None,
         }
     }
 
     pub fn with_startup_request(mut self, request: ExtRequest) -> Self {
         self.startup_requests.push(request);
+        self
+    }
+
+    pub fn with_tool_provision(mut self, provision: phenix_acp::ToolProvision) -> Self {
+        self.tool_provision = Some(provision);
         self
     }
 }
@@ -115,6 +124,7 @@ impl AgentBackend for AcpAgentBackend {
         let AcpAgentBackend {
             config,
             startup_requests,
+            tool_provision,
         } = *self;
         let agent = BlockingAcpAgent::from_command(&config.command, config.cwd.clone())
             .map_err(|error| BackendError::Start(error.to_string()))?;
@@ -142,6 +152,7 @@ impl AgentBackend for AcpAgentBackend {
             agent,
             config,
             startup_requests,
+            tool_provision,
             request_rx,
             outputs,
         ));
@@ -163,15 +174,20 @@ enum InternalEvent {
 
 struct RuntimeState {
     adapter: AdapterState,
+    external_mcp_servers: Vec<phenix_acp::acp::schema::v1::McpServer>,
     permissions: PermissionBroker,
     pending_terminal_auth: BTreeMap<AuthFlowId, String>,
     next_auth_flow: u64,
 }
 
 impl RuntimeState {
-    fn new(adapter: AdapterState) -> Self {
+    fn new(
+        adapter: AdapterState,
+        external_mcp_servers: Vec<phenix_acp::acp::schema::v1::McpServer>,
+    ) -> Self {
         Self {
             adapter,
+            external_mcp_servers,
             permissions: PermissionBroker::default(),
             pending_terminal_auth: BTreeMap::new(),
             next_auth_flow: 1,
@@ -192,6 +208,7 @@ async fn run_connection(
     agent: BlockingAcpAgent,
     config: AcpBackendConfig,
     startup_requests: Vec<ExtRequest>,
+    tool_provision: Option<phenix_acp::ToolProvision>,
     requests: mpsc::UnboundedReceiver<BackendRequest>,
     outputs: BackendOutputSender,
 ) -> Result<(), BackendError> {
@@ -223,6 +240,7 @@ async fn run_connection(
     let kill_terminals = terminals.clone();
     let release_terminals = terminals;
 
+    let agent = provisioned_agent(agent, tool_provision.clone());
     Client
         .builder()
         .on_receive_notification(
@@ -300,7 +318,18 @@ async fn run_connection(
                 )?;
                 let _: serde_json::Value = cx.send_request(request).block_task().await?;
             }
-            let runtime = RuntimeState::new(AdapterState::new(initialize));
+            if let Some(provision) = &tool_provision {
+                tool_host::validate_agent_capabilities(
+                    provision,
+                    &initialize.agent_capabilities.mcp_capabilities,
+                )?;
+            }
+            let external_mcp_servers = tool_provision
+                .as_ref()
+                .map(tool_host::external_mcp_servers)
+                .transpose()?
+                .unwrap_or_default();
+            let runtime = RuntimeState::new(AdapterState::new(initialize), external_mcp_servers);
             run_backend_loop(
                 cx,
                 config,
@@ -372,23 +401,10 @@ async fn handle_request(
     outputs: &BackendOutputSender,
 ) -> Result<bool, BackendError> {
     let result = match request.command {
-        BackendCommand::Initialize { .. } => {
-            if runtime.adapter.sessions.is_empty() {
-                match create_session(connection, runtime, config.cwd.clone(), None).await {
-                    Ok(_) => {}
-                    Err(error) => outputs.event(BackendEvent::Notification {
-                        level: NotificationLevel::Warning,
-                        message: format!(
-                            "ACP initialized without a session: {error}. Authenticate or create a session."
-                        ),
-                    })?,
-                }
-            }
-            Ok(BackendReply::Initialized {
-                capabilities: runtime.adapter.capabilities.clone(),
-                snapshot: runtime.adapter.snapshot(),
-            })
-        }
+        BackendCommand::Initialize { .. } => Ok(BackendReply::Initialized {
+            capabilities: runtime.adapter.capabilities.clone(),
+            snapshot: runtime.adapter.snapshot(),
+        }),
         BackendCommand::SnapshotRequest => Ok(BackendReply::Snapshot(runtime.adapter.snapshot())),
         BackendCommand::PromptSubmit {
             run_id,
@@ -818,7 +834,9 @@ async fn create_session(
     parent: Option<&SessionId>,
 ) -> Result<SessionId, BackendError> {
     let response = connection
-        .send_request(NewSessionRequest::new(cwd.clone()))
+        .send_request(
+            NewSessionRequest::new(cwd.clone()).mcp_servers(runtime.external_mcp_servers.clone()),
+        )
         .block_task()
         .await
         .map_err(acp_transport_error)?;
@@ -853,7 +871,10 @@ async fn switch_session(
         .is_some()
     {
         let response = connection
-            .send_request(ResumeSessionRequest::new(acp_id.clone(), cwd.clone()))
+            .send_request(
+                ResumeSessionRequest::new(acp_id.clone(), cwd.clone())
+                    .mcp_servers(runtime.external_mcp_servers.clone()),
+            )
             .block_task()
             .await
             .map_err(acp_transport_error)?;
@@ -868,7 +889,10 @@ async fn switch_session(
         )?;
     } else if runtime.adapter.initialize.agent_capabilities.load_session {
         let response = connection
-            .send_request(LoadSessionRequest::new(acp_id.clone(), cwd.clone()))
+            .send_request(
+                LoadSessionRequest::new(acp_id.clone(), cwd.clone())
+                    .mcp_servers(runtime.external_mcp_servers.clone()),
+            )
             .block_task()
             .await
             .map_err(acp_transport_error)?;
@@ -895,9 +919,6 @@ async fn fork_session(
     session_id: SessionId,
     cwd: PathBuf,
 ) -> Result<SessionId, BackendError> {
-    let parent = runtime.adapter.sessions.get(&session_id).ok_or_else(|| {
-        BackendError::InvalidConfiguration(format!("unknown session {session_id}"))
-    })?;
     if runtime
         .adapter
         .initialize
@@ -910,8 +931,12 @@ async fn fork_session(
             "the ACP agent does not support session forking".to_owned(),
         ));
     }
+    let source_acp_id = phenix_acp::acp::schema::v1::SessionId::new(session_id.to_string());
     let response = connection
-        .send_request(ForkSessionRequest::new(parent.acp_id.clone(), cwd.clone()))
+        .send_request(
+            ForkSessionRequest::new(source_acp_id, cwd.clone())
+                .mcp_servers(runtime.external_mcp_servers.clone()),
+        )
         .block_task()
         .await
         .map_err(acp_transport_error)?;
@@ -1242,7 +1267,7 @@ mod tests {
 
     #[test]
     fn terminal_auth_uses_the_original_agent_invocation() {
-        let invocation = shell_words::split("npx -y pi-acp").expect("parse invocation");
-        assert_eq!(invocation, vec!["npx", "-y", "pi-acp"]);
+        let invocation = shell_words::split("phenix-conductor runtime").expect("parse invocation");
+        assert_eq!(invocation, vec!["phenix-conductor", "runtime"]);
     }
 }

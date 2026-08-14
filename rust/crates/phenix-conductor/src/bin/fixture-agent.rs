@@ -1,6 +1,6 @@
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, ClientRequest, ContentBlock, ContentChunk, InitializeResponse,
-    PromptResponse, SessionNotification, SessionUpdate, StopReason, TextContent,
+    McpCapabilities, PromptResponse, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
 use agent_client_protocol::{Agent, Stdio};
 use serde_json::{json, Value};
@@ -15,8 +15,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             async move |request: ClientRequest, responder, connection| {
                 let response = match request {
                     ClientRequest::InitializeRequest(initialize) => serde_json::to_value(
-                        InitializeResponse::new(initialize.protocol_version)
-                            .agent_capabilities(AgentCapabilities::new()),
+                        InitializeResponse::new(initialize.protocol_version).agent_capabilities(
+                            AgentCapabilities::new()
+                                .mcp_capabilities(McpCapabilities::new().acp(true)),
+                        ),
                     )
                     .map_err(agent_client_protocol::Error::into_internal_error)?,
                     ClientRequest::NewSessionRequest(_) => json!({

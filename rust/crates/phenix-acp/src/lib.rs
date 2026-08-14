@@ -90,7 +90,9 @@ pub use source::{
 };
 pub use subscription::{NodeSubscribe, NodeSubscriptionParams, NodeUnsubscribe};
 pub use tools::{
-    BuiltinToolPolicy, McpServerDefinition, McpServerTransport, ToolConfigError, ToolConfiguration,
+    conductor_tool_catalog, BuiltinToolPolicy, McpServerDefinition, McpServerTransport,
+    McpServerTransportRef, ToolBinding, ToolConfigError, ToolConfiguration, ToolDescriptor,
+    ToolInvocation, ToolInvocationError, ToolInvoker, ToolProvision,
 };
 pub use workflow_ir::{
     CallableWorkflowDefinition, DependencyFailurePolicy, WorkflowDefinitionError,

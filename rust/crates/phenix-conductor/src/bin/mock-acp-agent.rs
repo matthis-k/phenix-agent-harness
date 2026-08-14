@@ -1,7 +1,7 @@
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, ClientRequest, ContentBlock, ContentChunk, InitializeResponse,
-    SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields,
+    McpCapabilities, SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
 };
 use agent_client_protocol::{Agent, Stdio};
 use serde::Deserialize;
@@ -301,8 +301,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             async move |request: ClientRequest, responder, connection| {
                 let response = match request {
                     ClientRequest::InitializeRequest(initialize) => serde_json::to_value(
-                        InitializeResponse::new(initialize.protocol_version)
-                            .agent_capabilities(AgentCapabilities::new()),
+                        InitializeResponse::new(initialize.protocol_version).agent_capabilities(
+                            AgentCapabilities::new()
+                                .mcp_capabilities(McpCapabilities::new().acp(true)),
+                        ),
                     )
                     .map_err(internal_error)?,
                     ClientRequest::NewSessionRequest(_) => request_state

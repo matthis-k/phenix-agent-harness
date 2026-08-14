@@ -14,7 +14,11 @@ struct TestFactory {
 }
 
 impl AcpSessionFactory for TestFactory {
-    fn open(&self, _request: SessionOpenRequest) -> Result<Box<dyn AcpSession>, GatewayError> {
+    fn open(
+        &self,
+        _request: SessionOpenRequest,
+        _tools: phenix_acp::ToolProvision,
+    ) -> Result<Box<dyn AcpSession>, GatewayError> {
         let sequence = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         Ok(Box::new(TestSession {
             id: AcpSessionId::parse(format!("session-{sequence}"))

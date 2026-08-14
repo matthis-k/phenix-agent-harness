@@ -2,7 +2,9 @@ use super::projection::{
     backend_error, empty_snapshot, interaction_event, runtime_session_id, terminal_run_event,
 };
 use crate::{AcpAgentBackend, AcpBackendConfig};
-use phenix_acp::{AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest};
+use phenix_acp::{
+    AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest, ToolProvision,
+};
 use phenix_runtime_api::{
     BackendCommand, BackendEvent, BackendHealth, BackendOutput, BackendReply, BackendRuntime,
     ClientInformation, NotificationLevel, RunId, RuntimeSnapshot, SessionId, ToolExecutionOutcome,
@@ -35,10 +37,15 @@ impl TreeConnection {
     pub(super) fn start(
         config: AcpBackendConfig,
         channel_capacity: usize,
+        tools: Option<ToolProvision>,
     ) -> Result<Self, GatewayError> {
+        let control_only = tools.is_none();
+        let backend = match tools {
+            Some(tools) => AcpAgentBackend::new(config).with_tool_provision(tools),
+            None => AcpAgentBackend::new(config),
+        };
         let runtime =
-            BackendRuntime::spawn(Box::new(AcpAgentBackend::new(config)), channel_capacity)
-                .map_err(backend_error)?;
+            BackendRuntime::spawn(Box::new(backend), channel_capacity).map_err(backend_error)?;
         let mut connection = Self {
             runtime: Some(runtime),
             snapshot: empty_snapshot(),
@@ -62,33 +69,32 @@ impl TreeConnection {
                 )))
             }
         }
+        if control_only {
+            connection.submit(BackendCommand::SessionCreate {
+                parent_session: None,
+            })?;
+        }
         Ok(connection)
     }
 
     pub(super) fn open(
         &mut self,
         request: &SessionOpenRequest,
-        _connection_created: bool,
     ) -> Result<SessionBinding, GatewayError> {
-        let reuse_initialized = matches!(&request.open, SessionOpenKind::New { parent: None })
-            && self.sessions.is_empty()
-            && self.snapshot.active_session.is_some();
-        if !reuse_initialized {
-            let command = match &request.open {
-                SessionOpenKind::New { parent } => BackendCommand::SessionCreate {
-                    parent_session: parent.as_ref().map(runtime_session_id).transpose()?,
-                },
-                SessionOpenKind::Load { session_id } | SessionOpenKind::Resume { session_id } => {
-                    BackendCommand::SessionSwitch {
-                        session_id: runtime_session_id(session_id)?,
-                    }
-                }
-                SessionOpenKind::Fork { session_id } => BackendCommand::SessionClone {
+        let command = match &request.open {
+            SessionOpenKind::New { parent } => BackendCommand::SessionCreate {
+                parent_session: parent.as_ref().map(runtime_session_id).transpose()?,
+            },
+            SessionOpenKind::Load { session_id } | SessionOpenKind::Resume { session_id } => {
+                BackendCommand::SessionSwitch {
                     session_id: runtime_session_id(session_id)?,
-                },
-            };
-            self.submit(command)?;
-        }
+                }
+            }
+            SessionOpenKind::Fork { session_id } => BackendCommand::SessionClone {
+                session_id: runtime_session_id(session_id)?,
+            },
+        };
+        self.submit(command)?;
 
         let binding = self.active_binding()?;
         if self.sessions.contains_key(&binding.session_id) {

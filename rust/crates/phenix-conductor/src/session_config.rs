@@ -155,13 +155,13 @@ mod tests {
                     display_name: "Routing · Mixed".to_owned(),
                 },
                 SessionRoutingOption {
-                    value: "pi/openai/gpt-5.6".to_owned(),
-                    display_name: "pi/openai/gpt-5.6".to_owned(),
+                    value: "backend/openai/gpt-5.6".to_owned(),
+                    display_name: "backend/openai/gpt-5.6".to_owned(),
                 },
             ],
         );
         assert_eq!(value[0]["category"], "model");
         assert_eq!(value[0]["currentValue"], "routing/mixed");
-        assert_eq!(value[0]["options"][1]["value"], "pi/openai/gpt-5.6");
+        assert_eq!(value[0]["options"][1]["value"], "backend/openai/gpt-5.6");
     }
 }

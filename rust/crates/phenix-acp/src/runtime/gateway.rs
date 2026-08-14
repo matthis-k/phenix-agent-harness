@@ -4,11 +4,11 @@ use super::{
     SessionRouter, TreeStartResult, Workflow, WorkflowRequest,
 };
 use crate::{
-    AcpSessionId, BackendId, DefinitionId, Difficulty, ModelConfig, NodeTranscript, ObjectiveId,
-    ObjectiveSnapshot, ObjectiveState, RoleId, RouterId, RoutingExplainResult, SessionNodeId,
-    SessionNodeSnapshot, SessionNodeState, SessionTreeDefinition, SessionTreeId,
-    SessionTreeListResult, SessionTreeSnapshot, SessionTreeSummary, WorkflowId,
-    WorkflowStartResult,
+    conductor_tool_catalog, AcpSessionId, BackendId, DefinitionId, Difficulty, ModelConfig,
+    NodeTranscript, ObjectiveId, ObjectiveSnapshot, ObjectiveState, RoleId, RouterId,
+    RoutingExplainResult, SessionNodeId, SessionNodeSnapshot, SessionNodeState,
+    SessionTreeDefinition, SessionTreeId, SessionTreeListResult, SessionTreeSnapshot,
+    SessionTreeSummary, ToolBinding, ToolInvoker, ToolProvision, WorkflowId, WorkflowStartResult,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -19,6 +19,8 @@ pub struct PhenixAcpGatewayBuilder {
     routers: BTreeMap<RouterId, Arc<dyn SessionRouter>>,
     workflows: BTreeMap<WorkflowId, Arc<dyn Workflow>>,
     backends: BTreeMap<BackendId, Arc<dyn AcpSessionFactory>>,
+    tool_invoker: Option<Arc<dyn ToolInvoker>>,
+    revision: u64,
 }
 
 impl PhenixAcpGatewayBuilder {
@@ -72,6 +74,12 @@ impl PhenixAcpGatewayBuilder {
         Ok(self)
     }
 
+    pub fn tool_service(mut self, revision: u64, invoker: Arc<dyn ToolInvoker>) -> Self {
+        self.revision = revision;
+        self.tool_invoker = Some(invoker);
+        self
+    }
+
     pub fn build(self) -> Result<PhenixAcpGateway, GatewayError> {
         if self.definitions.is_empty() {
             return Err(GatewayError::MissingDefinitions);
@@ -96,6 +104,8 @@ impl PhenixAcpGatewayBuilder {
             routers: self.routers,
             workflows: self.workflows,
             backends: self.backends,
+            tool_invoker: self.tool_invoker,
+            revision: self.revision,
             trees: BTreeMap::new(),
             next_tree: 1,
             next_node: 1,
@@ -109,6 +119,8 @@ pub struct PhenixAcpGateway {
     routers: BTreeMap<RouterId, Arc<dyn SessionRouter>>,
     workflows: BTreeMap<WorkflowId, Arc<dyn Workflow>>,
     backends: BTreeMap<BackendId, Arc<dyn AcpSessionFactory>>,
+    tool_invoker: Option<Arc<dyn ToolInvoker>>,
+    revision: u64,
     trees: BTreeMap<SessionTreeId, TreeRuntime>,
     next_tree: u64,
     next_node: u64,
@@ -171,7 +183,7 @@ impl PhenixAcpGateway {
             model: routing.model.clone(),
             open: SessionOpenKind::New { parent: None },
         };
-        let mut session = self.open_session(request)?;
+        let mut session = self.open_session(&definition, request)?;
         if let Err(error) = self.ensure_unique_session(session.id(), &[]) {
             let _ = session.execute(SessionCommand::Close);
             return Err(error);
@@ -304,7 +316,7 @@ impl PhenixAcpGateway {
                     parent: Some(parent_session),
                 },
             };
-            let session = match self.open_session(request) {
+            let session = match self.open_session(&definition, request) {
                 Ok(session) => session,
                 Err(error) => {
                     close_prepared(&mut prepared);
@@ -698,7 +710,7 @@ impl PhenixAcpGateway {
             model: routing.model.clone(),
             open,
         };
-        let mut session = self.open_session(request)?;
+        let mut session = self.open_session(&definition, request)?;
         if let Err(error) = self.ensure_unique_session(session.id(), &[]) {
             let _ = session.execute(SessionCommand::Close);
             return Err(error);
@@ -754,6 +766,7 @@ impl PhenixAcpGateway {
 
     fn open_session(
         &self,
+        definition: &SessionTreeDefinition,
         request: SessionOpenRequest,
     ) -> Result<Box<dyn AcpSession>, GatewayError> {
         let backend = request.model.backend.clone();
@@ -761,7 +774,29 @@ impl PhenixAcpGateway {
             .backends
             .get(&backend)
             .ok_or(GatewayError::MissingBackend(backend))?;
-        factory.open(request)
+        let binding = ToolBinding {
+            revision: self.revision,
+            tree_id: request.tree_id.clone(),
+            caller_node: request.node_id.clone(),
+            caller_role: request.role.clone(),
+        };
+        let tools = match &self.tool_invoker {
+            Some(invoker) => {
+                let descriptors = if matches!(request.open, SessionOpenKind::New { parent: None }) {
+                    conductor_tool_catalog()
+                } else {
+                    Vec::new()
+                };
+                ToolProvision::new(
+                    definition.tools().clone(),
+                    descriptors,
+                    binding,
+                    Arc::clone(invoker),
+                )
+            }
+            None => ToolProvision::without_model_tools(definition.tools().clone(), binding),
+        };
+        factory.open(request, tools)
     }
 
     fn ensure_unique_session(

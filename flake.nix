@@ -9,11 +9,6 @@
     };
     nixpkgs.follows = "phenix-pins/nixpkgs";
 
-    pi-src = {
-      url = "github:earendil-works/pi/v0.80.10";
-      flake = false;
-    };
-
     phenix-stitch = {
       url = "github:matthis-k/phenix-stitch";
       inputs = {
@@ -37,7 +32,6 @@
       ];
 
       imports = [
-        ./modules/pi-packages.nix
         ./modules/phenix-acp.nix
         ./modules/development.nix
         ./modules/stitch.nix

@@ -16,6 +16,7 @@ _: {
           "--bin"
           "phenix-conductor"
         ];
+        nativeBuildInputs = [ pkgs.cmake ];
         doCheck = false;
 
         installPhase = ''

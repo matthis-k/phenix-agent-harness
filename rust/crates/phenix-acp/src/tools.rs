@@ -1,8 +1,10 @@
-use crate::{McpServerName, ToolId};
+use crate::{Difficulty, McpServerName, RoleId, SessionNodeId, SessionTreeId, ToolId, WorkflowId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "transport", rename_all = "snake_case")]
@@ -28,6 +30,23 @@ enum McpServerTransportKind {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct McpServerTransport(McpServerTransportKind);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum McpServerTransportRef<'a> {
+    Stdio {
+        command: &'a str,
+        arguments: &'a [String],
+        environment: &'a BTreeMap<String, String>,
+    },
+    Http {
+        url: &'a str,
+        headers: &'a BTreeMap<String, String>,
+    },
+    Sse {
+        url: &'a str,
+        headers: &'a BTreeMap<String, String>,
+    },
+}
 
 impl McpServerTransport {
     pub fn stdio(
@@ -74,6 +93,26 @@ impl McpServerTransport {
             McpServerTransportKind::Http { url, headers }
         };
         Ok(Self(kind))
+    }
+
+    pub fn as_ref(&self) -> McpServerTransportRef<'_> {
+        match &self.0 {
+            McpServerTransportKind::Stdio {
+                command,
+                arguments,
+                environment,
+            } => McpServerTransportRef::Stdio {
+                command,
+                arguments,
+                environment,
+            },
+            McpServerTransportKind::Http { url, headers } => {
+                McpServerTransportRef::Http { url, headers }
+            }
+            McpServerTransportKind::Sse { url, headers } => {
+                McpServerTransportRef::Sse { url, headers }
+            }
+        }
     }
 }
 
@@ -179,6 +218,191 @@ impl ToolConfiguration {
     pub fn builtin_tools(&self) -> &BuiltinToolPolicy {
         &self.builtin_tools
     }
+}
+
+/// A model-visible operation. These descriptors are semantic conductor tools,
+/// not serialized `_phenix/*` frontend requests.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolDescriptor {
+    pub id: ToolId,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+/// Authority bound by the conductor to one downstream session. None of these
+/// identifiers are accepted from model-authored tool arguments.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolBinding {
+    pub revision: u64,
+    pub tree_id: SessionTreeId,
+    pub caller_node: SessionNodeId,
+    pub caller_role: RoleId,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum ToolInvocation {
+    Delegate {
+        role: RoleId,
+        objective: String,
+        prompt: String,
+        #[serde(default)]
+        difficulty: Option<Difficulty>,
+    },
+    WorkflowList,
+    WorkflowStart {
+        workflow: WorkflowId,
+        objective: String,
+        #[serde(default)]
+        difficulty: Option<Difficulty>,
+    },
+}
+
+pub trait ToolInvoker: Send + Sync + 'static {
+    fn invoke(
+        &self,
+        binding: &ToolBinding,
+        invocation: ToolInvocation,
+    ) -> Result<Value, ToolInvocationError>;
+}
+
+#[derive(Clone)]
+pub struct ToolProvision {
+    configuration: ToolConfiguration,
+    descriptors: Arc<[ToolDescriptor]>,
+    binding: ToolBinding,
+    invoker: Arc<dyn ToolInvoker>,
+}
+
+impl ToolProvision {
+    pub fn new(
+        configuration: ToolConfiguration,
+        descriptors: Vec<ToolDescriptor>,
+        binding: ToolBinding,
+        invoker: Arc<dyn ToolInvoker>,
+    ) -> Self {
+        Self {
+            configuration,
+            descriptors: descriptors.into(),
+            binding,
+            invoker,
+        }
+    }
+
+    pub fn without_model_tools(configuration: ToolConfiguration, binding: ToolBinding) -> Self {
+        Self::new(
+            configuration,
+            Vec::new(),
+            binding,
+            Arc::new(UnavailableToolInvoker),
+        )
+    }
+
+    pub fn configuration(&self) -> &ToolConfiguration {
+        &self.configuration
+    }
+
+    pub fn descriptors(&self) -> &[ToolDescriptor] {
+        &self.descriptors
+    }
+
+    pub fn binding(&self) -> &ToolBinding {
+        &self.binding
+    }
+
+    pub fn invoke(&self, invocation: ToolInvocation) -> Result<Value, ToolInvocationError> {
+        self.invoker.invoke(&self.binding, invocation)
+    }
+
+    pub fn requires_model_tool_host(&self) -> bool {
+        !self.descriptors.is_empty()
+    }
+}
+
+struct UnavailableToolInvoker;
+
+impl ToolInvoker for UnavailableToolInvoker {
+    fn invoke(
+        &self,
+        _binding: &ToolBinding,
+        _invocation: ToolInvocation,
+    ) -> Result<Value, ToolInvocationError> {
+        Err(ToolInvocationError::new(
+            "this session has no conductor model-tool service",
+        ))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolInvocationError {
+    message: String,
+}
+
+impl ToolInvocationError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl Display for ToolInvocationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl Error for ToolInvocationError {}
+
+pub fn conductor_tool_catalog() -> Vec<ToolDescriptor> {
+    vec![
+        ToolDescriptor {
+            id: ToolId::parse("phenix_delegate").expect("static tool identifier"),
+            description: "Delegate a bounded objective to a child Phenix agent and return its completed result. Session-tree identity and caller authority are bound by the conductor.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "role": { "type": "string" },
+                    "objective": { "type": "string" },
+                    "prompt": { "type": "string" },
+                    "difficulty": {
+                        "type": "string",
+                        "enum": ["d0", "d1", "d2", "d3", "d4"]
+                    }
+                },
+                "required": ["role", "objective", "prompt"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDescriptor {
+            id: ToolId::parse("phenix_workflow_list").expect("static tool identifier"),
+            description: "List workflows allowed by this immutable Phenix session-tree revision."
+                .to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        },
+        ToolDescriptor {
+            id: ToolId::parse("phenix_workflow_start").expect("static tool identifier"),
+            description: "Start an allowed conductor-owned workflow in this Phenix session tree."
+                .to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "workflow": { "type": "string" },
+                    "objective": { "type": "string" },
+                    "difficulty": {
+                        "type": "string",
+                        "enum": ["d0", "d1", "d2", "d3", "d4"]
+                    }
+                },
+                "required": ["workflow", "objective"],
+                "additionalProperties": false
+            }),
+        },
+    ]
 }
 
 impl Serialize for ToolConfiguration {

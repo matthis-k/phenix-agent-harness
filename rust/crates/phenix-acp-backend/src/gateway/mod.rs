@@ -5,7 +5,7 @@ use crate::{AcpAgentBackend, AcpBackendConfig};
 use connection::{SessionBinding, TreeConnection};
 use phenix_acp::{
     AcpSession, AcpSessionFactory, AcpSessionId, GatewayError, SessionCommand, SessionEvent,
-    SessionOpenRequest, SessionTreeId,
+    SessionNodeId, SessionOpenRequest, SessionTreeId, ToolProvision,
 };
 use phenix_runtime_api::{BackendCommand, BackendEvent, BackendReply, DialogId, RuntimeSnapshot};
 use projection::{
@@ -14,7 +14,9 @@ use projection::{
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-type TreeRegistry = Arc<Mutex<BTreeMap<SessionTreeId, Arc<Mutex<TreeConnection>>>>>;
+type ConnectionKey = (SessionTreeId, SessionNodeId);
+type ConnectionRegistry = Arc<Mutex<BTreeMap<ConnectionKey, Arc<Mutex<TreeConnection>>>>>;
+type ControlRegistry = Arc<Mutex<BTreeMap<SessionTreeId, Arc<Mutex<TreeConnection>>>>>;
 
 impl AcpAgentBackend {
     pub fn gateway_transport(
@@ -29,7 +31,8 @@ impl AcpAgentBackend {
 pub struct AcpGatewayTransport {
     config: AcpBackendConfig,
     channel_capacity: usize,
-    trees: TreeRegistry,
+    connections: ConnectionRegistry,
+    controls: ControlRegistry,
 }
 
 impl AcpGatewayTransport {
@@ -42,52 +45,101 @@ impl AcpGatewayTransport {
         Ok(Self {
             config,
             channel_capacity,
-            trees: Arc::new(Mutex::new(BTreeMap::new())),
+            connections: Arc::new(Mutex::new(BTreeMap::new())),
+            controls: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }
 
     pub fn control(&self, tree_id: SessionTreeId) -> Result<AcpTreeControl, GatewayError> {
-        let (connection, _) = self.connection(&tree_id)?;
+        let existing = self
+            .connections
+            .lock()
+            .map_err(|_| GatewayError::session("ACP connection registry lock poisoned"))?
+            .iter()
+            .find(|((candidate_tree, _), _)| candidate_tree == &tree_id)
+            .map(|(key, connection)| (key.clone(), Arc::clone(connection)));
+        let (connection, registration) = if let Some((key, connection)) = existing {
+            (
+                connection,
+                ControlRegistration::Session {
+                    key,
+                    registry: Arc::clone(&self.connections),
+                },
+            )
+        } else {
+            let mut controls = self
+                .controls
+                .lock()
+                .map_err(|_| GatewayError::session("ACP control registry lock poisoned"))?;
+            let connection = match controls.get(&tree_id) {
+                Some(connection) => Arc::clone(connection),
+                None => {
+                    let connection = Arc::new(Mutex::new(TreeConnection::start(
+                        self.config.clone(),
+                        self.channel_capacity,
+                        None,
+                    )?));
+                    controls.insert(tree_id.clone(), Arc::clone(&connection));
+                    connection
+                }
+            };
+            (
+                connection,
+                ControlRegistration::Control {
+                    tree_id,
+                    registry: Arc::clone(&self.controls),
+                },
+            )
+        };
         connection
             .lock()
-            .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?
+            .map_err(|_| GatewayError::session("ACP session connection lock poisoned"))?
             .retain_control()?;
         Ok(AcpTreeControl {
-            tree_id,
             connection,
-            registry: Arc::clone(&self.trees),
+            registration,
             released: false,
         })
     }
 
     fn connection(
         &self,
-        tree_id: &SessionTreeId,
-    ) -> Result<(Arc<Mutex<TreeConnection>>, bool), GatewayError> {
-        let mut trees = self
-            .trees
+        request: &SessionOpenRequest,
+        tools: ToolProvision,
+    ) -> Result<(ConnectionKey, Arc<Mutex<TreeConnection>>), GatewayError> {
+        let key = (request.tree_id.clone(), request.node_id.clone());
+        let mut connections = self
+            .connections
             .lock()
-            .map_err(|_| GatewayError::session("ACP tree registry lock poisoned"))?;
-        if let Some(connection) = trees.get(tree_id) {
-            return Ok((Arc::clone(connection), false));
+            .map_err(|_| GatewayError::session("ACP connection registry lock poisoned"))?;
+        if connections.contains_key(&key) {
+            return Err(GatewayError::session(format!(
+                "session node {} already has a downstream ACP connection",
+                request.node_id
+            )));
         }
         let connection = Arc::new(Mutex::new(TreeConnection::start(
             self.config.clone(),
             self.channel_capacity,
+            Some(tools),
         )?));
-        trees.insert(tree_id.clone(), Arc::clone(&connection));
-        Ok((connection, true))
+        connections.insert(key.clone(), Arc::clone(&connection));
+        Ok((key, connection))
     }
 }
 
 impl AcpSessionFactory for AcpGatewayTransport {
-    fn open(&self, request: SessionOpenRequest) -> Result<Box<dyn AcpSession>, GatewayError> {
-        let (connection, created) = self.connection(&request.tree_id)?;
+    fn open(
+        &self,
+        request: SessionOpenRequest,
+        tools: ToolProvision,
+    ) -> Result<Box<dyn AcpSession>, GatewayError> {
+        let (key, connection) = self.connection(&request, tools)?;
         let binding_result = (|| -> Result<SessionBinding, GatewayError> {
             let mut connection_guard = connection
                 .lock()
-                .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?;
-            let binding = connection_guard.open(&request, created)?;
+                .map_err(|_| GatewayError::session("ACP session connection lock poisoned"))?;
+            let binding = connection_guard.open(&request)?;
             let selection = request.model.selection();
             if let Err(error) = connection_guard.submit(BackendCommand::ModelSelect {
                 run_id: binding.run_id.clone(),
@@ -109,9 +161,7 @@ impl AcpSessionFactory for AcpGatewayTransport {
         let binding = match binding_result {
             Ok(binding) => binding,
             Err(error) => {
-                if created {
-                    remove_registered_connection(&self.trees, &request.tree_id, &connection)?;
-                }
+                remove_registered_connection(&self.connections, &key, &connection)?;
                 return Err(error);
             }
         };
@@ -120,26 +170,36 @@ impl AcpSessionFactory for AcpGatewayTransport {
             id: binding.acp_id,
             session_id: binding.session_id,
             run_id: binding.run_id,
-            tree_id: request.tree_id,
+            key,
             connection,
-            registry: Arc::clone(&self.trees),
+            registry: Arc::clone(&self.connections),
             closed: false,
         }))
     }
 }
 
 pub struct AcpTreeControl {
-    tree_id: SessionTreeId,
     connection: Arc<Mutex<TreeConnection>>,
-    registry: TreeRegistry,
+    registration: ControlRegistration,
     released: bool,
+}
+
+enum ControlRegistration {
+    Session {
+        key: ConnectionKey,
+        registry: ConnectionRegistry,
+    },
+    Control {
+        tree_id: SessionTreeId,
+        registry: ControlRegistry,
+    },
 }
 
 impl AcpTreeControl {
     pub fn submit(&mut self, command: BackendCommand) -> Result<BackendReply, GatewayError> {
         self.connection
             .lock()
-            .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?
+            .map_err(|_| GatewayError::session("ACP session connection lock poisoned"))?
             .submit(command)
     }
 
@@ -147,7 +207,7 @@ impl AcpTreeControl {
         let mut connection = self
             .connection
             .lock()
-            .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?;
+            .map_err(|_| GatewayError::session("ACP session connection lock poisoned"))?;
         connection.drain_available()?;
         Ok(connection.snapshot())
     }
@@ -155,7 +215,7 @@ impl AcpTreeControl {
     pub fn drain_events(&mut self) -> Result<Vec<BackendEvent>, GatewayError> {
         self.connection
             .lock()
-            .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?
+            .map_err(|_| GatewayError::session("ACP session connection lock poisoned"))?
             .drain_control_events()
     }
 
@@ -171,10 +231,17 @@ impl AcpTreeControl {
         let remove_tree = self
             .connection
             .lock()
-            .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?
+            .map_err(|_| GatewayError::session("ACP session connection lock poisoned"))?
             .release_control()?;
         if remove_tree {
-            remove_registered_connection(&self.registry, &self.tree_id, &self.connection)?;
+            match &self.registration {
+                ControlRegistration::Session { key, registry } => {
+                    remove_registered_connection(registry, key, &self.connection)?;
+                }
+                ControlRegistration::Control { tree_id, registry } => {
+                    remove_registered_control(registry, tree_id, &self.connection)?;
+                }
+            }
         }
         Ok(())
     }
@@ -190,9 +257,9 @@ struct GatewayAcpSession {
     id: AcpSessionId,
     session_id: phenix_runtime_api::SessionId,
     run_id: phenix_runtime_api::RunId,
-    tree_id: SessionTreeId,
+    key: ConnectionKey,
     connection: Arc<Mutex<TreeConnection>>,
-    registry: TreeRegistry,
+    registry: ConnectionRegistry,
     closed: bool,
 }
 
@@ -205,10 +272,10 @@ impl GatewayAcpSession {
         let remove_tree = self
             .connection
             .lock()
-            .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?
+            .map_err(|_| GatewayError::session("ACP session connection lock poisoned"))?
             .release(&self.session_id)?;
         if remove_tree {
-            remove_registered_connection(&self.registry, &self.tree_id, &self.connection)?;
+            remove_registered_connection(&self.registry, &self.key, &self.connection)?;
         }
         Ok(())
     }
@@ -234,7 +301,7 @@ impl AcpSession for GatewayAcpSession {
         let mut connection = self
             .connection
             .lock()
-            .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?;
+            .map_err(|_| GatewayError::session("ACP session connection lock poisoned"))?;
         match command {
             SessionCommand::Prompt { text, images } => {
                 connection.submit(BackendCommand::PromptSubmit {
@@ -326,18 +393,35 @@ impl Drop for GatewayAcpSession {
 }
 
 fn remove_registered_connection(
-    registry: &TreeRegistry,
+    registry: &ConnectionRegistry,
+    key: &ConnectionKey,
+    connection: &Arc<Mutex<TreeConnection>>,
+) -> Result<(), GatewayError> {
+    let mut connections = registry
+        .lock()
+        .map_err(|_| GatewayError::session("ACP connection registry lock poisoned"))?;
+    if connections
+        .get(key)
+        .is_some_and(|candidate| Arc::ptr_eq(candidate, connection))
+    {
+        connections.remove(key);
+    }
+    Ok(())
+}
+
+fn remove_registered_control(
+    registry: &ControlRegistry,
     tree_id: &SessionTreeId,
     connection: &Arc<Mutex<TreeConnection>>,
 ) -> Result<(), GatewayError> {
-    let mut trees = registry
+    let mut controls = registry
         .lock()
-        .map_err(|_| GatewayError::session("ACP tree registry lock poisoned"))?;
-    if trees
+        .map_err(|_| GatewayError::session("ACP control registry lock poisoned"))?;
+    if controls
         .get(tree_id)
         .is_some_and(|candidate| Arc::ptr_eq(candidate, connection))
     {
-        trees.remove(tree_id);
+        controls.remove(tree_id);
     }
     Ok(())
 }

@@ -241,13 +241,18 @@ fn backend_models(
         "_phenix/backend/model/list",
         &json!({ "tree_id": tree_id, "backend": backend }),
     )?;
-    Ok(process.receive_response(id)?["result"]["models"].clone())
+    let response = process.receive_response(id)?;
+    response
+        .get("result")
+        .and_then(|result| result.get("models"))
+        .cloned()
+        .ok_or_else(|| format!("backend model list failed: {response}").into())
 }
 
 fn assert_model_catalog(models: &Value, expected: &[&str]) {
     let actual = models
         .as_array()
-        .expect("model list must be an array")
+        .unwrap_or_else(|| panic!("model list must be an array: {models}"))
         .iter()
         .map(|model| format!("{}/{}", model["provider"], model["model"]).replace('"', ""))
         .collect::<Vec<_>>();

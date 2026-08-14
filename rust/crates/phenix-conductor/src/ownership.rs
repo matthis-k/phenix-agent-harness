@@ -2,9 +2,10 @@ use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
     decode_extension_response, encode_extension_request, AcpMethod, ConfigurationDefinitionInput,
     ConfigurationGet, ConfigurationGetResult, ConfigurationLoad, ConfigurationLoadParams,
-    ConfigurationLoadResult, ConfigurationSnapshot, ConfigurationSourceError, GatewayEvent,
-    SessionCommand, SessionNodeId, SessionTreeClose, SessionTreeCreate, SessionTreeCreateParams,
-    SessionTreeId, SessionTreeList, SessionTreeListResult, SessionTreeSnapshot,
+    ConfigurationLoadResult, ConfigurationSnapshot, ConfigurationSourceError, Difficulty,
+    GatewayEvent, RoleId, SessionCommand, SessionNodeId, SessionTreeClose, SessionTreeCreate,
+    SessionTreeCreateParams, SessionTreeId, SessionTreeList, SessionTreeListResult,
+    SessionTreeSnapshot, ToolBinding, ToolInvoker, WorkflowId, WorkflowStartResult,
 };
 use phenix_conductor::{
     BootstrapBackend, BootstrapDefinition, BootstrapStandardSession, ConductorBootstrap,
@@ -31,6 +32,7 @@ pub struct ConductorOwner {
     tree_revisions: BTreeMap<SessionTreeId, u64>,
     next_revision: u64,
     next_tree: u64,
+    tool_invoker: Option<Arc<dyn ToolInvoker>>,
 }
 
 struct RuntimeRevision {
@@ -51,7 +53,13 @@ impl ConductorOwner {
             tree_revisions: BTreeMap::new(),
             next_revision: 1,
             next_tree: 1,
+            tool_invoker: None,
         })
+    }
+
+    pub fn with_tool_invoker(mut self, invoker: Arc<dyn ToolInvoker>) -> Self {
+        self.tool_invoker = Some(invoker);
+        self
     }
 
     pub fn handle_configuration_extension(
@@ -203,6 +211,66 @@ impl ConductorOwner {
             .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
     }
 
+    pub fn delegate_from_tool(
+        &mut self,
+        binding: &ToolBinding,
+        role: RoleId,
+        difficulty: Option<Difficulty>,
+        objective: String,
+    ) -> Result<SessionNodeId, ConductorOwnerError> {
+        self.validate_tool_binding(binding)?;
+        self.runtime_for_tree_mut(&binding.tree_id)?
+            .conductor_mut()
+            .gateway_mut()
+            .delegate(
+                &binding.tree_id,
+                &binding.caller_node,
+                role,
+                difficulty,
+                objective,
+            )
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
+    }
+
+    pub fn execute_node(
+        &mut self,
+        tree_id: &SessionTreeId,
+        node_id: &SessionNodeId,
+        command: SessionCommand,
+    ) -> Result<Vec<GatewayEvent>, ConductorOwnerError> {
+        self.runtime_for_tree_mut(tree_id)?
+            .conductor_mut()
+            .gateway_mut()
+            .execute(tree_id, node_id, command)
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
+    }
+
+    pub fn workflows_from_tool(
+        &self,
+        binding: &ToolBinding,
+    ) -> Result<Vec<phenix_acp::WorkflowSummary>, ConductorOwnerError> {
+        self.validate_tool_binding(binding)?;
+        Ok(self
+            .runtime_for_tree(&binding.tree_id)?
+            .workflows()
+            .to_vec())
+    }
+
+    pub fn start_workflow_from_tool(
+        &mut self,
+        binding: &ToolBinding,
+        workflow: &WorkflowId,
+        difficulty: Option<Difficulty>,
+        objective: String,
+    ) -> Result<WorkflowStartResult, ConductorOwnerError> {
+        self.validate_tool_binding(binding)?;
+        self.runtime_for_tree_mut(&binding.tree_id)?
+            .conductor_mut()
+            .gateway_mut()
+            .start_workflow(&binding.tree_id, workflow, difficulty, objective)
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
+    }
+
     pub fn list_trees(&self) -> SessionTreeListResult {
         let mut trees = self
             .revisions
@@ -211,6 +279,40 @@ impl ConductorOwner {
             .collect::<Vec<_>>();
         trees.sort_by(|left, right| left.tree_id.cmp(&right.tree_id));
         SessionTreeListResult { trees }
+    }
+
+    fn validate_tool_binding(&self, binding: &ToolBinding) -> Result<(), ConductorOwnerError> {
+        let revision = self
+            .tree_revisions
+            .get(&binding.tree_id)
+            .copied()
+            .ok_or_else(|| ConductorOwnerError::UnknownTree(binding.tree_id.clone()))?;
+        if revision != binding.revision {
+            return Err(ConductorOwnerError::StaleToolBinding {
+                tree: binding.tree_id.clone(),
+                expected_revision: revision,
+                actual_revision: binding.revision,
+            });
+        }
+        let snapshot = self.snapshot_tree(&binding.tree_id)?;
+        if snapshot.root != binding.caller_node {
+            return Err(ConductorOwnerError::ToolCallerDenied(
+                binding.caller_node.clone(),
+            ));
+        }
+        let caller = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == binding.caller_node)
+            .ok_or_else(|| ConductorOwnerError::ToolCallerDenied(binding.caller_node.clone()))?;
+        if caller.role != binding.caller_role
+            || !matches!(caller.state, phenix_acp::SessionNodeState::Running)
+        {
+            return Err(ConductorOwnerError::ToolCallerDenied(
+                binding.caller_node.clone(),
+            ));
+        }
+        Ok(())
     }
 
     fn create_tree_extension(
@@ -267,9 +369,16 @@ impl ConductorOwner {
         // Construct the complete revision before publishing it. A failed parse,
         // validation, backend construction, or transport setup leaves active state
         // unchanged.
-        let runtime = bootstrap
-            .build(&self.cwd, self.channel_capacity)
-            .map_err(|error| ConductorOwnerError::Build(error.to_string()))?;
+        let runtime = match &self.tool_invoker {
+            Some(invoker) => bootstrap.build_with_tool_service(
+                &self.cwd,
+                self.channel_capacity,
+                revision,
+                Arc::clone(invoker),
+            ),
+            None => bootstrap.build(&self.cwd, self.channel_capacity),
+        }
+        .map_err(|error| ConductorOwnerError::Build(error.to_string()))?;
         let mut snapshot = snapshot;
         snapshot.workflows = runtime.workflows().to_vec();
         let result = ConfigurationLoadResult {
@@ -511,6 +620,12 @@ pub enum ConductorOwnerError {
     UnknownRevision(u64),
     UnknownTree(SessionTreeId),
     DuplicateTree(SessionTreeId),
+    StaleToolBinding {
+        tree: SessionTreeId,
+        expected_revision: u64,
+        actual_revision: u64,
+    },
+    ToolCallerDenied(SessionNodeId),
     MissingTreeTarget(String),
     InvalidTreeTarget(String),
     IdentifierExhausted,
@@ -546,6 +661,17 @@ impl Display for ConductorOwnerError {
             }
             Self::UnknownTree(tree) => write!(formatter, "unknown Phenix session tree {tree}"),
             Self::DuplicateTree(tree) => write!(formatter, "duplicate Phenix session tree {tree}"),
+            Self::StaleToolBinding {
+                tree,
+                expected_revision,
+                actual_revision,
+            } => write!(
+                formatter,
+                "tool binding for tree {tree} targets revision {actual_revision}, but the tree is bound to revision {expected_revision}"
+            ),
+            Self::ToolCallerDenied(node) => {
+                write!(formatter, "session node {node} is not authorized to invoke conductor tools")
+            }
             Self::MissingTreeTarget(method) => {
                 write!(formatter, "Phenix ACP method {method} requires tree_id")
             }
@@ -614,6 +740,8 @@ impl Error for ConductorOwnerError {
             | Self::UnknownRevision(_)
             | Self::UnknownTree(_)
             | Self::DuplicateTree(_)
+            | Self::StaleToolBinding { .. }
+            | Self::ToolCallerDenied(_)
             | Self::MissingTreeTarget(_)
             | Self::InvalidTreeTarget(_)
             | Self::IdentifierExhausted
@@ -653,8 +781,8 @@ mod tests {
             definition_id: phenix_acp::DefinitionId::parse("default").expect("definition"),
             router: RouterId::parse("default").expect("router"),
             backends: vec![ConfigurationBackendInput {
-                id: BackendId::parse("pi").expect("backend"),
-                command: "pi --mode acp".to_owned(),
+                id: BackendId::parse("backend").expect("backend"),
+                command: "example-acp-agent --stdio".to_owned(),
                 environment: BTreeMap::new(),
             }],
             definitions: Vec::new(),

@@ -273,8 +273,8 @@ mod tests {
 
     fn backend() -> BackendDefinition {
         BackendDefinition::new(
-            BackendId::parse("pi").expect("backend ID"),
-            AcpEndpoint::stdio("pi-acp", Vec::new(), BTreeMap::new()).expect("endpoint"),
+            BackendId::parse("backend").expect("backend ID"),
+            AcpEndpoint::stdio("example-acp-agent", Vec::new(), BTreeMap::new()).expect("endpoint"),
         )
     }
 

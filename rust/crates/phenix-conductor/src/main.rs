@@ -11,11 +11,18 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{Agent, Client, ConnectionTo, Stdio};
 use base64::Engine;
 use clap::Parser;
+#[cfg(feature = "builtin-runtime")]
+use clap::Subcommand;
 use ownership::ConductorOwner;
-use phenix_acp::{GatewayEvent, SessionCommand, SessionEvent, SessionImage};
+use phenix_acp::{
+    GatewayEvent, SessionCommand, SessionEvent, SessionImage, ToolBinding, ToolInvocation,
+    ToolInvocationError, ToolInvoker,
+};
+use serde_json::{json, Value};
 use std::error::Error;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 use subscriptions::SubscriptionHub;
 
@@ -29,6 +36,10 @@ const PROMPT_POLL_PERIOD: Duration = Duration::from_millis(20);
     about = "Phenix ACP aggregate manager and configuration owner"
 )]
 struct Arguments {
+    #[cfg(feature = "builtin-runtime")]
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// Working directory passed to downstream ACP agents and used for relative source roots.
     #[arg(long, value_name = "DIR")]
     cwd: Option<PathBuf>,
@@ -38,17 +49,32 @@ struct Arguments {
     channel_capacity: usize,
 }
 
+#[cfg(feature = "builtin-runtime")]
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Run the default Phenix-owned provider runtime as a standard ACP agent.
+    Runtime(phenix_acp_runtime::RuntimeArguments),
+}
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     let arguments = Arguments::parse();
+    #[cfg(feature = "builtin-runtime")]
+    if let Some(Command::Runtime(runtime)) = arguments.command {
+        return phenix_acp_runtime::run(runtime).await;
+    }
     let cwd = match arguments.cwd {
         Some(cwd) => cwd,
         None => std::env::current_dir()?,
     };
-    let runtime = Arc::new(Mutex::new(ConductorOwner::new(
-        cwd,
-        arguments.channel_capacity,
-    )?));
+    let (tool_sender, tool_requests) = mpsc::channel();
+    let tool_invoker = Arc::new(ChannelToolInvoker {
+        requests: tool_sender,
+    });
+    let runtime = Arc::new(Mutex::new(
+        ConductorOwner::new(cwd, arguments.channel_capacity)?.with_tool_invoker(tool_invoker),
+    ));
+    let _tool_dispatcher = spawn_tool_dispatcher(Arc::downgrade(&runtime), tool_requests)?;
     let request_runtime = Arc::clone(&runtime);
     let cancel_runtime = Arc::clone(&runtime);
     let subscriptions = SubscriptionHub::new();
@@ -148,6 +174,148 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect_to(Stdio::new())
         .await?;
     Ok(())
+}
+
+struct ToolRequest {
+    binding: ToolBinding,
+    invocation: ToolInvocation,
+    response: SyncSender<Result<Value, ToolInvocationError>>,
+}
+
+struct ChannelToolInvoker {
+    requests: mpsc::Sender<ToolRequest>,
+}
+
+impl ToolInvoker for ChannelToolInvoker {
+    fn invoke(
+        &self,
+        binding: &ToolBinding,
+        invocation: ToolInvocation,
+    ) -> Result<Value, ToolInvocationError> {
+        let (response, result) = mpsc::sync_channel(1);
+        self.requests
+            .send(ToolRequest {
+                binding: binding.clone(),
+                invocation,
+                response,
+            })
+            .map_err(|_| ToolInvocationError::new("conductor tool dispatcher has stopped"))?;
+        result
+            .recv()
+            .map_err(|_| ToolInvocationError::new("conductor tool result channel closed"))?
+    }
+}
+
+fn spawn_tool_dispatcher(
+    runtime: Weak<Mutex<ConductorOwner>>,
+    requests: Receiver<ToolRequest>,
+) -> Result<std::thread::JoinHandle<()>, std::io::Error> {
+    std::thread::Builder::new()
+        .name("phenix-model-tools".to_owned())
+        .spawn(move || {
+            while let Ok(request) = requests.recv() {
+                let result = dispatch_model_tool(&runtime, &request.binding, request.invocation);
+                let _ = request.response.send(result);
+            }
+        })
+}
+
+fn dispatch_model_tool(
+    runtime: &Weak<Mutex<ConductorOwner>>,
+    binding: &ToolBinding,
+    invocation: ToolInvocation,
+) -> Result<Value, ToolInvocationError> {
+    match invocation {
+        ToolInvocation::Delegate {
+            role,
+            objective,
+            prompt,
+            difficulty,
+        } => {
+            if objective.trim().is_empty() || prompt.trim().is_empty() {
+                return Err(ToolInvocationError::new(
+                    "delegation objective and prompt must not be empty",
+                ));
+            }
+            let node_id = with_tool_owner(runtime, |owner| {
+                owner.delegate_from_tool(binding, role, difficulty, objective)
+            })?;
+            let mut events = with_tool_owner(runtime, |owner| {
+                owner.execute_node(
+                    &binding.tree_id,
+                    &node_id,
+                    SessionCommand::Prompt {
+                        text: prompt,
+                        images: Vec::new(),
+                    },
+                )
+            })?;
+            let mut transcript = Vec::new();
+            loop {
+                let mut completed = false;
+                for event in events {
+                    match &event.event {
+                        SessionEvent::Text { text } => transcript.push(text.clone()),
+                        SessionEvent::Completed => completed = true,
+                        SessionEvent::Failed { message } => {
+                            return Err(ToolInvocationError::new(format!(
+                                "delegated node {node_id} failed: {message}"
+                            )));
+                        }
+                        SessionEvent::Cancelled { reason } => {
+                            return Err(ToolInvocationError::new(format!(
+                                "delegated node {node_id} was cancelled: {reason}"
+                            )));
+                        }
+                        _ => {}
+                    }
+                }
+                if completed {
+                    return Ok(json!({
+                        "node_id": node_id,
+                        "output": transcript.join("")
+                    }));
+                }
+                std::thread::sleep(PROMPT_POLL_PERIOD);
+                events =
+                    with_tool_owner(runtime, |owner| owner.poll_node(&binding.tree_id, &node_id))?;
+            }
+        }
+        ToolInvocation::WorkflowList => {
+            let workflows = with_tool_owner(runtime, |owner| owner.workflows_from_tool(binding))?;
+            serde_json::to_value(workflows)
+                .map_err(|error| ToolInvocationError::new(error.to_string()))
+        }
+        ToolInvocation::WorkflowStart {
+            workflow,
+            objective,
+            difficulty,
+        } => {
+            if objective.trim().is_empty() {
+                return Err(ToolInvocationError::new(
+                    "workflow objective must not be empty",
+                ));
+            }
+            let result = with_tool_owner(runtime, |owner| {
+                owner.start_workflow_from_tool(binding, &workflow, difficulty, objective)
+            })?;
+            serde_json::to_value(result)
+                .map_err(|error| ToolInvocationError::new(error.to_string()))
+        }
+    }
+}
+
+fn with_tool_owner<T>(
+    runtime: &Weak<Mutex<ConductorOwner>>,
+    operation: impl FnOnce(&mut ConductorOwner) -> Result<T, ownership::ConductorOwnerError>,
+) -> Result<T, ToolInvocationError> {
+    let runtime = runtime
+        .upgrade()
+        .ok_or_else(|| ToolInvocationError::new("conductor runtime has stopped"))?;
+    let mut owner = runtime
+        .lock()
+        .map_err(|_| ToolInvocationError::new("conductor runtime lock poisoned"))?;
+    operation(&mut owner).map_err(|error| ToolInvocationError::new(error.to_string()))
 }
 
 fn dispatch_extension(

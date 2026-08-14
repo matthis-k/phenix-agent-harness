@@ -14,7 +14,7 @@ use phenix_acp::{
     DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, Difficulty, GatewayError,
     GatewayEvent, ModelId, PhenixAcpGateway, PhenixConductor, ProviderId, RoleId, RouterId,
     SessionCommand, SessionNodeId, SessionTreeDefinition, SessionTreeId, ToolConfiguration,
-    WorkflowSummary,
+    ToolInvoker, WorkflowSummary,
 };
 use phenix_acp_backend::{
     AcpAgentBackend, AcpBackendConfig, AcpGatewayTransport, ConfigError as BackendConfigError,
@@ -339,6 +339,25 @@ impl ConductorBootstrap {
         cwd: &Path,
         channel_capacity: usize,
     ) -> Result<ConductorRuntime, BootstrapError> {
+        self.build_internal(cwd, channel_capacity, None)
+    }
+
+    pub fn build_with_tool_service(
+        self,
+        cwd: &Path,
+        channel_capacity: usize,
+        revision: u64,
+        invoker: Arc<dyn ToolInvoker>,
+    ) -> Result<ConductorRuntime, BootstrapError> {
+        self.build_internal(cwd, channel_capacity, Some((revision, invoker)))
+    }
+
+    fn build_internal(
+        self,
+        cwd: &Path,
+        channel_capacity: usize,
+        tool_service: Option<(u64, Arc<dyn ToolInvoker>)>,
+    ) -> Result<ConductorRuntime, BootstrapError> {
         if channel_capacity == 0 {
             return Err(BootstrapError::InvalidChannelCapacity);
         }
@@ -442,6 +461,9 @@ impl ConductorBootstrap {
         let mut builder = PhenixAcpGateway::builder()
             .definition(definition)?
             .router(self.router.clone(), routing.clone())?;
+        if let Some((revision, invoker)) = tool_service {
+            builder = builder.tool_service(revision, invoker);
+        }
         for workflow in workflows {
             builder = builder.workflow(workflow.id().clone(), workflow)?;
         }

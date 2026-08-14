@@ -485,11 +485,11 @@ id: phenix.implement
     {
       "role": "*",
       "workflow": "*",
-      "d0": "pi/openai/gpt-5.6-sol/minimal",
-      "d1": "pi/openai/gpt-5.6-sol/low",
-      "d2": "pi/openai/gpt-5.6-sol/medium",
-      "d3": "pi/openai/gpt-5.6-sol/high",
-      "d4": "pi/openai/gpt-5.6-sol/max",
+      "d0": "backend/openai/gpt-5.6-sol/minimal",
+      "d1": "backend/openai/gpt-5.6-sol/low",
+      "d2": "backend/openai/gpt-5.6-sol/medium",
+      "d3": "backend/openai/gpt-5.6-sol/high",
+      "d4": "backend/openai/gpt-5.6-sol/max",
       "explanation": "Default route"
     }
   ]
@@ -513,11 +513,11 @@ objective = "Implement {objective}"
     (
       role: "*",
       workflow: "*",
-      d0: "pi/openai/gpt-5.6-sol/minimal",
-      d1: "pi/openai/gpt-5.6-sol/low",
-      d2: "pi/openai/gpt-5.6-sol/medium",
-      d3: "pi/openai/gpt-5.6-sol/high",
-      d4: "pi/openai/gpt-5.6-sol/max",
+      d0: "backend/openai/gpt-5.6-sol/minimal",
+      d1: "backend/openai/gpt-5.6-sol/low",
+      d2: "backend/openai/gpt-5.6-sol/medium",
+      d3: "backend/openai/gpt-5.6-sol/high",
+      d4: "backend/openai/gpt-5.6-sol/max",
       explanation: "Default route",
     ),
   ]),

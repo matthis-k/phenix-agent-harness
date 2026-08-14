@@ -895,8 +895,8 @@ id: phenix.capability-budget
 
 | Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |
 |---|---|---|---|---|---|---|---|
-| `verifier` | `phenix.implement` | `pi/anthropic/sonnet/low` | `pi/anthropic/sonnet/medium` | `pi/anthropic/sonnet/high` | `pi/anthropic/opus/high` | `pi/anthropic/opus/max` | Strong verification route |
-| `*` | `*` | `pi/openai/gpt-5.6-luna/minimal` | `pi/openai/gpt-5.6-luna/low` | `pi/openai/gpt-5.6-sol/medium` | `pi/openai/gpt-5.6-sol/high` | `pi/openai/gpt-5.6-sol/max` | Default route |
+| `verifier` | `phenix.implement` | `backend/anthropic/sonnet/low` | `backend/anthropic/sonnet/medium` | `backend/anthropic/sonnet/high` | `backend/anthropic/opus/high` | `backend/anthropic/opus/max` | Strong verification route |
+| `*` | `*` | `backend/openai/gpt-5.6-luna/minimal` | `backend/openai/gpt-5.6-luna/low` | `backend/openai/gpt-5.6-sol/medium` | `backend/openai/gpt-5.6-sol/high` | `backend/openai/gpt-5.6-sol/max` | Default route |
 "#;
 
     #[test]
@@ -941,11 +941,11 @@ id: phenix.capability-budget
                 difficulty: Difficulty::D3,
                 objective: "verify".to_owned(),
                 workflow: Some(WorkflowId::parse("phenix.implement").expect("workflow")),
-                available_backends: vec![BackendId::parse("pi").expect("backend")],
+                available_backends: vec![BackendId::parse("backend").expect("backend")],
             })
             .expect("route");
         assert_eq!(decision.difficulty, Difficulty::D3);
-        assert_eq!(decision.model.backend.as_str(), "pi");
+        assert_eq!(decision.model.backend.as_str(), "backend");
         assert_eq!(decision.model.provider.as_str(), "anthropic");
         assert_eq!(decision.model.model.as_str(), "opus");
         assert_eq!(decision.model.thinking, ThinkingLevel::High);
