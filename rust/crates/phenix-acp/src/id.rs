@@ -97,14 +97,18 @@ macro_rules! define_id {
 }
 
 define_id!(AcpSessionId);
+define_id!(ArtifactId);
 define_id!(BackendId);
+define_id!(CallableId);
 define_id!(DefinitionId);
 define_id!(McpServerName);
 define_id!(ModelId);
 define_id!(ObjectiveId);
 define_id!(ProviderId);
 define_id!(RoleId);
+define_id!(RunId);
 define_id!(RouterId);
+define_id!(SchemaId);
 define_id!(SessionNodeId);
 define_id!(SessionTreeId);
 define_id!(ToolId);

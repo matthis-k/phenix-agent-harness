@@ -4,6 +4,7 @@ pub use agent_client_protocol as acp;
 
 mod authoring;
 mod backend;
+mod callable;
 mod client;
 mod conductor;
 mod configuration;
@@ -33,6 +34,10 @@ pub use backend::{
     BackendModelListResult, BackendModelSummary, BackendTargetParams, ExtensionUiCapabilities,
     ModelCapabilities, PromptCapabilities, ResourceCapabilities, SessionCapabilities,
 };
+pub use callable::{
+    ArtifactRef, CallableCatalog, CallableCatalogError, CallableDefinition, CallableExecutor,
+    CallableInput, CallableInvocation, InvocationPolicy, RunFailure, RunOutcome, SelectionMetadata,
+};
 pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
 };
@@ -49,8 +54,9 @@ pub use definition::{
     SessionTreeDefinitionBuilder,
 };
 pub use id::{
-    AcpSessionId, BackendId, DefinitionId, IdError, McpServerName, ModelId, ObjectiveId,
-    ProviderId, RoleId, RouterId, SessionNodeId, SessionTreeId, ToolId, WorkflowId,
+    AcpSessionId, ArtifactId, BackendId, CallableId, DefinitionId, IdError, McpServerName, ModelId,
+    ObjectiveId, ProviderId, RoleId, RouterId, RunId, SchemaId, SessionNodeId, SessionTreeId,
+    ToolId, WorkflowId,
 };
 pub use protocol::{
     AcpMethod, AcpNotification, Difficulty, EmptyResult, ModelConfig, ModelSelection,
