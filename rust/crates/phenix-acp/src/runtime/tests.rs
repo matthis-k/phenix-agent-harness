@@ -254,14 +254,17 @@ fn selecting_a_model_updates_the_downstream_session_and_tree_projection() {
 
     let snapshot = gateway.snapshot(&root.tree_id).expect("snapshot");
     assert_eq!(snapshot.nodes[0].model, selected);
-    assert!(factory.commands.lock().expect("command log").iter().any(
-        |(_, command)| matches!(
+    assert!(factory
+        .commands
+        .lock()
+        .expect("command log")
+        .iter()
+        .any(|(_, command)| matches!(
             command,
             SessionCommand::SetModel { model }
                 if model.provider.as_str() == "selected-provider"
                     && model.model.as_str() == "selected-model"
-        )
-    ));
+        )));
 }
 
 #[test]
