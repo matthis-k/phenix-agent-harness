@@ -39,7 +39,10 @@ impl CodexOAuth {
     pub(crate) async fn auth_data(&self) -> Result<Option<AuthData>, String> {
         let _guard = self.refresh_lock.lock().await;
         let Some(credential) = self.store.resolve(PROVIDER)? else {
-            return Ok(None);
+            return Err(
+                "openai-codex is not authenticated; use Phenix authentication and choose OpenAI Codex (ChatGPT Plus) [OAuth]"
+                    .to_owned(),
+            );
         };
         let credential = match credential {
             StoredCredential::OAuth { expires_at, .. }
@@ -391,5 +394,23 @@ mod tests {
 
         let _ = std::fs::remove_file(directory.join("credentials.json"));
         let _ = std::fs::remove_dir(directory);
+    }
+
+    #[tokio::test]
+    async fn missing_oauth_never_falls_through_to_an_api_key_resolver() {
+        let directory = std::env::temp_dir().join(format!(
+            "phenix-runtime-missing-oauth-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let store = CredentialStore {
+            path: directory.join("credentials.json"),
+        };
+        let error = CodexOAuth::new(store)
+            .auth_data()
+            .await
+            .expect_err("missing OAuth must fail explicitly");
+        assert!(error.contains("openai-codex is not authenticated"));
+        assert!(!error.contains("OPENAI_API_KEY"));
     }
 }

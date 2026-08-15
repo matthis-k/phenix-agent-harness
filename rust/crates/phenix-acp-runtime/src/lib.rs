@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-const DEFAULT_MODEL: &str = "openai-responses/gpt-5.1";
+const DEFAULT_MODEL: &str = "openai-codex/gpt-5.6-terra";
 const MAX_TOOL_ROUNDS: usize = 32;
 
 #[derive(Debug, Args)]
@@ -373,7 +373,7 @@ async fn execute_prompt(
         let mut stream = provider
             .exec_chat_stream(&provider_model, request, Some(&options))
             .await
-            .map_err(|error| format!("provider request failed: {error}"))?;
+            .map_err(|error| provider_request_error(&model, error))?;
         let mut captured = None;
         while let Some(event) = stream.stream.next().await {
             if cancelled.load(Ordering::Acquire) {
@@ -697,64 +697,76 @@ struct ProviderSpec {
     id: &'static str,
     name: &'static str,
     credential_name: &'static str,
+    description: &'static str,
 }
 
 fn provider_specs() -> &'static [ProviderSpec] {
     &[
         ProviderSpec {
             id: "openai-codex",
-            name: "OpenAI Codex (ChatGPT)",
+            name: "OpenAI Codex (ChatGPT Plus) [OAuth]",
             credential_name: "openai-codex",
+            description: "OAuth · ChatGPT subscription access through browser sign-in; no OpenAI API key is used",
         },
         ProviderSpec {
             id: "openai",
-            name: "OpenAI",
+            name: "OpenAI [API key]",
             credential_name: "openai",
+            description: "API key · OpenAI API billing; this is separate from a ChatGPT subscription",
         },
         ProviderSpec {
             id: "openai-responses",
-            name: "OpenAI Responses",
+            name: "OpenAI Responses API [API key]",
             credential_name: "openai_resp",
+            description: "API key · OpenAI API billing via a stored credential or OPENAI_API_KEY; ChatGPT OAuth does not apply",
         },
         ProviderSpec {
             id: "anthropic",
-            name: "Anthropic",
+            name: "Anthropic [API key]",
             credential_name: "anthropic",
+            description: "API key · stored by the Phenix runtime or read from the provider environment variable",
         },
         ProviderSpec {
             id: "gemini",
-            name: "Google Gemini",
+            name: "Google Gemini [API key]",
             credential_name: "gemini",
+            description: "API key · stored by the Phenix runtime or read from the provider environment variable",
         },
         ProviderSpec {
             id: "opencode-go",
-            name: "OpenCode Go",
+            name: "OpenCode Go [API key/token]",
             credential_name: "opencode_go",
+            description: "API key or token · stored by the Phenix runtime or read from the provider environment variable",
         },
         ProviderSpec {
             id: "github-copilot",
-            name: "GitHub Copilot",
+            name: "GitHub Copilot [token]",
             credential_name: "github_copilot",
+            description: "Token · stored by the Phenix runtime or read from the provider environment variable",
         },
         ProviderSpec {
             id: "open-router",
-            name: "OpenRouter",
+            name: "OpenRouter [API key]",
             credential_name: "open_router",
+            description: "API key · stored by the Phenix runtime or read from the provider environment variable",
         },
         ProviderSpec {
             id: "deepseek",
-            name: "DeepSeek",
+            name: "DeepSeek [API key]",
             credential_name: "deepseek",
+            description: "API key · stored by the Phenix runtime or read from the provider environment variable",
         },
         ProviderSpec {
             id: "groq",
-            name: "Groq",
+            name: "Groq [API key]",
             credential_name: "groq",
+            description: "API key · stored by the Phenix runtime or read from the provider environment variable",
         },
         ProviderSpec {
             id: "xai",
-            name: "xAI",
+            name: "xAI [API key]",
             credential_name: "xai",
+            description: "API key · stored by the Phenix runtime or read from the provider environment variable",
         },
     ]
 }
@@ -765,13 +777,7 @@ fn auth_methods() -> Vec<AuthMethod> {
         .map(|provider| {
             AuthMethod::Terminal(
                 AuthMethodTerminal::new(provider.id, provider.name)
-                    .description(
-                        if provider.id == "openai-codex" {
-                            "Browser OAuth for ChatGPT subscription access; the login command prints the authorization link"
-                        } else {
-                            "Stored by the Phenix runtime; environment credentials are also supported"
-                        },
-                    )
+                    .description(provider.description)
                     .args(vec![
                         "auth".to_owned(),
                         "login".to_owned(),
@@ -780,6 +786,23 @@ fn auth_methods() -> Vec<AuthMethod> {
             )
         })
         .collect()
+}
+
+fn provider_request_error(model: &ModelSelection, error: impl Display) -> String {
+    match model.provider.as_str() {
+        "openai-codex" => format!(
+            "provider request failed for `{}`: ChatGPT Plus uses OAuth through `openai-codex`; authenticate that provider in Phenix and retry. Cause: {error}",
+            model.wire_value()
+        ),
+        "openai-responses" => format!(
+            "provider request failed for `{}`: `openai-responses` uses OpenAI API billing and requires an API key (a saved Phenix credential or OPENAI_API_KEY). ChatGPT Plus OAuth authorizes `openai-codex`, not this provider. Cause: {error}",
+            model.wire_value()
+        ),
+        _ => format!(
+            "provider request failed for `{}`: {error}",
+            model.wire_value()
+        ),
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, agent_client_protocol::Error> {
@@ -810,6 +833,24 @@ mod tests {
                 Ok(provider.credential_name)
             );
         }
+    }
+
+    #[test]
+    fn auth_catalog_distinguishes_chatgpt_oauth_from_openai_api_keys() {
+        let methods = auth_methods();
+        let encoded = serde_json::to_string(&methods).expect("encode auth methods");
+        assert!(encoded.contains("ChatGPT Plus) [OAuth]"));
+        assert!(encoded.contains("OpenAI Responses API [API key]"));
+        assert!(encoded.contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn api_key_route_failure_explains_that_chatgpt_oauth_is_separate() {
+        let model = ModelSelection::parse("openai-responses/gpt-5.6-terra").expect("model");
+        let message = provider_request_error(&model, "OPENAI_API_KEY is missing");
+        assert!(message.contains("OpenAI API billing"));
+        assert!(message.contains("ChatGPT Plus OAuth"));
+        assert!(message.contains("openai-codex"));
     }
 
     #[test]

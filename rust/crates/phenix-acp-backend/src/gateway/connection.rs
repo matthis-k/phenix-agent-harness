@@ -376,16 +376,22 @@ impl TreeConnection {
             BackendEvent::HealthChanged(BackendHealth::Degraded { message }) => {
                 self.push_active(SessionEvent::Text { text: message });
             }
-            BackendEvent::AuthFinished { result, .. } => match result {
+            BackendEvent::AuthFinished {
+                provider_id,
+                result,
+                ..
+            } => match result {
                 Ok(()) => self.push_active(SessionEvent::Text {
-                    text: "authentication completed".to_owned(),
+                    text: format!("authentication completed for {provider_id}\n"),
                 }),
-                Err(message) => self.push_active(SessionEvent::Failed { message }),
+                Err(message) => self.push_active(SessionEvent::Failed {
+                    message: format!("authentication failed for {provider_id}: {message}"),
+                }),
             },
             BackendEvent::ExternalCommandRequested { command, .. } => {
                 self.push_active(SessionEvent::Text {
                     text: format!(
-                        "authentication requires external command: {} {}",
+                        "authentication starting external command: {} {}\n",
                         command.program,
                         command.arguments.join(" ")
                     ),
@@ -393,12 +399,12 @@ impl TreeConnection {
             }
             BackendEvent::AuthPromptRequested { prompt, .. } => {
                 self.push_active(SessionEvent::Text {
-                    text: format!("authentication input required: {prompt:?}"),
+                    text: format!("authentication input required: {prompt:?}\n"),
                 });
             }
             BackendEvent::AuthNotice { notice, .. } => {
                 self.push_active(SessionEvent::Text {
-                    text: format!("authentication: {notice:?}"),
+                    text: format!("authentication: {notice:?}\n"),
                 });
             }
             BackendEvent::StatusChanged { key, text } => {
