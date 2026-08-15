@@ -87,13 +87,13 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
         &json!({
             "sessionId": tree_id,
             "configId": "model",
-            "value": "coordinator/mock/coordinator",
+            "value": "routing/router.black-box",
         }),
     )?;
     let restored = process.receive_response(51)?;
     assert_eq!(
         restored["result"]["configOptions"][0]["currentValue"],
-        "coordinator/mock/coordinator"
+        "routing/router.black-box"
     );
 
     let coordinator_models = backend_models(&mut process, 4, &tree_id, "coordinator")?;
