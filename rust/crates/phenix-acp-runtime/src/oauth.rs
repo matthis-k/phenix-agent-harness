@@ -19,6 +19,10 @@ const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER: &str = "https://auth.openai.com";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
+// The ChatGPT Codex endpoint uses these headers to select its wire protocol and
+// model rollout. This is intentionally independent of Phenix's crate version.
+const CODEX_COMPAT_VERSION: &str = "0.147.0";
+const CODEX_ORIGINATOR: &str = "codex_cli_rs";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const REFRESH_MARGIN_SECONDS: u64 = 5 * 60;
 
@@ -68,8 +72,13 @@ impl CodexOAuth {
             headers: Headers::from([
                 ("Authorization", format!("Bearer {access_token}")),
                 ("ChatGPT-Account-ID", account_id),
-                ("originator", "phenix".to_owned()),
-                ("version", env!("CARGO_PKG_VERSION").to_owned()),
+                ("originator", CODEX_ORIGINATOR.to_owned()),
+                ("version", CODEX_COMPAT_VERSION.to_owned()),
+                (
+                    "User-Agent",
+                    format!("{CODEX_ORIGINATOR}/{CODEX_COMPAT_VERSION}"),
+                ),
+                ("x-phenix-version", env!("CARGO_PKG_VERSION").to_owned()),
             ]),
         }))
     }
@@ -391,6 +400,19 @@ mod tests {
         assert!(headers
             .iter()
             .any(|(name, value)| { name == "ChatGPT-Account-ID" && value == "account-1" }));
+        assert!(headers
+            .iter()
+            .any(|(name, value)| name == "originator" && value == CODEX_ORIGINATOR));
+        assert!(headers
+            .iter()
+            .any(|(name, value)| name == "version" && value == CODEX_COMPAT_VERSION));
+        assert!(headers.iter().any(|(name, value)| {
+            name == "User-Agent"
+                && value == &format!("{CODEX_ORIGINATOR}/{CODEX_COMPAT_VERSION}")
+        }));
+        assert!(headers.iter().any(|(name, value)| {
+            name == "x-phenix-version" && value == env!("CARGO_PKG_VERSION")
+        }));
 
         let _ = std::fs::remove_file(directory.join("credentials.json"));
         let _ = std::fs::remove_dir(directory);
