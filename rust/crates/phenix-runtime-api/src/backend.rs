@@ -19,14 +19,41 @@ pub struct BackendCapabilities {
     pub persistent_sessions: bool,
 }
 
+/// Conductor-owned tool semantics bound to one backend session.
+///
+/// Adapters may translate this provision into a native tool API, MCP, or an
+/// ACP extension, but they must not reinterpret the callable semantics.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BackendRequest {
-    pub execution_id: ExecutionId,
+pub struct ToolProvision {
+    pub callables: Vec<CallableDescriptor>,
+}
+
+impl ToolProvision {
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            callables: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.callables.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackendSessionRequest {
     /// Routing is resolved before reaching a backend adapter. Adapters receive
-    /// one concrete model target and never implement Phenix routing policy.
+    /// one concrete target and never implement Phenix routing policy.
     pub model: ModelTarget,
+    pub tools: ToolProvision,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackendExecutionRequest {
+    pub execution_id: ExecutionId,
     pub prompt: String,
-    pub tools: Vec<CallableDescriptor>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -44,18 +71,29 @@ pub trait BackendEventSink {
     fn emit(&mut self, event: BackendEvent) -> Result<(), BackendError>;
 }
 
+/// One materialized provider/agent session.
+///
+/// Backend session identifiers and transport-specific lifecycle remain adapter
+/// implementation details. The conductor addresses executions by Phenix IDs.
+pub trait BackendSession: Send {
+    fn execute(
+        &mut self,
+        request: BackendExecutionRequest,
+        events: &mut dyn BackendEventSink,
+    ) -> Result<(), BackendError>;
+
+    fn cancel(&mut self, execution_id: &ExecutionId) -> Result<(), BackendError>;
+}
+
 /// Backend adapters translate provider/protocol mechanics only. They do not own
 /// Phenix sessions, workflows, routing, policy or tool semantics.
 pub trait Backend: Send {
     fn capabilities(&self) -> BackendCapabilities;
 
-    fn execute(
+    fn open_session(
         &mut self,
-        request: BackendRequest,
-        events: &mut dyn BackendEventSink,
-    ) -> Result<(), BackendError>;
-
-    fn cancel(&mut self, execution_id: &ExecutionId) -> Result<(), BackendError>;
+        request: BackendSessionRequest,
+    ) -> Result<Box<dyn BackendSession>, BackendError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
