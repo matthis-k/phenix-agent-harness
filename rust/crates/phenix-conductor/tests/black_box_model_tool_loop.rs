@@ -364,7 +364,7 @@ id: router.black-box
 
 | Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |
 |---|---|---|---|---|---|---|---|
-| `coordinator` | `*` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | deterministic coordinator |
+| `coordinator` | `*` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator-unused/off` | deterministic coordinator |
 | `specialist` | `*` | `specialist/mock/specialist/off` | `specialist/mock/specialist/off` | `specialist/mock/specialist/off` | `specialist/mock/specialist/off` | `specialist/mock/specialist/off` | deterministic specialist |
 | `*` | `*` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | fallback coordinator |
 "#;
