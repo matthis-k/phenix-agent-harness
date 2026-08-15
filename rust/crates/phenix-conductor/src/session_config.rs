@@ -1,6 +1,6 @@
 use super::{ConductorRuntime, RuntimeError, StandardSession};
 use crate::routing::SessionRoutingOption;
-use phenix_acp::{BackendId, Difficulty, GatewayError, RoleId, SessionCommand, ThinkingLevel};
+use phenix_acp::{BackendId, Difficulty, GatewayError, RoleId, ThinkingLevel};
 use serde_json::{json, Value};
 
 const MODEL_CONFIG_ID: &str = "model";
@@ -63,12 +63,10 @@ impl ConductorRuntime {
         // Both direct-model and routing-profile selection immediately retarget
         // the root. Only after that succeeds do we commit the policy that will
         // govern every future workflow/delegated node in this tree.
-        self.conductor.gateway_mut().execute(
+        self.conductor.gateway_mut().set_node_model(
             &context.session.tree_id,
             &context.session.root_node_id,
-            SessionCommand::SetModel {
-                model: root_model.selection(),
-            },
+            root_model,
         )?;
         self.routing
             .set_selection(&context.session.tree_id, selection)?;

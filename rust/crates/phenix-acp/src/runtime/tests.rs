@@ -230,6 +230,41 @@ fn separately_configured_trees_own_distinct_downstream_sessions() {
 }
 
 #[test]
+fn selecting_a_model_updates_the_downstream_session_and_tree_projection() {
+    let factory = RecordingFactory::new();
+    let mut gateway = gateway(factory.clone());
+    let root = gateway
+        .create_tree(
+            &definition_id(),
+            RoleId::parse("root").expect("role"),
+            Difficulty::D2,
+            "retarget model",
+        )
+        .expect("tree");
+    let selected = ModelConfig {
+        backend: backend_id(),
+        provider: ProviderId::parse("selected-provider").expect("provider"),
+        model: ModelId::parse("selected-model").expect("model"),
+        thinking: ThinkingLevel::High,
+    };
+
+    gateway
+        .set_node_model(&root.tree_id, &root.root_node_id, selected.clone())
+        .expect("set model");
+
+    let snapshot = gateway.snapshot(&root.tree_id).expect("snapshot");
+    assert_eq!(snapshot.nodes[0].model, selected);
+    assert!(factory.commands.lock().expect("command log").iter().any(
+        |(_, command)| matches!(
+            command,
+            SessionCommand::SetModel { model }
+                if model.provider.as_str() == "selected-provider"
+                    && model.model.as_str() == "selected-model"
+        )
+    ));
+}
+
+#[test]
 fn conductor_tools_are_bound_to_the_root_session_and_not_delegated_siblings() {
     let factory = RecordingFactory::new();
     let mut gateway = PhenixAcpGateway::builder()

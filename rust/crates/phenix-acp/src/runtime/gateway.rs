@@ -478,6 +478,25 @@ impl PhenixAcpGateway {
         )
     }
 
+    /// Retarget a live node and keep the canonical tree projection in sync
+    /// with the downstream ACP session.
+    pub fn set_node_model(
+        &mut self,
+        tree_id: &SessionTreeId,
+        node_id: &SessionNodeId,
+        model: ModelConfig,
+    ) -> Result<Vec<GatewayEvent>, GatewayError> {
+        let events = self.execute(
+            tree_id,
+            node_id,
+            SessionCommand::SetModel {
+                model: model.selection(),
+            },
+        )?;
+        self.node_mut(tree_id, node_id)?.model = model;
+        Ok(events)
+    }
+
     pub fn execute(
         &mut self,
         tree_id: &SessionTreeId,

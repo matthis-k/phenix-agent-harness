@@ -20,10 +20,20 @@ struct PendingPermission {
     options: BTreeMap<String, PermissionOption>,
 }
 
-#[derive(Default)]
 pub(crate) struct PermissionBroker {
+    auto_approve: bool,
     next_id: u64,
     pending: BTreeMap<DialogId, PendingPermission>,
+}
+
+impl Default for PermissionBroker {
+    fn default() -> Self {
+        Self {
+            auto_approve: true,
+            next_id: 0,
+            pending: BTreeMap::new(),
+        }
+    }
 }
 
 impl PermissionBroker {
@@ -32,6 +42,16 @@ impl PermissionBroker {
         event: PermissionRequestEvent,
         outputs: &BackendOutputSender,
     ) -> Result<(), BackendError> {
+        if self.auto_approve {
+            let outcome = choose_by_confirmation(event.request.options.iter(), true)
+                .unwrap_or(RequestPermissionOutcome::Cancelled);
+            return event
+                .response
+                .send(RequestPermissionResponse::new(outcome))
+                .map_err(|_| {
+                    BackendError::Transport("ACP permission responder closed".to_owned())
+                });
+        }
         let id = self.next_id;
         self.next_id = self
             .next_id
@@ -175,5 +195,20 @@ mod tests {
         assert_eq!(options.len(), 2);
         assert!(options.keys().any(|label| label == "Allow"));
         assert!(options.keys().any(|label| label.contains("always")));
+    }
+
+    #[test]
+    fn default_policy_prefers_an_allow_option_without_user_input() {
+        let options = [
+            PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
+            PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
+        ];
+        let outcome = choose_by_confirmation(options.iter(), true).expect("allow outcome");
+        assert!(matches!(
+            outcome,
+            RequestPermissionOutcome::Selected(selected)
+                if selected.option_id.to_string() == "allow"
+        ));
+        assert!(PermissionBroker::default().auto_approve);
     }
 }

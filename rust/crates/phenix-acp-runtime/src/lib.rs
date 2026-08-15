@@ -6,11 +6,9 @@ mod oauth;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, AuthMethod, AuthMethodTerminal, CancelNotification, ClientRequest,
     ContentBlock, ContentChunk, CreateTerminalRequest, InitializeResponse, McpCapabilities,
-    McpServer, PermissionOption, PermissionOptionKind, PromptCapabilities, PromptResponse,
-    ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    SessionNotification, SessionUpdate, StopReason, TerminalOutputRequest, TextContent,
-    ToolCall as AcpToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
-    WaitForTerminalExitRequest,
+    McpServer, PromptCapabilities, PromptResponse, ReleaseTerminalRequest, SessionNotification,
+    SessionUpdate, StopReason, TerminalOutputRequest, TextContent, ToolCall as AcpToolCall,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, WaitForTerminalExitRequest,
 };
 use agent_client_protocol::{Agent, Client as AcpClient, ConnectionTo, Stdio};
 use clap::{Args, Subcommand};
@@ -456,7 +454,7 @@ impl RuntimeTool {
         match self {
             Self::Terminal { .. } => Tool::new("phenix_terminal")
                 .with_description(
-                    "Run a shell command in the session workspace. Use ordinary command-line tools to inspect, search, edit, build, and test the project. Each invocation requires user permission.",
+                    "Run a shell command in the session workspace. Use ordinary command-line tools to inspect, search, edit, build, and test the project.",
                 )
                 .with_schema(json!({
                     "type": "object",
@@ -556,40 +554,6 @@ async fn execute_tool(
             ),
         ))
         .map_err(|error| format!("cannot announce tool call: {error}"))?;
-    let permission = connection
-        .send_request(RequestPermissionRequest::new(
-            session_id.clone(),
-            ToolCallUpdate::new(
-                call_id.to_owned(),
-                ToolCallUpdateFields::new()
-                    .title(tool.name().to_owned())
-                    .kind(tool.kind())
-                    .status(ToolCallStatus::Pending)
-                    .raw_input(arguments.clone()),
-            ),
-            vec![
-                PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
-                PermissionOption::new("reject_once", "Reject", PermissionOptionKind::RejectOnce),
-            ],
-        ))
-        .block_task()
-        .await
-        .map_err(|error| format!("tool permission request failed: {error}"))?;
-    let allowed = matches!(
-        permission.outcome,
-        RequestPermissionOutcome::Selected(selected) if selected.option_id.to_string() == "allow_once"
-    );
-    if !allowed {
-        let result = json!({ "error": "tool call rejected by user" });
-        send_tool_finished(
-            connection,
-            session_id,
-            call_id,
-            ToolCallStatus::Failed,
-            result.clone(),
-        )?;
-        return Ok(result);
-    }
     connection
         .send_notification(SessionNotification::new(
             session_id.clone(),
@@ -854,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn built_in_terminal_is_small_explicit_and_permission_gated() {
+    fn built_in_terminal_is_small_explicit_and_ready_to_execute() {
         let tool = RuntimeTool::Terminal {
             cwd: PathBuf::from("/workspace"),
         };
@@ -867,9 +831,9 @@ mod tests {
                 .and_then(|schema| schema.get("required")),
             Some(&json!(["command"]))
         );
-        assert!(definition
+        assert!(!definition
             .description
             .as_deref()
-            .is_some_and(|description| description.contains("requires user permission")));
+            .is_some_and(|description| description.contains("permission")));
     }
 }

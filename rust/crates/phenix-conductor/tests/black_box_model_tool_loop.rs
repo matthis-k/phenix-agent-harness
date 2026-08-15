@@ -62,6 +62,35 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
     assert_eq!(tree["result"]["nodes"][0]["model"]["provider"], "mock");
     assert_eq!(tree["result"]["nodes"][0]["model"]["model"], "coordinator");
 
+    process.send_request(
+        50,
+        "session/set_config_option",
+        &json!({
+            "sessionId": tree_id,
+            "configId": "model",
+            "value": "coordinator/mock/coordinator-unused",
+        }),
+    )?;
+    let selected = process.receive_response(50)?;
+    assert_eq!(
+        selected["result"]["configOptions"][0]["currentValue"],
+        "coordinator/mock/coordinator-unused"
+    );
+    process.send_request(
+        51,
+        "session/set_config_option",
+        &json!({
+            "sessionId": tree_id,
+            "configId": "model",
+            "value": "coordinator/mock/coordinator",
+        }),
+    )?;
+    let restored = process.receive_response(51)?;
+    assert_eq!(
+        restored["result"]["configOptions"][0]["currentValue"],
+        "coordinator/mock/coordinator"
+    );
+
     let coordinator_models = backend_models(&mut process, 4, &tree_id, "coordinator")?;
     assert_model_catalog(
         &coordinator_models,
