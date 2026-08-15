@@ -13,6 +13,7 @@ pub enum ConductorError {
     UnknownSession(SessionId),
     UnknownExecution(ExecutionId),
     UnknownCallable(CallableId),
+    InvalidChildCallable(CallableId),
     EmptyInput,
 }
 
@@ -22,6 +23,9 @@ impl Display for ConductorError {
             Self::UnknownSession(id) => write!(formatter, "unknown session: {id}"),
             Self::UnknownExecution(id) => write!(formatter, "unknown execution: {id}"),
             Self::UnknownCallable(id) => write!(formatter, "unknown callable: {id}"),
+            Self::InvalidChildCallable(id) => {
+                write!(formatter, "callable cannot create an execution child: {id}")
+            }
             Self::EmptyInput => formatter.write_str("input must not be empty"),
         }
     }
@@ -155,9 +159,10 @@ impl ConductorRuntime {
 
         let target = resolve_child_target(&parent.target, requested_target);
         let kind = match callable.kind {
+            phenix_runtime_api::CallableKind::Agent => ExecutionKind::Agent,
             phenix_runtime_api::CallableKind::Workflow => ExecutionKind::Workflow,
-            phenix_runtime_api::CallableKind::Agent | phenix_runtime_api::CallableKind::Tool => {
-                ExecutionKind::Agent
+            phenix_runtime_api::CallableKind::Tool => {
+                return Err(ConductorError::InvalidChildCallable(callable_id.clone()));
             }
         };
         let child = ExecutionSummary {
@@ -276,14 +281,18 @@ mod tests {
         }
     }
 
-    fn agent(id: &str) -> CallableDescriptor {
+    fn callable(id: &str, kind: CallableKind) -> CallableDescriptor {
         CallableDescriptor {
             id: CallableId::parse(id).unwrap(),
-            kind: CallableKind::Agent,
-            description: "agent".to_owned(),
+            kind,
+            description: "callable".to_owned(),
             input_schema: "{}".to_owned(),
             output_schema: "{}".to_owned(),
         }
+    }
+
+    fn agent(id: &str) -> CallableDescriptor {
+        callable(id, CallableKind::Agent)
     }
 
     #[test]
@@ -344,6 +353,20 @@ mod tests {
             .unwrap();
 
         assert_eq!(child.target, fixed("worker-model"));
+    }
+
+    #[test]
+    fn tools_do_not_create_execution_children() {
+        let mut runtime = ConductorRuntime::new();
+        let tool_id = CallableId::parse("tool.read").unwrap();
+        runtime.register_callable(callable(tool_id.as_str(), CallableKind::Tool));
+        let session = runtime.create_session(None, None, fixed("a")).unwrap();
+        let root = runtime.submit(&session.id, None, "work").unwrap();
+
+        let error = runtime.start_child(&root.id, &tool_id, None).unwrap_err();
+
+        assert_eq!(error, ConductorError::InvalidChildCallable(tool_id));
+        assert_eq!(runtime.snapshot().executions.len(), 1);
     }
 
     #[test]
