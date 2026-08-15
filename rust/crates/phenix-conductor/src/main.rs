@@ -16,6 +16,5 @@ struct Arguments {
 
 fn main() {
     let _arguments = Arguments::parse();
-    let mut runtime = ConductorRuntime::new();
-    runtime.mark_ready();
+    let _runtime = ConductorRuntime::new();
 }
