@@ -40,6 +40,7 @@ use state::{thinking_level_value, AdapterState, PendingPrompt};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -148,7 +149,7 @@ impl AgentBackend for AcpAgentBackend {
             })
             .map_err(|error| BackendError::Start(error.to_string()))?;
 
-        let result = futures::executor::block_on(run_connection(
+        let result = block_on_backend(run_connection(
             agent,
             config,
             startup_requests,
@@ -160,6 +161,17 @@ impl AgentBackend for AcpAgentBackend {
         relay.join().map_err(|_| BackendError::Panicked)?;
         result
     }
+}
+
+fn block_on_backend<F>(future: F) -> Result<(), BackendError>
+where
+    F: Future<Output = Result<(), BackendError>>,
+{
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| BackendError::Start(format!("failed to create async runtime: {error}")))?
+        .block_on(future)
 }
 
 enum InternalEvent {
@@ -1269,5 +1281,15 @@ mod tests {
     fn terminal_auth_uses_the_original_agent_invocation() {
         let invocation = shell_words::split("phenix-conductor runtime").expect("parse invocation");
         assert_eq!(invocation, vec!["phenix-conductor", "runtime"]);
+    }
+
+    #[test]
+    fn backend_async_work_has_a_tokio_reactor() {
+        block_on_backend(async {
+            tokio::runtime::Handle::try_current().expect("backend Tokio runtime");
+            tokio::time::sleep(Duration::ZERO).await;
+            Ok(())
+        })
+        .expect("run backend future");
     }
 }
