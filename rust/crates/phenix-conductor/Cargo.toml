@@ -7,3 +7,4 @@ publish = false
 [dependencies]
 clap.workspace = true
 phenix-runtime-api = { path = "../phenix-runtime-api" }
+serde_json.workspace = true
