@@ -72,10 +72,15 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
         }),
     )?;
     let selected = process.receive_response(50)?;
-    assert_eq!(
-        selected["result"]["configOptions"][0]["currentValue"],
-        "coordinator/mock/coordinator-unused"
-    );
+    let selected_value = selected
+        .get("result")
+        .and_then(|result| result.get("configOptions"))
+        .and_then(Value::as_array)
+        .and_then(|options| options.first())
+        .and_then(|option| option.get("currentValue"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("model selection failed: {selected}"));
+    assert_eq!(selected_value, "coordinator/mock/coordinator-unused");
     process.send_request(
         51,
         "session/set_config_option",
