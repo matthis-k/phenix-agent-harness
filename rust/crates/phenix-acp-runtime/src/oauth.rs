@@ -407,8 +407,7 @@ mod tests {
             .iter()
             .any(|(name, value)| name == "version" && value == CODEX_COMPAT_VERSION));
         assert!(headers.iter().any(|(name, value)| {
-            name == "User-Agent"
-                && value == &format!("{CODEX_ORIGINATOR}/{CODEX_COMPAT_VERSION}")
+            name == "User-Agent" && value == &format!("{CODEX_ORIGINATOR}/{CODEX_COMPAT_VERSION}")
         }));
         assert!(headers.iter().any(|(name, value)| {
             name == "x-phenix-version" && value == env!("CARGO_PKG_VERSION")
