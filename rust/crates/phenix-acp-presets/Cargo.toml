@@ -2,11 +2,11 @@
 name = "phenix-acp-presets"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+publish = false
+
+[[bin]]
+name = "phenix-acp-smoke"
+path = "src/bin/phenix-acp-smoke.rs"
 
 [dependencies]
-futures.workspace = true
 phenix-acp = { path = "../phenix-acp" }
-phenix-acp-backend = { path = "../phenix-acp-backend" }
-serde_json.workspace = true
-shell-words.workspace = true

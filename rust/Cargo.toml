@@ -2,9 +2,7 @@
 resolver = "2"
 members = [
   "crates/phenix-acp",
-  "crates/phenix-acp-backend",
   "crates/phenix-acp-presets",
-  "crates/phenix-acp-runtime",
   "crates/phenix-conductor",
   "crates/phenix-runtime-api",
 ]
@@ -17,22 +15,6 @@ agent-client-protocol = { version = "2.0.0", features = [
   "unstable_session_fork",
   "unstable_mcp_over_acp",
 ] }
-agent-client-protocol-conductor = "2.0.0"
-agent-client-protocol-rmcp = { version = "3.0.0", features = ["unstable_mcp_over_acp"] }
-base64 = "0.22"
-blocking = "1.6"
 clap = { version = "4.5.47", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
-futures = "0.3"
-genai = "0.6.0"
-getrandom = "0.4"
-reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls"] }
-rpassword = "7.4"
-ron = "0.10"
-schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-sha2 = "0.10"
-shell-words = "1.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
-toml = "0.9"
-url = "2"
