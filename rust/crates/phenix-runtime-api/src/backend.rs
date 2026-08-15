@@ -1,4 +1,4 @@
-use crate::{CallableDescriptor, ExecutionId, ModelTarget};
+use crate::{CallableDescriptor, CallableId, ExecutionId, ModelTarget};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -60,15 +60,28 @@ pub struct BackendExecutionRequest {
 pub enum BackendEvent {
     ContentDelta(String),
     ReasoningDelta(String),
-    ToolCall {
-        name: String,
-        arguments_json: String,
-    },
-    Completed,
 }
 
-pub trait BackendEventSink {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolInvocation {
+    pub callable: CallableId,
+    pub arguments_json: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolResult {
+    pub output: String,
+    pub success: bool,
+}
+
+/// Invocation surface supplied by the conductor to a materialized backend
+/// session. Streaming output is emitted through `emit`; model-requested tools
+/// synchronously re-enter the conductor through `invoke_tool` and receive the
+/// conductor-owned result.
+pub trait BackendHost {
     fn emit(&mut self, event: BackendEvent) -> Result<(), BackendError>;
+
+    fn invoke_tool(&mut self, invocation: ToolInvocation) -> Result<ToolResult, BackendError>;
 }
 
 /// One materialized provider/agent session.
@@ -79,7 +92,7 @@ pub trait BackendSession: Send {
     fn execute(
         &mut self,
         request: BackendExecutionRequest,
-        events: &mut dyn BackendEventSink,
+        host: &mut dyn BackendHost,
     ) -> Result<(), BackendError>;
 
     fn cancel(&mut self, execution_id: &ExecutionId) -> Result<(), BackendError>;
