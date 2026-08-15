@@ -1,6 +1,20 @@
+use phenix_conductor::resolve_child_target;
+use phenix_runtime_api::{ExecutionTarget, ModelTarget};
+
 #[test]
-fn conductor_has_no_acp_application_dependency() {
-    let mut runtime = phenix_conductor::ConductorRuntime::new();
-    runtime.mark_ready();
-    assert_eq!(format!("{:?}", runtime.health()), "Ready");
+fn direct_model_target_cannot_fall_back_into_routing() {
+    let fixed = ExecutionTarget::Fixed {
+        model: ModelTarget {
+            backend: "backend".to_owned(),
+            provider: "provider".to_owned(),
+            model: "model".to_owned(),
+        },
+    };
+    let child = resolve_child_target(
+        &fixed,
+        Some(ExecutionTarget::Routed {
+            profile: "mixed".to_owned(),
+        }),
+    );
+    assert_eq!(child, fixed);
 }
