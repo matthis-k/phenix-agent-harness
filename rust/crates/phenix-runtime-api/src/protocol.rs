@@ -173,3 +173,26 @@ pub enum ServerEvent {
     Execution { event: ExecutionEvent },
     SnapshotChanged { snapshot: RuntimeSnapshot },
 }
+
+/// Line-delimited frontend request envelope. This is intentionally Phenix-owned
+/// rather than JSON-RPC/ACP-shaped; transport details may change independently.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FrontendRequest {
+    pub id: u64,
+    pub command: ClientCommand,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FrontendError {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FrontendResponse {
+    pub id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ServerReply>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<FrontendError>,
+}
