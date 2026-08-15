@@ -24,7 +24,7 @@ impl ConductorRuntime {
         &mut self,
         session_id: &str,
         config_id: &str,
-        value: &Value,
+        value: &str,
     ) -> Result<Value, RuntimeError> {
         if config_id != MODEL_CONFIG_ID {
             return Err(GatewayError::routing(format!(
@@ -32,11 +32,6 @@ impl ConductorRuntime {
             ))
             .into());
         }
-        let value = value.as_str().ok_or_else(|| {
-            GatewayError::routing(format!(
-                "standard ACP session config option {MODEL_CONFIG_ID:?} requires a string value"
-            ))
-        })?;
         let context = self.standard_session_routing_context(session_id)?;
         let selection = self.routing.resolve_selection(
             &context.session.tree_id,

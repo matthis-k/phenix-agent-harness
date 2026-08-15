@@ -26,8 +26,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "configOptions": fixture_config_options(),
                     }),
                     ClientRequest::SetSessionConfigOptionRequest(request) => {
-                        let value = serde_json::to_value(&request.value)
-                            .map_err(agent_client_protocol::Error::into_internal_error)?;
+                        let value = request
+                            .value
+                            .as_value_id()
+                            .map(ToString::to_string)
+                            .unwrap_or_default();
                         json!({
                             "configOptions": fixture_config_options_with(
                                 &request.config_id.to_string(),
@@ -66,17 +69,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn fixture_config_options() -> Value {
-    fixture_config_options_with("", &Value::Null)
+    fixture_config_options_with("", "")
 }
 
-fn fixture_config_options_with(config_id: &str, value: &Value) -> Value {
+fn fixture_config_options_with(config_id: &str, value: &str) -> Value {
     let selected_model = if config_id == "model" {
-        value.as_str().unwrap_or("provider/model")
+        value
     } else {
         "provider/model"
     };
     let selected_thinking = if config_id == "thinking" {
-        value.as_str().unwrap_or("medium")
+        value
     } else {
         "medium"
     };

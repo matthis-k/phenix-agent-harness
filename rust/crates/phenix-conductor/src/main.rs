@@ -124,8 +124,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     ClientRequest::SetSessionConfigOptionRequest(request) => {
                         let session_id = request.session_id.to_string();
                         let config_id = request.config_id.to_string();
-                        let value = serde_json::to_value(&request.value)
-                            .map_err(agent_client_protocol::Error::into_internal_error)?;
+                        let value = request
+                            .value
+                            .as_value_id()
+                            .ok_or_else(|| {
+                                agent_client_protocol::Error::invalid_params()
+                                    .data("select configuration options require a value ID")
+                            })?
+                            .to_string();
                         let config_options = lock_runtime(&request_runtime)?
                             .set_standard_session_config_option(&session_id, &config_id, &value)
                             .map_err(|error| {

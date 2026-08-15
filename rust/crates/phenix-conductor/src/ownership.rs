@@ -140,7 +140,7 @@ impl ConductorOwner {
         &mut self,
         session_id: &str,
         config_id: &str,
-        value: &serde_json::Value,
+        value: &str,
     ) -> Result<serde_json::Value, ConductorOwnerError> {
         let tree_id = parse_tree_id(session_id)?;
         self.runtime_for_tree_mut(&tree_id)?
