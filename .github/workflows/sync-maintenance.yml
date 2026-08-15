@@ -27,7 +27,6 @@ jobs:
         run: |
           set -euo pipefail
           nix run .#phenix-maintenance -- fix
-          cargo metadata --manifest-path rust/Cargo.toml --format-version 1 >/dev/null
           git diff --check
 
       - name: Commit autofixes
