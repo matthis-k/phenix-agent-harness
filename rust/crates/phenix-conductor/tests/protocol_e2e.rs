@@ -82,7 +82,10 @@ fn journal_replay_restart_continues_protocol_with_monotonic_ids_and_events() {
     assert!(before.response_ok(2));
     assert!(before.response_ok(3));
     assert_eq!(before.backend.prompts(), vec!["before restart"]);
-    assert_eq!(before.only_execution_state(), Some(&ExecutionState::Completed));
+    assert_eq!(
+        before.only_execution_state(),
+        Some(&ExecutionState::Completed)
+    );
     let before_restart = before.snapshot.clone();
     let session_id = before_restart.sessions[0].id.clone();
     let cursor = before_restart.last_event_sequence;
