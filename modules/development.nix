@@ -77,6 +77,12 @@
           test = "protocol_e2e";
           label = "conductor / protocol_e2e";
         }
+        {
+          id = "conductor-runtime-edge-cases";
+          package = "phenix-conductor";
+          test = "runtime_edge_cases";
+          label = "conductor / runtime_edge_cases";
+        }
       ];
 
       cargoTestTargets = integrationTargets ++ systemTargets;

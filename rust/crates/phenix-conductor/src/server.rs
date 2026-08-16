@@ -1,6 +1,6 @@
 use crate::{
-    ConductorError, ConductorRuntime, ExecutionPayload, ExecutionProviderError, JsonFileStore,
-    PersistenceError, ResolvedInvocation,
+    ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload, ExecutionProviderError,
+    JsonFileStore, PersistenceError, ResolvedInvocation,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
@@ -82,7 +82,7 @@ impl ConductorServer {
 
     pub fn load_or_new(store: JsonFileStore) -> Result<Self, ServerError> {
         let runtime = match store.load() {
-            Ok(checkpoint) => ConductorRuntime::restore(checkpoint)?,
+            Ok(journal) => ConductorRuntime::restore(journal)?,
             Err(PersistenceError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
                 ConductorRuntime::new()
             }
@@ -290,10 +290,10 @@ impl ConductorServer {
             Command::Submit { .. } => unreachable!("submit handled before dispatch"),
         };
 
-        self.respond(output, id, reply)?;
         if persist {
             self.persist()?;
         }
+        self.respond(output, id, reply)?;
         Ok(())
     }
 
@@ -313,6 +313,7 @@ impl ConductorServer {
             }
         };
         let execution_id = execution.id.clone();
+        self.persist()?;
         self.respond(
             output,
             request_id,
@@ -320,9 +321,12 @@ impl ConductorServer {
                 execution: execution.clone(),
             }),
         )?;
-        self.persist()?;
 
-        let resolved = match self.lock_runtime()?.resolve_invocation(&execution_id) {
+        let resolved = {
+            let mut runtime = self.lock_runtime()?;
+            runtime.resolve_invocation(&execution_id)
+        };
+        let resolved = match resolved {
             Ok(resolved) => resolved,
             Err(error) => {
                 self.fail_execution(&execution_id, map_conductor_error(error))?;
@@ -330,6 +334,10 @@ impl ConductorServer {
                 return Ok(());
             }
         };
+        // A routed decision is durable audit state. Persist it before any
+        // backend session can observe or execute the resolved invocation.
+        self.persist()?;
+
         let backend_id = resolved.model.backend.clone();
         let Some(backend) = self.backends.get(&backend_id).cloned() else {
             self.fail_execution(
@@ -650,12 +658,13 @@ fn persist_shared(
     };
     let _persist_guard = persist_lock
         .lock()
-        .map_err(|_| PersistenceError::InvalidFormat("persistence lock poisoned".to_owned()))?;
-    let checkpoint = runtime
+        .map_err(|_| PersistenceError::InvalidJournal("persistence lock poisoned".to_owned()))?;
+    let journal = runtime
         .lock()
-        .map_err(|_| PersistenceError::InvalidFormat("runtime lock poisoned".to_owned()))?
-        .checkpoint();
-    store.save(&checkpoint)
+        .map_err(|_| PersistenceError::InvalidJournal("runtime lock poisoned".to_owned()))?
+        .journal()
+        .clone();
+    store.save(&journal)
 }
 
 struct SharedRuntimeHost {
@@ -725,12 +734,19 @@ impl ConductorRuntime {
         session_id: &SessionId,
         name: String,
     ) -> Result<phenix_core::SessionSummary, ConductorError> {
-        let session = self
+        if !self.sessions.contains_key(session_id) {
+            return Err(ConductorError::UnknownSession(session_id.clone()));
+        }
+        self.record_domain_event(DomainEvent::SessionRenamed {
+            session_id: session_id.clone(),
+            name,
+        })?;
+        Ok(self
             .sessions
-            .get_mut(session_id)
-            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?;
-        session.summary.name = Some(name);
-        Ok(session.summary.clone())
+            .get(session_id)
+            .expect("renamed session remains present")
+            .summary
+            .clone())
     }
 
     fn set_session_target(
@@ -738,12 +754,19 @@ impl ConductorRuntime {
         session_id: &SessionId,
         target: ExecutionTarget,
     ) -> Result<phenix_core::SessionSummary, ConductorError> {
-        let session = self
+        if !self.sessions.contains_key(session_id) {
+            return Err(ConductorError::UnknownSession(session_id.clone()));
+        }
+        self.record_domain_event(DomainEvent::SessionTargetChanged {
+            session_id: session_id.clone(),
+            target,
+        })?;
+        Ok(self
             .sessions
-            .get_mut(session_id)
-            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?;
-        session.summary.default_target = target;
-        Ok(session.summary.clone())
+            .get(session_id)
+            .expect("retargeted session remains present")
+            .summary
+            .clone())
     }
 
     fn interrupt_non_resumable_executions(&mut self) -> Result<(), ConductorError> {
@@ -914,9 +937,165 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }
         ConductorError::ExecutionProvider(error) => map_execution_provider_error(error),
+        ConductorError::Journal(error) => {
+            protocol_error(ErrorCode::BackendProtocol, error.to_string())
+        }
         ConductorError::Routing(error) => {
             protocol_error(ErrorCode::RoutingFailure, error.to_string())
         }
         ConductorError::Backend(error) => map_backend_error(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_backend::{BackendExecutionRequest, BackendSessionRequest};
+    use phenix_core::{
+        CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet, InferenceOptions, ModelId,
+        ModelTarget, ProviderId, WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
+    };
+    use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CancelOnlySession {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl BackendSession for CancelOnlySession {
+        fn execute(
+            &self,
+            _request: BackendExecutionRequest,
+            _host: &mut dyn BackendHost,
+        ) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        fn cancel(&self, _execution_id: &ExecutionId) -> Result<(), BackendError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn model_target() -> ModelTarget {
+        ModelTarget {
+            backend: BackendId::parse("fixture").unwrap(),
+            provider: ProviderId::parse("fixture").unwrap(),
+            model: ModelId::parse("fixture-model").unwrap(),
+            inference: InferenceOptions::default(),
+        }
+    }
+
+    fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
+        CallableDescriptor {
+            id: CallableId::parse(id).unwrap(),
+            kind,
+            description: "server cancellation fixture".to_owned(),
+            input_schema: json!({"type": "object"}),
+            output_schema: json!({"type": "object"}),
+            capabilities: CapabilitySet::default(),
+            policy: CallablePolicy::default(),
+        }
+    }
+
+    #[test]
+    fn cancelling_root_reaches_active_descendant_scope_without_crossing_unrelated_execution() {
+        let descendant_calls = Arc::new(AtomicUsize::new(0));
+        let unrelated_calls = Arc::new(AtomicUsize::new(0));
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(descriptor("agent.child", CallableKind::Agent))
+            .unwrap();
+        runtime
+            .register_workflow(WorkflowDefinition {
+                descriptor: descriptor("workflow.tree", CallableKind::Workflow),
+                policy: WorkflowExecutionPolicy::Sequential,
+                steps: vec![WorkflowStep {
+                    callable: CallableId::parse("agent.child").unwrap(),
+                    objective: Some("child".to_owned()),
+                }],
+            })
+            .unwrap();
+
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(model_target()))
+            .unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let workflow = runtime
+            .start_workflow(
+                &root.id,
+                &CallableId::parse("workflow.tree").unwrap(),
+                "tree",
+            )
+            .unwrap();
+        let child = runtime
+            .snapshot()
+            .executions
+            .into_iter()
+            .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .unwrap();
+        runtime
+            .set_state(&child.id, ExecutionState::Running)
+            .unwrap();
+
+        let unrelated_session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(model_target()))
+            .unwrap();
+        let unrelated = runtime.submit(&unrelated_session.id, "unrelated").unwrap();
+        runtime
+            .set_state(&unrelated.id, ExecutionState::Running)
+            .unwrap();
+
+        let server = ConductorServer::new(runtime);
+        {
+            let mut scopes = server.active_scopes.lock().unwrap();
+            scopes.insert(
+                child.id.clone(),
+                LiveExecutionScope {
+                    backend_session: Arc::new(CancelOnlySession {
+                        calls: descendant_calls.clone(),
+                    }),
+                },
+            );
+            scopes.insert(
+                unrelated.id.clone(),
+                LiveExecutionScope {
+                    backend_session: Arc::new(CancelOnlySession {
+                        calls: unrelated_calls.clone(),
+                    }),
+                },
+            );
+        }
+
+        assert_eq!(server.cancel_execution(&root.id).unwrap(), Reply::Accepted);
+        assert_eq!(descendant_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(unrelated_calls.load(Ordering::SeqCst), 0);
+
+        let runtime = server.runtime();
+        for id in [&root.id, &workflow.id, &child.id] {
+            assert_eq!(runtime.execution_state(id), Some(ExecutionState::Cancelled));
+        }
+        assert_eq!(
+            runtime.execution_state(&unrelated.id),
+            Some(ExecutionState::Running)
+        );
+    }
+
+    #[test]
+    fn cancel_only_session_type_satisfies_backend_session_contract() {
+        let session: Arc<dyn BackendSession> = Arc::new(CancelOnlySession {
+            calls: Arc::new(AtomicUsize::new(0)),
+        });
+        let _ = BackendSessionRequest {
+            model: model_target(),
+            tools: phenix_backend::ToolProvision::default()
+                .prepare(&phenix_backend::BackendCapabilities {
+                    tool_presentations: BTreeSet::new(),
+                    images: false,
+                    persistent_sessions: false,
+                })
+                .unwrap(),
+        };
+        assert!(Arc::strong_count(&session) >= 1);
     }
 }

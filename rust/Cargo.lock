@@ -736,6 +736,7 @@ dependencies = [
  "phenix-backend-acp",
  "phenix-core",
  "phenix-protocol",
+ "serde",
  "serde_json",
 ]
 

@@ -2,6 +2,7 @@
 
 mod callables;
 mod execution_provider;
+mod journal;
 mod persistence;
 mod policy;
 mod routing;
@@ -12,7 +13,10 @@ pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
     ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest,
 };
-pub use persistence::{JsonFileStore, PersistenceError, RuntimeCheckpoint};
+pub use journal::{
+    DomainEvent, JournalEntry, JournalError, JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
+};
+pub use persistence::{JsonFileStore, PersistenceError};
 pub use policy::{
     CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
     InvocationPolicyContext, InvocationSubject, PolicyDenial,
@@ -20,6 +24,7 @@ pub use policy::{
 pub use routing::{RoutingRegistry, RoutingRegistryError};
 pub use server::{ConductorServer, ServerError};
 
+use journal::{apply_domain_event, DurableProjection};
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
     BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolProvision, ToolResult,
@@ -50,6 +55,7 @@ pub enum ConductorError {
     },
     CallableRegistry(CallableRegistryError),
     ExecutionProvider(ExecutionProviderError),
+    Journal(JournalError),
     Routing(RoutingRegistryError),
     Backend(BackendError),
 }
@@ -70,6 +76,7 @@ impl Display for ConductorError {
             Self::PolicyDenied { denial, .. } => Display::fmt(denial, f),
             Self::CallableRegistry(error) => Display::fmt(error, f),
             Self::ExecutionProvider(error) => Display::fmt(error, f),
+            Self::Journal(error) => Display::fmt(error, f),
             Self::Routing(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
         }
@@ -96,6 +103,12 @@ impl From<ExecutionProviderError> for ConductorError {
     }
 }
 
+impl From<JournalError> for ConductorError {
+    fn from(value: JournalError) -> Self {
+        Self::Journal(value)
+    }
+}
+
 impl From<RoutingRegistryError> for ConductorError {
     fn from(value: RoutingRegistryError) -> Self {
         Self::Routing(value)
@@ -107,9 +120,6 @@ struct SessionRecord {
     summary: SessionSummary,
 }
 
-/// Input owned by one executable child. The provider binding, not this payload,
-/// decides whether the invocation is model-backed or handled by another
-/// execution provider.
 #[derive(Clone, Debug)]
 enum ExecutionPayload {
     Invocation { input: String },
@@ -122,12 +132,6 @@ struct ExecutionRecord {
     payload: ExecutionPayload,
 }
 
-/// Immutable result of conductor-owned target resolution for one model step.
-///
-/// Once this value exists no downstream layer is allowed to route the step
-/// again. It captures both the requested target and the concrete target so
-/// diagnostics can explain a routed decision without making the backend aware
-/// of routing profiles.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedInvocation {
     pub execution_id: ExecutionId,
@@ -140,9 +144,6 @@ pub struct ResolvedInvocation {
     pub tools: ToolProvision,
 }
 
-/// A resolved invocation after backend capability negotiation, lifecycle
-/// validation, and conductor-owned policy evaluation. This is the only value
-/// from which backend session/execution requests should be materialized.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedInvocation {
     pub resolved: ResolvedInvocation,
@@ -176,14 +177,14 @@ impl PreparedInvocation {
     }
 }
 
-/// In-memory reference runtime proving conductor-owned semantics before
-/// persistence and concrete backend adapters are introduced.
 #[derive(Debug)]
 pub struct ConductorRuntime {
     config_revision: ConfigRevisionId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
+    resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
     events: Vec<ExecutionEvent>,
+    journal: RuntimeJournal,
     callables: CallableRegistry,
     routing: RoutingRegistry,
     policy: InvocationPolicy,
@@ -203,10 +204,13 @@ impl Default for ConductorRuntime {
 impl ConductorRuntime {
     #[must_use]
     pub fn new() -> Self {
+        let config_revision = ConfigRevisionId::parse("config-1").expect("static config id");
         Self {
-            config_revision: ConfigRevisionId::parse("config-1").expect("static config id"),
+            journal: RuntimeJournal::new(config_revision.clone()),
+            config_revision,
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
+            resolved_routes: BTreeMap::new(),
             events: Vec::new(),
             callables: CallableRegistry::default(),
             routing: RoutingRegistry::default(),
@@ -217,6 +221,48 @@ impl ConductorRuntime {
             next_event: 0,
             next_tool_call: 0,
         }
+    }
+
+    fn record_domain_event(&mut self, event: DomainEvent) -> Result<(), ConductorError> {
+        let frontend_event = match &event {
+            DomainEvent::FrontendEvent { event } => Some(event.clone()),
+            _ => None,
+        };
+        let sequence = u64::try_from(self.journal.entries.len())
+            .map_err(|_| JournalError::InvalidFormat("journal is too large".to_owned()))?
+            + 1;
+        self.journal.entries.push(JournalEntry {
+            sequence,
+            event: event.clone(),
+        });
+        let result = {
+            let mut projection = DurableProjection {
+                config_revision: &self.config_revision,
+                sessions: &mut self.sessions,
+                executions: &mut self.executions,
+                resolved_routes: &mut self.resolved_routes,
+                events: &mut self.events,
+                next_session: &mut self.next_session,
+                next_execution: &mut self.next_execution,
+                next_event: &mut self.next_event,
+                next_tool_call: &mut self.next_tool_call,
+            };
+            apply_domain_event(&mut projection, &event)
+        };
+        if let Err(error) = result {
+            self.journal.entries.pop();
+            return Err(error.into());
+        }
+        if let Some(event) = frontend_event {
+            if self
+                .event_sink
+                .as_ref()
+                .is_some_and(|sink| sink.send(event).is_err())
+            {
+                self.event_sink = None;
+            }
+        }
+        Ok(())
     }
 
     pub fn register_invocation_guard<G>(&mut self, guard: G)
@@ -238,14 +284,11 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    /// Register the canonical model-backed agent provider.
     pub fn register_agent(&mut self, descriptor: CallableDescriptor) -> Result<(), ConductorError> {
         self.callables.register_agent(descriptor)?;
         Ok(())
     }
 
-    /// Register an agent whose execution is supplied by a backend-neutral
-    /// provider instead of the model backend path.
     pub fn register_provider_agent<P>(
         &mut self,
         descriptor: CallableDescriptor,
@@ -296,20 +339,16 @@ impl ConductorRuntime {
                 return Err(ConductorError::UnknownSession(parent.clone()));
             }
         }
-        let id = self.new_session_id();
         let summary = SessionSummary {
-            id: id.clone(),
+            id: self.new_session_id(),
             parent_session,
             name,
             config_revision: self.config_revision.clone(),
             default_target: target,
         };
-        self.sessions.insert(
-            id,
-            SessionRecord {
-                summary: summary.clone(),
-            },
-        );
+        self.record_domain_event(DomainEvent::SessionCreated {
+            session: summary.clone(),
+        })?;
         Ok(summary)
     }
 
@@ -352,15 +391,12 @@ impl ConductorRuntime {
             target,
             state: ExecutionState::Pending,
         };
-        self.executions.insert(
-            summary.id.clone(),
-            ExecutionRecord {
-                summary: summary.clone(),
-                payload: ExecutionPayload::Invocation {
-                    input: text.clone(),
-                },
+        self.record_domain_event(DomainEvent::ExecutionCreated {
+            execution: summary.clone(),
+            payload: JournalExecutionPayload::Invocation {
+                input: text.clone(),
             },
-        );
+        })?;
         self.push_event(&summary.id, ExecutionEventKind::UserInput { text })?;
         self.push_event(
             &summary.id,
@@ -460,13 +496,10 @@ impl ConductorRuntime {
             target: parent.target,
             state: ExecutionState::Pending,
         };
-        self.executions.insert(
-            child.id.clone(),
-            ExecutionRecord {
-                summary: child.clone(),
-                payload,
-            },
-        );
+        self.record_domain_event(DomainEvent::ExecutionCreated {
+            execution: child.clone(),
+            payload: JournalExecutionPayload::from(&payload),
+        })?;
         self.push_event(
             parent_id,
             ExecutionEventKind::ChildExecutionStarted {
@@ -499,54 +532,63 @@ impl ConductorRuntime {
         }
     }
 
-    /// Resolve routing and callable visibility exactly once for a model step.
-    /// Backend capabilities intentionally do not participate in model routing.
     pub fn resolve_invocation(
-        &self,
+        &mut self,
         execution_id: &ExecutionId,
     ) -> Result<ResolvedInvocation, ConductorError> {
-        let execution = self
-            .executions
-            .get(execution_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-        if execution.summary.kind == ExecutionKind::Workflow {
-            return Err(ConductorError::NonModelExecution(execution_id.clone()));
-        }
+        let (summary, input) = {
+            let execution = self
+                .executions
+                .get(execution_id)
+                .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+            if execution.summary.kind == ExecutionKind::Workflow {
+                return Err(ConductorError::NonModelExecution(execution_id.clone()));
+            }
+            let ExecutionPayload::Invocation { input } = &execution.payload else {
+                return Err(ConductorError::NonModelExecution(execution_id.clone()));
+            };
+            (execution.summary.clone(), input.clone())
+        };
         if self.execution_provider_kind(execution_id)? != ExecutionProviderKind::Model {
             return Err(ConductorError::NonModelExecution(execution_id.clone()));
         }
-        let ExecutionPayload::Invocation { input } = &execution.payload else {
-            return Err(ConductorError::NonModelExecution(execution_id.clone()));
+
+        let route = if let Some(route) = self.resolved_routes.get(execution_id) {
+            route.clone()
+        } else {
+            let requested_target = summary.target.clone();
+            let model = match &requested_target {
+                ExecutionTarget::Fixed(model) => model.clone(),
+                ExecutionTarget::Routed(profile) => {
+                    self.routing.resolve(profile, summary.callable.as_ref())?
+                }
+            };
+            let route = ResolvedRoute {
+                requested_target,
+                model,
+                config_revision: self.config_revision.clone(),
+            };
+            self.record_domain_event(DomainEvent::InvocationResolved {
+                execution_id: execution_id.clone(),
+                route: route.clone(),
+            })?;
+            route
         };
-        let requested_target = execution.summary.target.clone();
-        let model = match &requested_target {
-            ExecutionTarget::Fixed(model) => model.clone(),
-            ExecutionTarget::Routed(profile) => self
-                .routing
-                .resolve(profile, execution.summary.callable.as_ref())?,
-        };
-        let session = self
-            .sessions
-            .get(&execution.summary.session_id)
-            .expect("execution session invariant");
+
         Ok(ResolvedInvocation {
             execution_id: execution_id.clone(),
-            session_id: execution.summary.session_id.clone(),
-            config_revision: session.summary.config_revision.clone(),
-            callable: execution.summary.callable.clone(),
-            requested_target,
-            model,
-            prompt: input.clone(),
+            session_id: summary.session_id,
+            config_revision: route.config_revision.clone(),
+            callable: summary.callable,
+            requested_target: route.requested_target,
+            model: route.model,
+            prompt: input,
             tools: ToolProvision {
                 callables: self.callables.tool_descriptors(),
             },
         })
     }
 
-    /// Validate that a previously resolved invocation is still runnable, bind
-    /// its semantic tool provision to one concrete backend presentation, then
-    /// run the canonical model-dispatch policy gate. No routing lookup occurs in
-    /// this phase.
     pub fn prepare_invocation(
         &self,
         resolved: ResolvedInvocation,
@@ -589,23 +631,16 @@ impl ConductorRuntime {
             self.set_state(execution_id, ExecutionState::Failed)?;
             return Err(ConductorError::Backend(error));
         }
-        let state = self
+        if self
             .executions
             .get(execution_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?
-            .summary
-            .state
-            .clone();
-        if state == ExecutionState::Running {
+            .is_some_and(|execution| execution.summary.state == ExecutionState::Running)
+        {
             self.set_state(execution_id, ExecutionState::Completed)?;
         }
         Ok(())
     }
 
-    /// Drive a non-model execution provider through the same execution tree and
-    /// lifecycle used by model-backed agents. The conductor allocates IDs and
-    /// owns state; the provider receives immutable request context and can emit
-    /// normalized output only through its host.
     pub fn drive_provider_execution(
         &mut self,
         execution_id: &ExecutionId,
@@ -723,21 +758,15 @@ impl ConductorRuntime {
             .summary
             .session_id
             .clone();
-        self.next_event += 1;
         let event = ExecutionEvent {
-            sequence: self.next_event,
+            sequence: self.next_event + 1,
             session_id,
             execution_id: execution_id.clone(),
             kind,
         };
-        self.events.push(event.clone());
-        if self
-            .event_sink
-            .as_ref()
-            .is_some_and(|sink| sink.send(event.clone()).is_err())
-        {
-            self.event_sink = None;
-        }
+        self.record_domain_event(DomainEvent::FrontendEvent {
+            event: event.clone(),
+        })?;
         Ok(event)
     }
 
@@ -759,11 +788,10 @@ impl ConductorRuntime {
         if is_terminal(&current) {
             return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
         }
-        self.executions
-            .get_mut(execution_id)
-            .expect("checked execution")
-            .summary
-            .state = state.clone();
+        self.record_domain_event(DomainEvent::ExecutionStateChanged {
+            execution_id: execution_id.clone(),
+            state: state.clone(),
+        })?;
         self.push_event(
             execution_id,
             ExecutionEventKind::ExecutionStateChanged {
@@ -850,20 +878,15 @@ impl ConductorRuntime {
             return Ok(());
         }
         let step = definition.steps[next_step].clone();
-        let ExecutionPayload::Workflow { next_step, .. } = &mut self
-            .executions
-            .get_mut(execution_id)
-            .expect("workflow exists")
-            .payload
-        else {
-            unreachable!("workflow execution payload")
-        };
-        *next_step += 1;
         self.start_agent(
             execution_id,
             &step.callable,
             step.objective.unwrap_or(objective),
         )?;
+        self.record_domain_event(DomainEvent::WorkflowAdvanced {
+            execution_id: execution_id.clone(),
+            next_step: next_step + 1,
+        })?;
         Ok(())
     }
 
@@ -1024,19 +1047,16 @@ impl ConductorRuntime {
         Ok(result)
     }
 
-    fn new_session_id(&mut self) -> SessionId {
-        self.next_session += 1;
-        SessionId::parse(format!("session-{}", self.next_session)).expect("generated id")
+    fn new_session_id(&self) -> SessionId {
+        SessionId::parse(format!("session-{}", self.next_session + 1)).expect("generated id")
     }
 
-    fn new_execution_id(&mut self) -> ExecutionId {
-        self.next_execution += 1;
-        ExecutionId::parse(format!("execution-{}", self.next_execution)).expect("generated id")
+    fn new_execution_id(&self) -> ExecutionId {
+        ExecutionId::parse(format!("execution-{}", self.next_execution + 1)).expect("generated id")
     }
 
-    fn new_tool_call_id(&mut self) -> ToolCallId {
-        self.next_tool_call += 1;
-        ToolCallId::parse(format!("tool-call-{}", self.next_tool_call)).expect("generated id")
+    fn new_tool_call_id(&self) -> ToolCallId {
+        ToolCallId::parse(format!("tool-call-{}", self.next_tool_call + 1)).expect("generated id")
     }
 }
 
@@ -1171,7 +1191,7 @@ mod tests {
     }
 
     #[test]
-    fn resolved_invocation_records_routing_origin_and_concrete_target() {
+    fn resolved_invocation_is_journaled_once_and_reused() {
         let mut runtime = ConductorRuntime::new();
         let profile = RoutingProfileId::parse("default").unwrap();
         let concrete = ModelTarget {
@@ -1191,11 +1211,19 @@ mod tests {
             .create_session(None, None, ExecutionTarget::Routed(profile.clone()))
             .unwrap();
         let execution = runtime.submit(&session.id, "work").unwrap();
-        let resolved = runtime.resolve_invocation(&execution.id).unwrap();
+        let first = runtime.resolve_invocation(&execution.id).unwrap();
+        let journal_len = runtime.journal.entries.len();
+        let second = runtime.resolve_invocation(&execution.id).unwrap();
 
-        assert_eq!(resolved.requested_target, ExecutionTarget::Routed(profile));
-        assert_eq!(resolved.model, concrete);
-        assert_eq!(resolved.session_id, session.id);
-        assert_eq!(resolved.config_revision.as_str(), "config-1");
+        assert_eq!(first.model, concrete);
+        assert_eq!(first, second);
+        assert_eq!(runtime.journal.entries.len(), journal_len);
+        assert!(runtime.journal.entries.iter().any(|entry| {
+            matches!(
+                &entry.event,
+                DomainEvent::InvocationResolved { execution_id, .. }
+                    if execution_id == &execution.id
+            )
+        }));
     }
 }

@@ -105,7 +105,7 @@ The policy pipeline is required to prove:
 
 - normal protocol input reaches the exact prepared mock model and produces protocol events;
 - a model-dispatch guard prevents `Backend::open_session` entirely;
-- a tool guard prevents the tool handler while allowing the mock model to observe an unsuccessful `ToolResult`;
+- a tool guard prevents the tool handler while allowing the mock model to observe an unsuccessful tool result;
 - the built-in `requires_permission` guard preserves agent, workflow-step, and tool behavior after removal of the old direct permission branches;
 - deterministic backend failure is normalized through the same protocol/event path.
 

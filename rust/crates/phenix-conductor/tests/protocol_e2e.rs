@@ -73,6 +73,62 @@ fn frontend_input_reaches_prepared_mock_model_and_returns_events() {
 }
 
 #[test]
+fn journal_replay_restart_continues_protocol_with_monotonic_ids_and_events() {
+    let before = ProtocolHarness::model(MockModelScript::reply("before restart complete"))
+        .input("before restart")
+        .run();
+
+    assert!(before.response_ok(1));
+    assert!(before.response_ok(2));
+    assert!(before.response_ok(3));
+    assert_eq!(before.backend.prompts(), vec!["before restart"]);
+    assert_eq!(
+        before.only_execution_state(),
+        Some(&ExecutionState::Completed)
+    );
+    let before_restart = before.snapshot.clone();
+    let session_id = before_restart.sessions[0].id.clone();
+    let cursor = before_restart.last_event_sequence;
+    let persisted = serde_json::to_vec(&before.journal).unwrap();
+    let restored = ConductorRuntime::restore(serde_json::from_slice(&persisted).unwrap()).unwrap();
+    assert_eq!(restored.snapshot(), before_restart);
+
+    let after = ProtocolHarness::model(MockModelScript::reply("after restart complete"))
+        .runtime(restored)
+        .commands([
+            Command::Initialize {
+                after_sequence: Some(cursor),
+            },
+            Command::Submit {
+                session_id,
+                text: "after restart".to_owned(),
+            },
+        ])
+        .run();
+
+    assert!(after.response_ok(1));
+    assert!(after.response_ok(2));
+    assert_eq!(after.backend.prompts(), vec!["after restart"]);
+    assert_eq!(after.snapshot.executions.len(), 2);
+    let continued = after
+        .snapshot
+        .executions
+        .iter()
+        .find(|execution| execution.id == execution_id(2))
+        .expect("continued execution uses replayed execution cursor");
+    assert_eq!(continued.state, ExecutionState::Completed);
+    let new_events = after
+        .events()
+        .filter(|event| event.sequence > cursor)
+        .collect::<Vec<_>>();
+    assert!(!new_events.is_empty());
+    assert_eq!(new_events[0].sequence, cursor + 1);
+    assert!(new_events
+        .iter()
+        .all(|event| event.execution_id == execution_id(2)));
+}
+
+#[test]
 fn streaming_order_and_cancellation_are_deterministic() {
     let run = ProtocolHarness::model(MockModelScript::sequence([
         MockAction::reasoning("thinking-1"),

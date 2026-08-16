@@ -124,6 +124,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-protocol-e2e
 
+      - name: "conductor / runtime_edge_cases"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-runtime-edge-cases
+
       - name: Repository remains clean
         if: ${{ !cancelled() }}
         run: |
