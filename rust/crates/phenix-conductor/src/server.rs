@@ -497,7 +497,9 @@ impl ConductorServer {
         for backend in self.backends.values() {
             backend
                 .lock()
-                .map_err(|_| protocol_error(ErrorCode::BackendTransport, "backend lock poisoned"))?
+                .map_err(|_| {
+                    protocol_error(ErrorCode::BackendTransport, "backend lock poisoned")
+                })?
                 .close_persistent_session(session_id)
                 .map_err(map_backend_error)?;
         }
@@ -1201,123 +1203,10 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    fn start_session_callable(
-        &mut self,
-        session_id: &SessionId,
-        callable: &CallableId,
-        objective: String,
-    ) -> Result<phenix_core::ExecutionSummary, ConductorError> {
-        self.ensure_session_active(session_id)?;
-        let descriptor = self.callables.descriptor(callable)?.clone();
-        let target = self
-            .sessions
-            .get(session_id)
-            .expect("active session exists")
-            .summary
-            .default_target
-            .clone();
-        let root = phenix_core::ExecutionSummary {
-            id: self.new_execution_id(),
-            session_id: session_id.clone(),
-            parent_execution: None,
-            kind: descriptor.kind.clone().into(),
-            callable: Some(callable.clone()),
-            target,
-            state: ExecutionState::Pending,
-        };
-        let payload = match descriptor.kind {
-            phenix_core::CallableKind::Workflow => JournalExecutionPayload::Workflow {
-                objective,
-                next_step: 0,
-            },
-            _ => JournalExecutionPayload::Invocation { input: objective },
-        };
-        self.record_domain_event(DomainEvent::ExecutionCreated {
-            execution: root.clone(),
-            payload,
-        })?;
-        self.push_event(
-            &root.id,
-            ExecutionEventKind::ExecutionStateChanged {
-                state: ExecutionState::Pending,
-            },
-        )?;
-        if root.kind == ExecutionKind::Workflow {
-            self.set_state(&root.id, ExecutionState::Running)?;
-            self.advance_workflow(&root.id)?;
-            return Ok(self
-                .executions
-                .get(&root.id)
-                .expect("workflow remains present")
-                .summary
-                .clone());
-        }
-        Ok(root)
-    }
-
-    fn prepare_provider_execution(
-        &self,
-        execution_id: &ExecutionId,
-    ) -> Result<(Arc<dyn ExecutionProvider>, crate::ExecutionProviderRequest), ConductorError> {
-        let execution = self
-            .executions
-            .get(execution_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-        if execution.summary.state != ExecutionState::Pending {
-            return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
-        }
-        let callable = execution
-            .summary
-            .callable
-            .clone()
-            .ok_or_else(|| ConductorError::NonProviderExecution(execution_id.clone()))?;
-        let descriptor = self.callables.descriptor(&callable)?.clone();
-        let binding = self.callables.execution_provider(&callable)?.clone();
-        let Some(provider) = binding.provider().cloned() else {
-            return Err(ConductorError::NonProviderExecution(execution_id.clone()));
-        };
-        self.check_callable_policy(
-            execution_id,
-            &descriptor,
-            crate::CallableOperation::DispatchProvider,
-        )?;
-        let ExecutionPayload::Invocation { input } = &execution.payload else {
-            return Err(ConductorError::NonProviderExecution(execution_id.clone()));
-        };
-        let config_revision = self
-            .sessions
-            .get(&execution.summary.session_id)
-            .expect("execution session invariant")
-            .summary
-            .config_revision
-            .clone();
-        Ok((
-            provider,
-            crate::ExecutionProviderRequest {
-                execution_id: execution_id.clone(),
-                session_id: execution.summary.session_id.clone(),
-                parent_execution: execution.summary.parent_execution.clone(),
-                callable,
-                config_revision,
-                objective: input.clone(),
-            },
-        ))
-    }
-
     fn execution_state(&self, execution_id: &ExecutionId) -> Option<ExecutionState> {
         self.executions
             .get(execution_id)
             .map(|record| record.summary.state.clone())
-    }
-}
-
-impl From<phenix_core::CallableKind> for ExecutionKind {
-    fn from(value: phenix_core::CallableKind) -> Self {
-        match value {
-            phenix_core::CallableKind::Tool => ExecutionKind::Agent,
-            phenix_core::CallableKind::Agent => ExecutionKind::Agent,
-            phenix_core::CallableKind::Workflow => ExecutionKind::Workflow,
-        }
     }
 }
 
@@ -1422,10 +1311,8 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error
         }
         ConductorError::ClosedSession(id) => {
-            let mut error = protocol_error(
-                ErrorCode::InvalidRequest,
-                format!("session is closed: {id}"),
-            );
+            let mut error =
+                protocol_error(ErrorCode::InvalidRequest, format!("session is closed: {id}"));
             error.session_id = Some(id);
             error
         }
