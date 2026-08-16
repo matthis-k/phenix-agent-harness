@@ -9,6 +9,12 @@ path = "tests/fixtures/acp_continuity_agent.rs"
 test = false
 bench = false
 
+[[bin]]
+name = "acp-tool-bridge-fixture"
+path = "tests/fixtures/acp_tool_bridge_agent.rs"
+test = false
+bench = false
+
 [dependencies]
 agent-client-protocol.workspace = true
 phenix-backend = { path = "../phenix-backend" }
