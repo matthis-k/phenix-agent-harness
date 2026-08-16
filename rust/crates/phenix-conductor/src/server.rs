@@ -36,11 +36,26 @@ struct ExecutionJob {
 }
 
 /// Process-local resources owned by one live execution. Durable execution state
-/// remains in `ConductorRuntime`; this scope is deliberately not persisted and
-/// is removed when the backend execution finishes or is abandoned.
+/// remains in `ConductorRuntime`; this scope is deliberately not persisted.
 #[derive(Clone)]
 struct LiveExecutionScope {
     backend_session: Arc<dyn BackendSession>,
+}
+
+/// RAII lease for one live execution scope. Once installed, every return path
+/// from the worker tears the process-local scope down, including error returns
+/// and unwinding. Durable execution state remains owned by `ConductorRuntime`.
+struct LiveExecutionLease {
+    scopes: ActiveScopes,
+    execution_id: ExecutionId,
+}
+
+impl Drop for LiveExecutionLease {
+    fn drop(&mut self) {
+        if let Ok(mut scopes) = self.scopes.lock() {
+            scopes.remove(&self.execution_id);
+        }
+    }
 }
 
 pub struct ConductorServer {
@@ -526,6 +541,10 @@ fn execute_job(
                 backend_session: backend_session.clone(),
             },
         );
+    let _scope_lease = LiveExecutionLease {
+        scopes: active_scopes.clone(),
+        execution_id: execution_id.clone(),
+    };
 
     let should_execute = {
         let mut runtime_guard = runtime
@@ -580,10 +599,6 @@ fn execute_job(
         persist_shared(runtime, store, persist_lock)?;
     }
 
-    active_scopes
-        .lock()
-        .map_err(|_| ServerError::StatePoisoned("active scopes"))?
-        .remove(&execution_id);
     Ok(())
 }
 
