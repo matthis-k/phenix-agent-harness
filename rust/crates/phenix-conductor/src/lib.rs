@@ -2,11 +2,16 @@
 
 mod callables;
 mod persistence;
+mod policy;
 mod routing;
 mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError};
 pub use persistence::{JsonFileStore, PersistenceError, RuntimeCheckpoint};
+pub use policy::{
+    CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
+    InvocationPolicyContext, InvocationSubject, PolicyDenial,
+};
 pub use routing::{RoutingRegistry, RoutingRegistryError};
 pub use server::{ConductorServer, ServerError};
 
@@ -33,7 +38,10 @@ pub enum ConductorError {
     EmptyInput,
     InvalidLifecycle(ExecutionId),
     NonModelExecution(ExecutionId),
-    PermissionRequired(CallableId),
+    PolicyDenied {
+        execution_id: ExecutionId,
+        denial: PolicyDenial,
+    },
     CallableRegistry(CallableRegistryError),
     Routing(RoutingRegistryError),
     Backend(BackendError),
@@ -52,7 +60,7 @@ impl Display for ConductorError {
                     "execution is conductor-owned and has no backend session: {id}"
                 )
             }
-            Self::PermissionRequired(id) => write!(f, "permission required for callable: {id}"),
+            Self::PolicyDenied { denial, .. } => Display::fmt(denial, f),
             Self::CallableRegistry(error) => Display::fmt(error, f),
             Self::Routing(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
@@ -115,9 +123,9 @@ pub struct ResolvedInvocation {
     pub tools: ToolProvision,
 }
 
-/// A resolved invocation after backend capability negotiation and lifecycle
-/// validation. This is the only value from which backend session/execution
-/// requests should be materialized.
+/// A resolved invocation after backend capability negotiation, lifecycle
+/// validation, and conductor-owned policy evaluation. This is the only value
+/// from which backend session/execution requests should be materialized.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedInvocation {
     pub resolved: ResolvedInvocation,
@@ -161,6 +169,7 @@ pub struct ConductorRuntime {
     events: Vec<ExecutionEvent>,
     callables: CallableRegistry,
     routing: RoutingRegistry,
+    policy: InvocationPolicy,
     event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
     next_session: u64,
     next_execution: u64,
@@ -184,12 +193,20 @@ impl ConductorRuntime {
             events: Vec::new(),
             callables: CallableRegistry::default(),
             routing: RoutingRegistry::default(),
+            policy: InvocationPolicy::new(),
             event_sink: None,
             next_session: 0,
             next_execution: 0,
             next_event: 0,
             next_tool_call: 0,
         }
+    }
+
+    pub fn register_invocation_guard<G>(&mut self, guard: G)
+    where
+        G: InvocationGuard + 'static,
+    {
+        self.policy.register(guard);
     }
 
     pub fn register_tool<F>(
@@ -336,9 +353,7 @@ impl ConductorRuntime {
             }
             .into());
         }
-        if descriptor.policy.requires_permission {
-            return Err(ConductorError::PermissionRequired(callable.clone()));
-        }
+        self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgent)?;
         self.create_child(
             parent_id,
             ExecutionKind::Agent,
@@ -356,14 +371,18 @@ impl ConductorRuntime {
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
         let definition = self.callables.workflow(callable)?.clone();
-        if definition.descriptor.policy.requires_permission {
-            return Err(ConductorError::PermissionRequired(callable.clone()));
-        }
+        self.check_callable_policy(
+            parent_id,
+            &definition.descriptor,
+            CallableOperation::StartWorkflow,
+        )?;
         for step in &definition.steps {
-            let descriptor = self.callables.descriptor(&step.callable)?;
-            if descriptor.policy.requires_permission {
-                return Err(ConductorError::PermissionRequired(step.callable.clone()));
-            }
+            let descriptor = self.callables.descriptor(&step.callable)?.clone();
+            self.check_callable_policy(
+                parent_id,
+                &descriptor,
+                CallableOperation::StartWorkflowStep,
+            )?;
         }
         let summary = self.create_child(
             parent_id,
@@ -469,9 +488,10 @@ impl ConductorRuntime {
         })
     }
 
-    /// Validate that a previously resolved invocation is still runnable and bind
-    /// its semantic tool provision to one concrete backend presentation. No
-    /// routing lookup occurs in this phase.
+    /// Validate that a previously resolved invocation is still runnable, bind
+    /// its semantic tool provision to one concrete backend presentation, then
+    /// run the canonical model-dispatch policy gate. No routing lookup occurs in
+    /// this phase.
     pub fn prepare_invocation(
         &self,
         resolved: ResolvedInvocation,
@@ -485,7 +505,9 @@ impl ConductorRuntime {
             return Err(ConductorError::InvalidLifecycle(resolved.execution_id));
         }
         let tools = resolved.tools.clone().prepare(capabilities)?;
-        Ok(PreparedInvocation { resolved, tools })
+        let prepared = PreparedInvocation { resolved, tools };
+        self.check_model_policy(&prepared)?;
+        Ok(prepared)
     }
 
     pub fn drive_execution(
@@ -756,6 +778,54 @@ impl ConductorRuntime {
         }
     }
 
+    fn check_callable_policy(
+        &self,
+        execution_id: &ExecutionId,
+        descriptor: &CallableDescriptor,
+        operation: CallableOperation,
+    ) -> Result<(), ConductorError> {
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let session = self
+            .sessions
+            .get(&execution.summary.session_id)
+            .expect("execution session invariant");
+        let context = InvocationPolicyContext {
+            session_id: &execution.summary.session_id,
+            execution_id,
+            config_revision: &session.summary.config_revision,
+            subject: InvocationSubject::Callable {
+                descriptor,
+                operation,
+            },
+        };
+        self.policy
+            .check(&context)
+            .map_err(|denial| ConductorError::PolicyDenied {
+                execution_id: execution_id.clone(),
+                denial,
+            })
+    }
+
+    fn check_model_policy(&self, prepared: &PreparedInvocation) -> Result<(), ConductorError> {
+        let context = InvocationPolicyContext {
+            session_id: &prepared.resolved.session_id,
+            execution_id: &prepared.resolved.execution_id,
+            config_revision: &prepared.resolved.config_revision,
+            subject: InvocationSubject::Model {
+                invocation: prepared,
+            },
+        };
+        self.policy
+            .check(&context)
+            .map_err(|denial| ConductorError::PolicyDenied {
+                execution_id: prepared.resolved.execution_id.clone(),
+                denial,
+            })
+    }
+
     fn invoke_tool(
         &mut self,
         execution_id: &ExecutionId,
@@ -788,15 +858,31 @@ impl ConductorRuntime {
         )
         .map_err(conductor_protocol_error)?;
 
-        let result = match serde_json::from_str::<Value>(&invocation.arguments_json) {
-            Ok(_) => self
-                .callables
-                .invoke_tool(&invocation.callable, &invocation.arguments_json)
-                .map_err(|error| BackendError::Protocol(error.to_string()))?,
-            Err(error) => ToolResult {
-                output: format!("invalid JSON tool arguments: {error}"),
+        let descriptor = self
+            .callables
+            .descriptor(&invocation.callable)
+            .map_err(|error| BackendError::Protocol(error.to_string()))?
+            .clone();
+        let result = match self.check_callable_policy(
+            execution_id,
+            &descriptor,
+            CallableOperation::InvokeTool,
+        ) {
+            Ok(()) => match serde_json::from_str::<Value>(&invocation.arguments_json) {
+                Ok(_) => self
+                    .callables
+                    .invoke_tool(&invocation.callable, &invocation.arguments_json)
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                Err(error) => ToolResult {
+                    output: format!("invalid JSON tool arguments: {error}"),
+                    success: false,
+                },
+            },
+            Err(ConductorError::PolicyDenied { denial, .. }) => ToolResult {
+                output: denial.message,
                 success: false,
             },
+            Err(error) => return Err(conductor_protocol_error(error)),
         };
         self.push_event(
             execution_id,

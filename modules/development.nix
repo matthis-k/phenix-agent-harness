@@ -65,6 +65,12 @@
           test = "stdio_roundtrip";
           label = "conductor / stdio_roundtrip";
         }
+        {
+          id = "conductor-protocol-e2e";
+          package = "phenix-conductor";
+          test = "protocol_e2e";
+          label = "conductor / protocol_e2e";
+        }
       ];
 
       cargoTestTargets = integrationTargets ++ systemTargets;
