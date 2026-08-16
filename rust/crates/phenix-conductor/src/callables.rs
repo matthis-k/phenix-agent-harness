@@ -328,7 +328,10 @@ impl ConductorRuntime {
                     execution_id,
                     ExecutionKind::Agent,
                     callable.clone(),
-                    ExecutionPayload::Invocation { input: objective },
+                    ExecutionPayload::Invocation {
+                        input: objective.clone(),
+                    },
+                    objective,
                 )
             }
             CallableKind::Workflow => {
@@ -355,9 +358,10 @@ impl ConductorRuntime {
                     ExecutionKind::Workflow,
                     callable.clone(),
                     ExecutionPayload::Workflow {
-                        objective,
+                        objective: objective.clone(),
                         next_step: 0,
                     },
+                    objective,
                 )?;
                 self.set_state(&summary.id, ExecutionState::Running)?;
                 self.advance_workflow(&summary.id)?;
@@ -409,6 +413,7 @@ impl ConductorRuntime {
         kind: ExecutionKind,
         callable: CallableId,
         payload: ExecutionPayload,
+        user_input: String,
     ) -> Result<ExecutionSummary, ConductorError> {
         let target = self
             .sessions
@@ -430,6 +435,10 @@ impl ConductorRuntime {
             execution: summary.clone(),
             payload: JournalExecutionPayload::from(&payload),
         })?;
+        self.push_event(
+            &summary.id,
+            ExecutionEventKind::UserInput { text: user_input },
+        )?;
         self.push_event(
             &summary.id,
             ExecutionEventKind::ExecutionStateChanged {
@@ -583,6 +592,20 @@ mod tests {
         );
         assert_eq!(execution.target, fixed("fixed"));
         assert_eq!(execution.state, ExecutionState::Pending);
+        let user_inputs = runtime
+            .events_since(0)
+            .into_iter()
+            .filter_map(|event| {
+                if event.execution_id != execution.id {
+                    return None;
+                }
+                match event.kind {
+                    ExecutionEventKind::UserInput { text } => Some(text),
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(user_inputs, vec!["inspect"]);
     }
 
     #[test]
@@ -621,5 +644,14 @@ mod tests {
             .expect("workflow started its first ordinary child execution");
         assert_eq!(child.kind, ExecutionKind::Agent);
         assert_eq!(child.callable, Some(CallableId::parse("worker").unwrap()));
+        let user_inputs = runtime
+            .events_since(0)
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                ExecutionEventKind::UserInput { text } => Some((event.execution_id, text)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(user_inputs, vec![(workflow.id.clone(), "implement it".to_owned())]);
     }
 }
