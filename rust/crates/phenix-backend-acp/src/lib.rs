@@ -10,7 +10,7 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
-    BackendSession, BackendSessionRequest, ToolHostingCapability,
+    BackendSession, BackendSessionRequest,
 };
 use phenix_core::{
     AuthenticationMethodDescriptor, AuthenticationMethodId, AuthenticationMethodKind,
@@ -87,7 +87,7 @@ impl AcpBackend {
 impl Backend for AcpBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            tool_hosting: ToolHostingCapability::Unsupported,
+            tool_presentations: BTreeSet::new(),
             images: false,
             persistent_sessions: false,
         }
@@ -137,7 +137,7 @@ impl Backend for AcpBackend {
                 "ACP inference effort mapping is not implemented in R7".to_owned(),
             ));
         }
-        if !request.tools.callables.is_empty() {
+        if !request.tools.callables().is_empty() {
             return Err(BackendError::Unsupported(
                 "ACP conductor-tool provisioning is not implemented in R7".to_owned(),
             ));
@@ -717,10 +717,13 @@ mod tests {
         let mut backend = AcpBackend::new(config());
         let mut target = model();
         target.inference.effort = Some("high".to_owned());
+        let tools = ToolProvision::default()
+            .prepare(&backend.capabilities())
+            .unwrap();
         assert!(matches!(
             backend.open_session(BackendSessionRequest {
                 model: target,
-                tools: ToolProvision { callables: vec![] },
+                tools,
             }),
             Err(BackendError::Unsupported(_))
         ));
