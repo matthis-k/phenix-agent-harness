@@ -119,7 +119,7 @@ impl Backend for AcpBackend {
     fn open_session(
         &mut self,
         request: BackendSessionRequest,
-    ) -> Result<Box<dyn BackendSession>, BackendError> {
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
         if request.model.backend != self.config.backend {
             return Err(BackendError::Unsupported(format!(
                 "ACP backend {} cannot serve target backend {}",
@@ -142,7 +142,7 @@ impl Backend for AcpBackend {
                 "ACP conductor-tool provisioning is not implemented in R7".to_owned(),
             ));
         }
-        Ok(Box::new(AcpBackendSession {
+        Ok(Arc::new(AcpBackendSession {
             config: self.config.clone(),
             model: request.model,
         }))
@@ -157,7 +157,7 @@ struct AcpBackendSession {
 
 impl BackendSession for AcpBackendSession {
     fn execute(
-        &mut self,
+        &self,
         request: BackendExecutionRequest,
         host: &mut dyn BackendHost,
     ) -> Result<(), BackendError> {
@@ -196,7 +196,7 @@ impl BackendSession for AcpBackendSession {
         })
     }
 
-    fn cancel(&mut self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
         Err(BackendError::Unsupported(
             "ACP cancellation requires the persistent session lifecycle introduced after R7"
                 .to_owned(),

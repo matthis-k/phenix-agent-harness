@@ -733,6 +733,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "phenix-backend",
+ "phenix-backend-acp",
  "phenix-core",
  "phenix-protocol",
  "serde_json",

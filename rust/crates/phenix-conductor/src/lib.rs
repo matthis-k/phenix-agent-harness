@@ -3,10 +3,12 @@
 mod callables;
 mod persistence;
 mod routing;
+mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError};
 pub use persistence::{JsonFileStore, PersistenceError, RuntimeCheckpoint};
 pub use routing::{RoutingRegistry, RoutingRegistryError};
+pub use server::{ConductorServer, ServerError};
 
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
@@ -112,6 +114,7 @@ pub struct ConductorRuntime {
     events: Vec<ExecutionEvent>,
     callables: CallableRegistry,
     routing: RoutingRegistry,
+    event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
     next_session: u64,
     next_execution: u64,
     next_event: u64,
@@ -134,6 +137,7 @@ impl ConductorRuntime {
             events: Vec::new(),
             callables: CallableRegistry::default(),
             routing: RoutingRegistry::default(),
+            event_sink: None,
             next_session: 0,
             next_execution: 0,
             next_event: 0,
@@ -436,7 +440,7 @@ impl ConductorRuntime {
             .iter()
             .map(|descriptor| descriptor.id.clone())
             .collect();
-        let mut backend_session = backend.open_session(BackendSessionRequest {
+        let backend_session = backend.open_session(BackendSessionRequest {
             model: plan.model,
             tools: plan.tools,
         })?;
@@ -526,6 +530,13 @@ impl ConductorRuntime {
             kind,
         };
         self.events.push(event.clone());
+        if self
+            .event_sink
+            .as_ref()
+            .is_some_and(|sink| sink.send(event.clone()).is_err())
+        {
+            self.event_sink = None;
+        }
         Ok(event)
     }
 
@@ -653,6 +664,19 @@ impl ConductorRuntime {
             step.objective.unwrap_or(objective),
         )?;
         Ok(())
+    }
+
+    pub fn subscribe_events(
+        &mut self,
+        capacity: usize,
+    ) -> std::sync::mpsc::Receiver<ExecutionEvent> {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(capacity.max(1));
+        self.event_sink = Some(sender);
+        receiver
+    }
+
+    pub fn unsubscribe_events(&mut self) {
+        self.event_sink = None;
     }
 
     #[must_use]

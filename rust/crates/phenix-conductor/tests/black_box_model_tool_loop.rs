@@ -34,18 +34,18 @@ impl Backend for MockBackend {
     fn open_session(
         &mut self,
         request: BackendSessionRequest,
-    ) -> Result<Box<dyn BackendSession>, BackendError> {
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
         if let Some(expected) = self.expected_model.as_deref() {
             assert_eq!(request.model.model.as_str(), expected);
         }
         self.opened.store(true, Ordering::SeqCst);
-        Ok(Box::new(MockSession))
+        Ok(Arc::new(MockSession))
     }
 }
 
 impl BackendSession for MockSession {
     fn execute(
-        &mut self,
+        &self,
         _request: BackendExecutionRequest,
         host: &mut dyn BackendHost,
     ) -> Result<(), BackendError> {
@@ -54,7 +54,7 @@ impl BackendSession for MockSession {
         Ok(())
     }
 
-    fn cancel(&mut self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
         Ok(())
     }
 }
@@ -76,17 +76,17 @@ impl Backend for ToolBackend {
     fn open_session(
         &mut self,
         request: BackendSessionRequest,
-    ) -> Result<Box<dyn BackendSession>, BackendError> {
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
         assert_eq!(request.tools.callables.len(), 1);
         assert_eq!(request.tools.callables[0].id.as_str(), "echo");
         self.opened.store(true, Ordering::SeqCst);
-        Ok(Box::new(ToolSession))
+        Ok(Arc::new(ToolSession))
     }
 }
 
 impl BackendSession for ToolSession {
     fn execute(
-        &mut self,
+        &self,
         _request: BackendExecutionRequest,
         host: &mut dyn BackendHost,
     ) -> Result<(), BackendError> {
@@ -102,7 +102,7 @@ impl BackendSession for ToolSession {
         Ok(())
     }
 
-    fn cancel(&mut self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
         Ok(())
     }
 }
@@ -123,9 +123,9 @@ impl Backend for UnsupportedBackend {
     fn open_session(
         &mut self,
         _request: BackendSessionRequest,
-    ) -> Result<Box<dyn BackendSession>, BackendError> {
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
         self.opened.store(true, Ordering::SeqCst);
-        Ok(Box::new(MockSession))
+        Ok(Arc::new(MockSession))
     }
 }
 

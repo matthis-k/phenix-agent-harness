@@ -434,6 +434,7 @@ impl ConductorRuntime {
             events: checkpoint.events,
             callables: CallableRegistry::default(),
             routing: RoutingRegistry::default(),
+            event_sink: None,
             next_session: checkpoint.next_session,
             next_execution: checkpoint.next_execution,
             next_event: checkpoint.next_event,

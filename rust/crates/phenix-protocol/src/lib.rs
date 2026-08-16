@@ -65,9 +65,11 @@ pub enum Reply {
     Initialized {
         snapshot: RuntimeSnapshot,
         events: Vec<ExecutionEvent>,
+        backends: Vec<BackendCatalog>,
     },
     Snapshot {
         snapshot: RuntimeSnapshot,
+        backends: Vec<BackendCatalog>,
     },
     Session {
         session: SessionSummary,

@@ -6,6 +6,7 @@ use phenix_core::{
 };
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolHostingCapability {
@@ -62,13 +63,17 @@ pub trait BackendHost {
     fn invoke_tool(&mut self, invocation: ToolInvocation) -> Result<ToolResult, BackendError>;
 }
 
-pub trait BackendSession: Send {
+/// A materialized backend session may be executing on the conductor execution
+/// worker while a frontend request concurrently asks it to cancel. Implementors
+/// therefore expose thread-safe shared methods rather than requiring exclusive
+/// ownership for the lifetime of a model turn.
+pub trait BackendSession: Send + Sync {
     fn execute(
-        &mut self,
+        &self,
         request: BackendExecutionRequest,
         host: &mut dyn BackendHost,
     ) -> Result<(), BackendError>;
-    fn cancel(&mut self, execution_id: &ExecutionId) -> Result<(), BackendError>;
+    fn cancel(&self, execution_id: &ExecutionId) -> Result<(), BackendError>;
 }
 
 pub trait Backend: Send {
@@ -89,7 +94,7 @@ pub trait Backend: Send {
     fn open_session(
         &mut self,
         request: BackendSessionRequest,
-    ) -> Result<Box<dyn BackendSession>, BackendError>;
+    ) -> Result<Arc<dyn BackendSession>, BackendError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
