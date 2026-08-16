@@ -1,14 +1,20 @@
 #![forbid(unsafe_code)]
 
+mod tooling;
+
+pub use tooling::{ToolRegistry, ToolRegistryError};
+
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
-    BackendSessionRequest, ToolInvocation, ToolProvision, ToolResult,
+    BackendSessionRequest, ToolHostingCapability, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_core::{
-    ConfigRevisionId, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, SessionId, SessionSummary,
+    CallableDescriptor, CallableId, ConfigRevisionId, ExecutionEvent, ExecutionEventKind,
+    ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget,
+    SessionId, SessionSummary, ToolCallId,
 };
 use phenix_protocol::RuntimeSnapshot;
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -21,6 +27,7 @@ pub enum ConductorError {
     InvalidChildKind,
     InvalidLifecycle(ExecutionId),
     RoutingUnavailable,
+    ToolRegistry(ToolRegistryError),
     Backend(BackendError),
 }
 
@@ -33,6 +40,7 @@ impl Display for ConductorError {
             Self::InvalidChildKind => f.write_str("root is not a valid child execution kind"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
             Self::RoutingUnavailable => f.write_str("routing is not implemented until R5"),
+            Self::ToolRegistry(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
         }
     }
@@ -41,6 +49,11 @@ impl Error for ConductorError {}
 impl From<BackendError> for ConductorError {
     fn from(value: BackendError) -> Self {
         Self::Backend(value)
+    }
+}
+impl From<ToolRegistryError> for ConductorError {
+    fn from(value: ToolRegistryError) -> Self {
+        Self::ToolRegistry(value)
     }
 }
 
@@ -55,23 +68,26 @@ struct ExecutionRecord {
     prompt: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ExecutionPlan {
     pub execution_id: ExecutionId,
     pub model: ModelTarget,
+    pub tools: ToolProvision,
 }
 
-/// In-memory reference runtime used to prove the runtime model before any real
-/// backend adapter or persistence layer is introduced.
+/// In-memory reference runtime used to prove conductor-owned runtime semantics
+/// before any real backend adapter or persistence layer is introduced.
 #[derive(Debug)]
 pub struct ConductorRuntime {
     config_revision: ConfigRevisionId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
     events: Vec<ExecutionEvent>,
+    tools: ToolRegistry,
     next_session: u64,
     next_execution: u64,
     next_event: u64,
+    next_tool_call: u64,
 }
 
 impl Default for ConductorRuntime {
@@ -88,10 +104,29 @@ impl ConductorRuntime {
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
             events: Vec::new(),
+            tools: ToolRegistry::default(),
             next_session: 0,
             next_execution: 0,
             next_event: 0,
+            next_tool_call: 0,
         }
+    }
+
+    pub fn register_tool<F>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        handler: F,
+    ) -> Result<(), ConductorError>
+    where
+        F: Fn(&str) -> Result<String, String> + Send + Sync + 'static,
+    {
+        self.tools.register(descriptor, handler)?;
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
+        self.tools.descriptors()
     }
 
     pub fn create_session(
@@ -237,6 +272,9 @@ impl ConductorRuntime {
             ExecutionTarget::Fixed(model) => Ok(ExecutionPlan {
                 execution_id: execution_id.clone(),
                 model: model.clone(),
+                tools: ToolProvision {
+                    callables: self.tools.descriptors(),
+                },
             }),
             ExecutionTarget::Routed(_) => Err(ConductorError::RoutingUnavailable),
         }
@@ -255,12 +293,26 @@ impl ConductorRuntime {
         if record.summary.state != ExecutionState::Pending {
             return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
         }
+        if !plan.tools.callables.is_empty()
+            && matches!(
+                backend.capabilities().tool_hosting,
+                ToolHostingCapability::Unsupported
+            )
+        {
+            return Err(ConductorError::Backend(BackendError::Unsupported(
+                "backend cannot host conductor-provisioned tools".to_owned(),
+            )));
+        }
         let prompt = record.prompt.clone();
+        let allowed_tools = plan
+            .tools
+            .callables
+            .iter()
+            .map(|descriptor| descriptor.id.clone())
+            .collect();
         let mut backend_session = backend.open_session(BackendSessionRequest {
             model: plan.model,
-            tools: ToolProvision {
-                callables: Vec::new(),
-            },
+            tools: plan.tools,
         })?;
         self.set_state(execution_id, ExecutionState::Running)?;
         let request = BackendExecutionRequest {
@@ -271,6 +323,7 @@ impl ConductorRuntime {
             let mut host = RuntimeHost {
                 runtime: self,
                 execution_id: execution_id.clone(),
+                allowed_tools,
             };
             backend_session.execute(request, &mut host)
         };
@@ -403,6 +456,60 @@ impl ConductorRuntime {
         }
     }
 
+    fn invoke_tool(
+        &mut self,
+        execution_id: &ExecutionId,
+        allowed_tools: &BTreeSet<CallableId>,
+        invocation: ToolInvocation,
+    ) -> Result<ToolResult, BackendError> {
+        if !allowed_tools.contains(&invocation.callable)
+            || !self.tools.contains(&invocation.callable)
+        {
+            return Err(BackendError::Protocol(format!(
+                "backend invoked unprovisioned tool {}",
+                invocation.callable
+            )));
+        }
+        let tool_call_id = self.new_tool_call_id();
+        self.push_event(
+            execution_id,
+            ExecutionEventKind::ToolCallStarted {
+                tool_call_id: tool_call_id.clone(),
+                callable: invocation.callable.clone(),
+            },
+        )
+        .map_err(conductor_protocol_error)?;
+        self.push_event(
+            execution_id,
+            ExecutionEventKind::ToolCallArguments {
+                tool_call_id: tool_call_id.clone(),
+                arguments: invocation.arguments_json.clone(),
+            },
+        )
+        .map_err(conductor_protocol_error)?;
+
+        let result = match serde_json::from_str::<Value>(&invocation.arguments_json) {
+            Ok(_) => self
+                .tools
+                .invoke(&invocation.callable, &invocation.arguments_json)
+                .map_err(|error| BackendError::Protocol(error.to_string()))?,
+            Err(error) => ToolResult {
+                output: format!("invalid JSON tool arguments: {error}"),
+                success: false,
+            },
+        };
+        self.push_event(
+            execution_id,
+            ExecutionEventKind::ToolCallFinished {
+                tool_call_id,
+                output: result.output.clone(),
+                success: result.success,
+            },
+        )
+        .map_err(conductor_protocol_error)?;
+        Ok(result)
+    }
+
     fn new_session_id(&mut self) -> SessionId {
         self.next_session += 1;
         SessionId::parse(format!("session-{}", self.next_session)).expect("generated id")
@@ -411,6 +518,14 @@ impl ConductorRuntime {
         self.next_execution += 1;
         ExecutionId::parse(format!("execution-{}", self.next_execution)).expect("generated id")
     }
+    fn new_tool_call_id(&mut self) -> ToolCallId {
+        self.next_tool_call += 1;
+        ToolCallId::parse(format!("tool-call-{}", self.next_tool_call)).expect("generated id")
+    }
+}
+
+fn conductor_protocol_error(error: ConductorError) -> BackendError {
+    BackendError::Protocol(error.to_string())
 }
 
 fn is_terminal(state: &ExecutionState) -> bool {
@@ -426,6 +541,7 @@ fn is_terminal(state: &ExecutionState) -> bool {
 struct RuntimeHost<'a> {
     runtime: &'a mut ConductorRuntime,
     execution_id: ExecutionId,
+    allowed_tools: BTreeSet<CallableId>,
 }
 
 impl BackendHost for RuntimeHost<'_> {
@@ -437,13 +553,12 @@ impl BackendHost for RuntimeHost<'_> {
         self.runtime
             .push_event(&self.execution_id, event)
             .map(|_| ())
-            .map_err(|error| BackendError::Protocol(error.to_string()))
+            .map_err(conductor_protocol_error)
     }
 
-    fn invoke_tool(&mut self, _invocation: ToolInvocation) -> Result<ToolResult, BackendError> {
-        Err(BackendError::Unsupported(
-            "tool invocation is introduced in R4".to_owned(),
-        ))
+    fn invoke_tool(&mut self, invocation: ToolInvocation) -> Result<ToolResult, BackendError> {
+        self.runtime
+            .invoke_tool(&self.execution_id, &self.allowed_tools, invocation)
     }
 }
 
