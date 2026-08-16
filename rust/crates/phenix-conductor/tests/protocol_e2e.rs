@@ -19,8 +19,7 @@ use std::sync::{
 mod protocol_harness;
 
 use protocol_harness::{
-    execution_id, model_target, MockAction, MockBackend, MockBackendState, MockModelScript,
-    ObservedAction, ProtocolHarness,
+    execution_id, model_target, MockAction, MockModelScript, ObservedAction, ProtocolHarness,
 };
 
 fn descriptor(id: &str, kind: CallableKind, requires_permission: bool) -> CallableDescriptor {
@@ -75,57 +74,47 @@ fn frontend_input_reaches_prepared_mock_model_and_returns_events() {
 
 #[test]
 fn journal_replay_restart_continues_protocol_with_monotonic_ids_and_events() {
-    let backend_state = Arc::new(MockBackendState::default());
-    let mut backend = MockBackend::new(
-        backend_state,
-        MockModelScript::reply("before restart complete"),
-    );
-    let mut runtime = ConductorRuntime::new();
-    let session = runtime
-        .create_session(
-            None,
-            Some("restart-e2e".to_owned()),
-            ExecutionTarget::Fixed(model_target("mock-model")),
-        )
-        .unwrap();
-    let first = runtime.submit(&session.id, "before restart").unwrap();
-    runtime.drive_execution(&first.id, &mut backend).unwrap();
+    let before = ProtocolHarness::model(MockModelScript::reply("before restart complete"))
+        .input("before restart")
+        .run();
 
-    let before_restart = runtime.snapshot();
-    assert_eq!(
-        before_restart.executions[0].state,
-        ExecutionState::Completed
-    );
+    assert!(before.response_ok(1));
+    assert!(before.response_ok(2));
+    assert!(before.response_ok(3));
+    assert_eq!(before.backend.prompts(), vec!["before restart"]);
+    assert_eq!(before.only_execution_state(), Some(&ExecutionState::Completed));
+    let before_restart = before.snapshot.clone();
+    let session_id = before_restart.sessions[0].id.clone();
     let cursor = before_restart.last_event_sequence;
-    let persisted = serde_json::to_vec(runtime.journal()).unwrap();
+    let persisted = serde_json::to_vec(&before.journal).unwrap();
     let restored = ConductorRuntime::restore(serde_json::from_slice(&persisted).unwrap()).unwrap();
     assert_eq!(restored.snapshot(), before_restart);
 
-    let run = ProtocolHarness::model(MockModelScript::reply("after restart complete"))
+    let after = ProtocolHarness::model(MockModelScript::reply("after restart complete"))
         .runtime(restored)
         .commands([
             Command::Initialize {
                 after_sequence: Some(cursor),
             },
             Command::Submit {
-                session_id: session.id,
+                session_id,
                 text: "after restart".to_owned(),
             },
         ])
         .run();
 
-    assert!(run.response_ok(1));
-    assert!(run.response_ok(2));
-    assert_eq!(run.backend.prompts(), vec!["after restart"]);
-    assert_eq!(run.snapshot.executions.len(), 2);
-    let continued = run
+    assert!(after.response_ok(1));
+    assert!(after.response_ok(2));
+    assert_eq!(after.backend.prompts(), vec!["after restart"]);
+    assert_eq!(after.snapshot.executions.len(), 2);
+    let continued = after
         .snapshot
         .executions
         .iter()
         .find(|execution| execution.id == execution_id(2))
         .expect("continued execution uses replayed execution cursor");
     assert_eq!(continued.state, ExecutionState::Completed);
-    let new_events = run
+    let new_events = after
         .events()
         .filter(|event| event.sequence > cursor)
         .collect::<Vec<_>>();
