@@ -883,10 +883,14 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.execution_id = Some(id);
             error
         }
-        ConductorError::PermissionRequired(callable) => protocol_error(
-            ErrorCode::PolicyDenied,
-            format!("permission is required for callable {callable}"),
-        ),
+        ConductorError::PolicyDenied {
+            execution_id,
+            denial,
+        } => {
+            let mut error = protocol_error(ErrorCode::PolicyDenied, denial.message);
+            error.execution_id = Some(execution_id);
+            error
+        }
         ConductorError::CallableRegistry(error) => {
             protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }

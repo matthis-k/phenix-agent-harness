@@ -121,9 +121,9 @@ impl PersistedExecution {
     }
 }
 
-/// Durable mutable conductor state. Executable callables, routing tables, and
-/// backend sessions are intentionally excluded and must be rebound from the
-/// pinned immutable config revision after restore.
+/// Durable mutable conductor state. Executable callables, routing tables,
+/// invocation guards, and backend sessions are intentionally excluded and must
+/// be rebound from the pinned immutable config revision after restore.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeCheckpoint {
     config_revision: ConfigRevisionId,
@@ -434,6 +434,7 @@ impl ConductorRuntime {
             events: checkpoint.events,
             callables: CallableRegistry::default(),
             routing: RoutingRegistry::default(),
+            policy: crate::InvocationPolicy::new(),
             event_sink: None,
             next_session: checkpoint.next_session,
             next_execution: checkpoint.next_execution,

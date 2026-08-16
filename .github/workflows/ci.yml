@@ -112,6 +112,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-stdio-roundtrip
 
+      - name: "conductor / protocol_e2e"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-protocol-e2e
+
       - name: Repository remains clean
         if: ${{ !cancelled() }}
         run: |

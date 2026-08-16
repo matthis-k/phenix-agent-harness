@@ -233,12 +233,6 @@ impl CallableRegistry {
                 actual: entry.descriptor.kind.clone(),
             });
         };
-        if entry.descriptor.policy.requires_permission {
-            return Ok(ToolResult {
-                output: format!("permission required for tool {id}"),
-                success: false,
-            });
-        }
         Ok(match handler(arguments_json) {
             Ok(output) => ToolResult {
                 output,
@@ -257,7 +251,6 @@ mod tests {
     use super::*;
     use phenix_core::{CallablePolicy, CapabilitySet};
     use serde_json::json;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
         CallableDescriptor {
@@ -287,22 +280,17 @@ mod tests {
     }
 
     #[test]
-    fn permission_policy_denies_without_executing_tool_handler() {
-        let called = Arc::new(AtomicBool::new(false));
-        let marker = called.clone();
-        let mut guarded = descriptor("guarded", CallableKind::Tool);
-        guarded.policy.requires_permission = true;
+    fn tool_registry_executes_handler_without_owning_policy() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_tool(guarded, move |_| {
-                marker.store(true, Ordering::SeqCst);
-                Ok("should not execute".to_owned())
+            .register_tool(descriptor("echo", CallableKind::Tool), |arguments| {
+                Ok(arguments.to_owned())
             })
             .unwrap();
         let result = registry
-            .invoke_tool(&CallableId::parse("guarded").unwrap(), "{}")
+            .invoke_tool(&CallableId::parse("echo").unwrap(), r#"{"value":1}"#)
             .unwrap();
-        assert!(!result.success);
-        assert!(!called.load(Ordering::SeqCst));
+        assert!(result.success);
+        assert_eq!(result.output, r#"{"value":1}"#);
     }
 }
