@@ -9,7 +9,7 @@ use phenix_core::{
     ExecutionEventKind, ExecutionState, ExecutionTarget, WorkflowDefinition,
     WorkflowExecutionPolicy, WorkflowStep,
 };
-use phenix_protocol::Command;
+use phenix_protocol::{Command, Reply};
 use serde_json::json;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -40,6 +40,54 @@ fn descriptor(id: &str, kind: CallableKind, requires_permission: bool) -> Callab
 
 fn tool_descriptor(id: &str) -> CallableDescriptor {
     descriptor(id, CallableKind::Tool, false)
+}
+
+#[test]
+fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
+    let run = ProtocolHarness::model(MockModelScript::reply("model must not execute"))
+        .configure_runtime(|runtime| {
+            runtime
+                .register_tool(tool_descriptor("tool.echo"), |arguments| Ok(arguments.to_owned()))
+                .unwrap();
+            runtime
+                .register_agent(descriptor("agent.catalog", CallableKind::Agent, false))
+                .unwrap();
+            runtime
+                .register_workflow(WorkflowDefinition {
+                    descriptor: descriptor("workflow.catalog", CallableKind::Workflow, false),
+                    policy: WorkflowExecutionPolicy::Sequential,
+                    steps: vec![WorkflowStep {
+                        callable: CallableId::parse("agent.catalog").unwrap(),
+                        objective: Some("catalog step".to_owned()),
+                    }],
+                })
+                .unwrap();
+        })
+        .commands([
+            Command::Initialize {
+                after_sequence: Some(0),
+            },
+            Command::GetCallableCatalog,
+        ])
+        .run();
+
+    assert!(run.response_ok(1));
+    assert!(run.response_ok(2));
+    let Reply::CallableCatalog { callables } = run.reply(2).expect("callable catalog reply") else {
+        panic!("callable catalog command returned the wrong reply type");
+    };
+    assert_eq!(callables.len(), 3);
+    assert!(callables.iter().any(|descriptor| {
+        descriptor.id.as_str() == "tool.echo" && descriptor.kind == CallableKind::Tool
+    }));
+    assert!(callables.iter().any(|descriptor| {
+        descriptor.id.as_str() == "agent.catalog" && descriptor.kind == CallableKind::Agent
+    }));
+    assert!(callables.iter().any(|descriptor| {
+        descriptor.id.as_str() == "workflow.catalog" && descriptor.kind == CallableKind::Workflow
+    }));
+    assert_eq!(run.backend.opened(), 0);
+    assert_eq!(run.backend.executed(), 0);
 }
 
 #[test]
