@@ -281,10 +281,9 @@ mod tests {
                 .prepare(&backend.capabilities())
                 .unwrap(),
         };
-        let error = match backend.open_persistent_session(
-            &SessionId::parse("session-1").unwrap(),
-            request,
-        ) {
+        let error = match backend
+            .open_persistent_session(&SessionId::parse("session-1").unwrap(), request)
+        {
             Ok(_) => panic!("persistent opening must require an implementation"),
             Err(error) => error,
         };
