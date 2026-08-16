@@ -3,8 +3,10 @@ resolver = "2"
 members = [
   "crates/phenix-acp",
   "crates/phenix-acp-presets",
+  "crates/phenix-core",
+  "crates/phenix-protocol",
+  "crates/phenix-backend",
   "crates/phenix-conductor",
-  "crates/phenix-runtime-api",
 ]
 
 [workspace.dependencies]

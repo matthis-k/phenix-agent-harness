@@ -1,12 +1,12 @@
 [package]
-name = "phenix-conductor"
+name = "phenix-protocol"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [dependencies]
-clap.workspace = true
-phenix-backend = { path = "../phenix-backend" }
 phenix-core = { path = "../phenix-core" }
-phenix-protocol = { path = "../phenix-protocol" }
+serde.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true

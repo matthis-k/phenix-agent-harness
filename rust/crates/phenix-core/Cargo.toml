@@ -1,11 +1,9 @@
 [package]
-name = "phenix-runtime-api"
+name = "phenix-core"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
-[lib]
-path = "src/lib.rs"
-
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true

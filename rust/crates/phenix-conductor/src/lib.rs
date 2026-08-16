@@ -1,33 +1,33 @@
 #![forbid(unsafe_code)]
 
-use phenix_runtime_api::BackendHealth;
+/// Minimal conductor spine. Runtime state/execution semantics are added in R3;
+/// this crate deliberately owns no ACP types.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RuntimeHealth {
+    Starting,
+    Ready,
+}
 
-/// Minimal application-runtime spine retained across the purge.
-///
-/// Functionality is intentionally reintroduced here rather than through ACP.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConductorRuntime {
-    health: BackendHealth,
+    health: RuntimeHealth,
 }
 
 impl ConductorRuntime {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            health: BackendHealth::Starting,
+            health: RuntimeHealth::Starting,
         }
     }
-
     #[must_use]
-    pub fn health(&self) -> &BackendHealth {
+    pub fn health(&self) -> &RuntimeHealth {
         &self.health
     }
-
     pub fn mark_ready(&mut self) {
-        self.health = BackendHealth::Ready;
+        self.health = RuntimeHealth::Ready;
     }
 }
-
 impl Default for ConductorRuntime {
     fn default() -> Self {
         Self::new()
@@ -37,12 +37,10 @@ impl Default for ConductorRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn conductor_owns_runtime_lifecycle() {
+    fn conductor_spine_is_protocol_and_backend_neutral() {
         let mut runtime = ConductorRuntime::new();
-        assert_eq!(runtime.health(), &BackendHealth::Starting);
         runtime.mark_ready();
-        assert_eq!(runtime.health(), &BackendHealth::Ready);
+        assert_eq!(runtime.health(), &RuntimeHealth::Ready);
     }
 }
