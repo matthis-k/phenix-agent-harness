@@ -240,7 +240,10 @@ fn typed_callable_command_executes_native_provider_without_model_backend() {
     assert_eq!(run.snapshot.executions.len(), 1);
     let execution = &run.snapshot.executions[0];
     assert_eq!(execution.parent_execution, None);
-    assert_eq!(execution.callable, Some(CallableId::parse("agent.native").unwrap()));
+    assert_eq!(
+        execution.callable,
+        Some(CallableId::parse("agent.native").unwrap())
+    );
     assert_eq!(execution.state, ExecutionState::Completed);
     assert!(run.has_event(|event| {
         matches!(
@@ -314,7 +317,12 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
         .snapshot
         .executions
         .iter()
-        .find(|execution| execution.callable.as_ref().is_some_and(|id| id.as_str() == "workflow.two-step"))
+        .find(|execution| {
+            execution
+                .callable
+                .as_ref()
+                .is_some_and(|id| id.as_str() == "workflow.two-step")
+        })
         .expect("workflow execution exists");
     assert_eq!(workflow.parent_execution, None);
     assert_eq!(workflow.state, ExecutionState::Completed);

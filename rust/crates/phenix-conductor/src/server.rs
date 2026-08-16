@@ -352,11 +352,7 @@ impl ConductorServer {
         };
         let execution_id = execution.id.clone();
         self.persist()?;
-        self.respond(
-            output,
-            request_id,
-            Ok(Reply::Execution { execution }),
-        )?;
+        self.respond(output, request_id, Ok(Reply::Execution { execution }))?;
         self.enqueue_execution(execution_id, executions)
     }
 
@@ -369,16 +365,17 @@ impl ConductorServer {
         output: &SyncSender<ServerMessage>,
         executions: &SyncSender<ExecutionJob>,
     ) -> Result<(), ServerError> {
-        let execution = match self
-            .lock_runtime()?
-            .start_session_callable(&session_id, &callable, objective)
-        {
-            Ok(execution) => execution,
-            Err(error) => {
-                self.respond(output, request_id, Err(map_conductor_error(error)))?;
-                return Ok(());
-            }
-        };
+        let execution =
+            match self
+                .lock_runtime()?
+                .start_session_callable(&session_id, &callable, objective)
+            {
+                Ok(execution) => execution,
+                Err(error) => {
+                    self.respond(output, request_id, Err(map_conductor_error(error)))?;
+                    return Ok(());
+                }
+            };
         let execution_id = execution.id.clone();
         let execution_kind = execution.kind.clone();
         self.persist()?;
@@ -642,13 +639,7 @@ fn execute_execution(
             store,
             persist_lock,
         ),
-        _ => execute_provider_execution(
-            execution_id,
-            runtime,
-            active_scopes,
-            store,
-            persist_lock,
-        ),
+        _ => execute_provider_execution(execution_id, runtime, active_scopes, store, persist_lock),
     }
 }
 
