@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{
-    ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, SessionId, SessionSummary,
+    AuthenticationMethodId, BackendCatalog, BackendId, ExecutionEvent, ExecutionId,
+    ExecutionSummary, ExecutionTarget, SessionId, SessionSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,13 @@ pub enum Command {
     CancelExecution {
         execution_id: ExecutionId,
     },
+    RefreshBackendCatalog {
+        backend_id: BackendId,
+    },
+    SelectAuthentication {
+        backend_id: BackendId,
+        method_id: AuthenticationMethodId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -67,6 +75,9 @@ pub enum Reply {
     Execution {
         execution: ExecutionSummary,
     },
+    BackendCatalog {
+        catalog: BackendCatalog,
+    },
     Accepted,
 }
 
@@ -78,6 +89,7 @@ pub enum ErrorCode {
     PolicyDenied,
     UnsupportedCapability,
     RoutingFailure,
+    AuthenticationRequired,
     BackendTransport,
     BackendProtocol,
     ToolFailure,
@@ -92,8 +104,6 @@ pub struct ProtocolError {
     pub execution_id: Option<ExecutionId>,
 }
 
-/// Explicit wire-level response sum type. This avoids exposing Serde's native
-/// `Result<T, E>` representation as part of the Phenix protocol contract.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ResponsePayload {

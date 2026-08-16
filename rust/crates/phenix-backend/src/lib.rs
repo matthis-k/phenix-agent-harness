@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use phenix_core::{CallableDescriptor, CallableId, ExecutionId, ModelTarget};
+use phenix_core::{
+    AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId, ExecutionId,
+    ModelTarget,
+};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -70,6 +73,19 @@ pub trait BackendSession: Send {
 
 pub trait Backend: Send {
     fn capabilities(&self) -> BackendCapabilities;
+
+    fn catalog(&mut self) -> Result<BackendCatalog, BackendError> {
+        Err(BackendError::Unsupported(
+            "backend does not provide model/auth discovery".to_owned(),
+        ))
+    }
+
+    fn authenticate(&mut self, _method: &AuthenticationMethodId) -> Result<(), BackendError> {
+        Err(BackendError::Unsupported(
+            "backend does not provide authentication actions".to_owned(),
+        ))
+    }
+
     fn open_session(
         &mut self,
         request: BackendSessionRequest,
