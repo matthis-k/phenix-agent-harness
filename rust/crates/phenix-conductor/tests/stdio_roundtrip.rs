@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex};
 
 #[path = "support/server_cancellation.rs"]
 mod server_cancellation;
+#[path = "support/protocol_public_journeys.rs"]
+mod protocol_public_journeys;
 
 struct MockBackend;
 struct MockSession;
