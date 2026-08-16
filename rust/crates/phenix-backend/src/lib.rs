@@ -201,9 +201,7 @@ mod tests {
 
     #[test]
     fn empty_tool_provision_needs_no_presentation() {
-        let surface = ToolProvision::default()
-            .prepare(&capabilities([]))
-            .unwrap();
+        let surface = ToolProvision::default().prepare(&capabilities([])).unwrap();
         assert_eq!(surface.presentation(), None);
         assert!(surface.is_empty());
     }
@@ -219,9 +217,6 @@ mod tests {
             capabilities.preferred_tool_presentation(),
             Some(ToolPresentation::Native)
         );
-        assert_eq!(
-            capabilities([]).preferred_tool_presentation(),
-            None
-        );
+        assert_eq!(capabilities([]).preferred_tool_presentation(), None);
     }
 }
