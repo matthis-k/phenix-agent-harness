@@ -652,6 +652,9 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(user_inputs, vec![(workflow.id.clone(), "implement it".to_owned())]);
+        assert_eq!(
+            user_inputs,
+            vec![(workflow.id.clone(), "implement it".to_owned())]
+        );
     }
 }
