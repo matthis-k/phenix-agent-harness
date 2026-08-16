@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
 use agent_client_protocol::schema::v1::{
-    AuthMethod, AuthenticateRequest, ContentBlock, ContentChunk, ErrorCode, InitializeRequest,
-    NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
-    TextContent,
+    AuthMethod, AuthenticateRequest, CancelNotification, ContentBlock, ContentChunk, ErrorCode,
+    InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 
@@ -145,14 +145,49 @@ impl Backend for AcpBackend {
         Ok(Arc::new(AcpBackendSession {
             config: self.config.clone(),
             model: request.model,
+            cancellation: Mutex::new(CancellationState::default()),
         }))
     }
+}
+
+#[derive(Debug, Default)]
+struct CancellationState {
+    requested: bool,
+    signal: Option<mpsc::Sender<()>>,
 }
 
 #[derive(Debug)]
 struct AcpBackendSession {
     config: AcpBackendConfig,
     model: ModelTarget,
+    cancellation: Mutex<CancellationState>,
+}
+
+impl AcpBackendSession {
+    fn arm_cancellation(&self) -> Result<Option<mpsc::Receiver<()>>, BackendError> {
+        let mut cancellation = self.cancellation.lock().map_err(|_| {
+            BackendError::Protocol("ACP cancellation state lock poisoned".to_owned())
+        })?;
+        if cancellation.signal.is_some() {
+            return Err(BackendError::Protocol(
+                "ACP backend session is already executing".to_owned(),
+            ));
+        }
+        if cancellation.requested {
+            return Ok(None);
+        }
+        let (signal, receiver) = mpsc::channel();
+        cancellation.signal = Some(signal);
+        Ok(Some(receiver))
+    }
+
+    fn disarm_cancellation(&self) -> Result<(), BackendError> {
+        let mut cancellation = self.cancellation.lock().map_err(|_| {
+            BackendError::Protocol("ACP cancellation state lock poisoned".to_owned())
+        })?;
+        cancellation.signal = None;
+        Ok(())
+    }
 }
 
 impl BackendSession for AcpBackendSession {
@@ -161,16 +196,19 @@ impl BackendSession for AcpBackendSession {
         request: BackendExecutionRequest,
         host: &mut dyn BackendHost,
     ) -> Result<(), BackendError> {
+        let Some(cancellation) = self.arm_cancellation()? else {
+            return Ok(());
+        };
         let config = self.config.clone();
         let model = self.model.clone();
         let prompt = request.prompt;
         let (tx, rx) = mpsc::channel();
 
-        thread::scope(|scope| {
+        let result = thread::scope(|scope| {
             let worker_tx = tx.clone();
             scope.spawn(move || {
                 let done_tx = worker_tx.clone();
-                let result = block_on(run_turn(config, model, prompt, worker_tx));
+                let result = block_on(run_turn(config, model, prompt, worker_tx, cancellation));
                 let _ = done_tx.send(WorkerMessage::Done(result));
             });
             drop(tx);
@@ -193,14 +231,20 @@ impl BackendSession for AcpBackendSession {
                     }
                 }
             }
-        })
+        });
+        self.disarm_cancellation()?;
+        result
     }
 
     fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
-        Err(BackendError::Unsupported(
-            "ACP cancellation requires the persistent session lifecycle introduced after R7"
-                .to_owned(),
-        ))
+        let mut cancellation = self.cancellation.lock().map_err(|_| {
+            BackendError::Protocol("ACP cancellation state lock poisoned".to_owned())
+        })?;
+        cancellation.requested = true;
+        if let Some(signal) = cancellation.signal.as_ref() {
+            let _ = signal.send(());
+        }
+        Ok(())
     }
 }
 
@@ -301,6 +345,7 @@ async fn run_turn(
     model: ModelTarget,
     prompt: String,
     events: mpsc::Sender<WorkerMessage>,
+    cancellation: mpsc::Receiver<()>,
 ) -> Result<(), BackendError> {
     let agent = new_agent(&config);
     let notification_events = events.clone();
@@ -335,6 +380,14 @@ async fn run_turn(
                 .block_task()
                 .await?;
             let session_id = session.session_id.clone();
+            let cancel_connection = connection.clone();
+            let cancel_session_id = session_id.clone();
+            thread::spawn(move || {
+                if cancellation.recv().is_ok() {
+                    let _ = cancel_connection
+                        .send_notification(CancelNotification::new(cancel_session_id));
+                }
+            });
             let config_options = serde_json::to_value(&session.config_options)
                 .map_err(agent_client_protocol::Error::into_internal_error)?;
             let selection = exact_model_selection(&config_options, model.model.as_str())
@@ -583,6 +636,32 @@ mod tests {
             model: ModelId::parse("gpt-5.6-sol").unwrap(),
             inference: InferenceOptions::default(),
         }
+    }
+
+    fn backend_session() -> AcpBackendSession {
+        AcpBackendSession {
+            config: config(),
+            model: model(),
+            cancellation: Mutex::new(CancellationState::default()),
+        }
+    }
+
+    #[test]
+    fn cancel_before_execute_is_latched() {
+        let session = backend_session();
+        let execution = phenix_core::ExecutionId::parse("execution-1").unwrap();
+        session.cancel(&execution).unwrap();
+        assert!(session.arm_cancellation().unwrap().is_none());
+    }
+
+    #[test]
+    fn cancel_signals_active_execution() {
+        let session = backend_session();
+        let execution = phenix_core::ExecutionId::parse("execution-1").unwrap();
+        let cancellation = session.arm_cancellation().unwrap().unwrap();
+        session.cancel(&execution).unwrap();
+        assert!(cancellation.recv().is_ok());
+        session.disarm_cancellation().unwrap();
     }
 
     #[test]
