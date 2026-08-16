@@ -283,7 +283,10 @@ impl ExecutionProvider for BlockingNativeProvider {
         Ok(())
     }
 
-    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), ExecutionProviderError> {
+    fn cancel(
+        &self,
+        _execution_id: &phenix_core::ExecutionId,
+    ) -> Result<(), ExecutionProviderError> {
         self.cancelled.fetch_add(1, Ordering::SeqCst);
         self.released.signal();
         Ok(())
