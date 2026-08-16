@@ -37,8 +37,12 @@ fn routed_turn_replays_prior_conversation_after_model_route_changes() {
     let route_a = RoutingProfileId::parse("route-a").unwrap();
     let route_b = RoutingProfileId::parse("route-b").unwrap();
     let mut runtime = ConductorRuntime::new();
-    runtime.register_routing_profile(route("route-a", "model-a")).unwrap();
-    runtime.register_routing_profile(route("route-b", "model-b")).unwrap();
+    runtime
+        .register_routing_profile(route("route-a", "model-a"))
+        .unwrap();
+    runtime
+        .register_routing_profile(route("route-b", "model-b"))
+        .unwrap();
 
     let state = Arc::new(MockBackendState::default());
     let backend = MockBackend::new(state.clone(), MockModelScript::reply("alpha acknowledged"));
@@ -112,8 +116,12 @@ fn routed_context_is_reconstructed_from_the_journal_after_runtime_restore() {
     let route_a = RoutingProfileId::parse("route-a").unwrap();
     let route_b = RoutingProfileId::parse("route-b").unwrap();
     let mut runtime = ConductorRuntime::new();
-    runtime.register_routing_profile(route("route-a", "model-a")).unwrap();
-    runtime.register_routing_profile(route("route-b", "model-b")).unwrap();
+    runtime
+        .register_routing_profile(route("route-a", "model-a"))
+        .unwrap();
+    runtime
+        .register_routing_profile(route("route-b", "model-b"))
+        .unwrap();
 
     let first_state = Arc::new(MockBackendState::default());
     let first_backend = MockBackend::new(
