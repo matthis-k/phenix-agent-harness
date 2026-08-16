@@ -45,6 +45,12 @@
 
       integrationTargets = [
         {
+          id = "backend-acp-persistent-continuity";
+          package = "phenix-backend-acp";
+          test = "persistent_continuity";
+          label = "phenix-backend-acp / persistent_continuity";
+        }
+        {
           id = "phenix-acp-repeated-prompts";
           package = "phenix-acp";
           test = "repeated_prompts";
