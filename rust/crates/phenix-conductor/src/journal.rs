@@ -318,6 +318,11 @@ pub(crate) fn apply_domain_event(
                     "resolved route references unknown execution {execution_id}"
                 ))
             })?;
+            if !matches!(&execution.payload, ExecutionPayload::Invocation { .. }) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "resolved route references non-invocation execution {execution_id}"
+                )));
+            }
             if route.config_revision != *state.config_revision {
                 return Err(JournalError::InvalidEvent(format!(
                     "resolved route for {execution_id} uses config revision {} instead of {}",
@@ -329,15 +334,21 @@ pub(crate) fn apply_domain_event(
                     "resolved route for {execution_id} does not match execution target"
                 )));
             }
-            if state
-                .resolved_routes
-                .insert(execution_id.clone(), route.clone())
-                .is_some()
-            {
+            if let ExecutionTarget::Fixed(expected) = &route.requested_target {
+                if &route.model != expected {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "resolved fixed route for {execution_id} does not match its requested model"
+                    )));
+                }
+            }
+            if state.resolved_routes.contains_key(execution_id) {
                 return Err(JournalError::InvalidEvent(format!(
                     "execution {execution_id} was resolved more than once"
                 )));
             }
+            state
+                .resolved_routes
+                .insert(execution_id.clone(), route.clone());
         }
         DomainEvent::FrontendEvent { event } => {
             let expected = *state.next_event + 1;
