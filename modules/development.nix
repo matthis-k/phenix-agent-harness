@@ -51,6 +51,12 @@
           label = "phenix-backend-acp / persistent_continuity";
         }
         {
+          id = "backend-acp-tool-bridge";
+          package = "phenix-backend-acp";
+          test = "tool_bridge";
+          label = "phenix-backend-acp / tool_bridge";
+        }
+        {
           id = "phenix-acp-repeated-prompts";
           package = "phenix-acp";
           test = "repeated_prompts";
