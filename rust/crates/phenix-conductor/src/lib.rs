@@ -67,7 +67,9 @@ impl Display for ConductorError {
             Self::UnknownExecution(id) => write!(f, "unknown execution: {id}"),
             Self::EmptyInput => f.write_str("input must not be empty"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
-            Self::NonModelExecution(id) => write!(f, "execution is not model-provider backed: {id}"),
+            Self::NonModelExecution(id) => {
+                write!(f, "execution is not model-provider backed: {id}")
+            }
             Self::NonProviderExecution(id) => {
                 write!(f, "execution is not non-model-provider backed: {id}")
             }

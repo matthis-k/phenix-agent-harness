@@ -216,7 +216,9 @@ pub(crate) fn apply_domain_event(
         }
         DomainEvent::SessionRenamed { session_id, name } => {
             let session = state.sessions.get_mut(session_id).ok_or_else(|| {
-                JournalError::InvalidEvent(format!("rename references unknown session {session_id}"))
+                JournalError::InvalidEvent(format!(
+                    "rename references unknown session {session_id}"
+                ))
             })?;
             session.summary.name = Some(name.clone());
         }
@@ -293,8 +295,7 @@ pub(crate) fn apply_domain_event(
                 ))
             })?;
             let ExecutionPayload::Workflow {
-                next_step: current,
-                ..
+                next_step: current, ..
             } = &mut execution.payload
             else {
                 return Err(JournalError::InvalidEvent(format!(
@@ -359,11 +360,9 @@ pub(crate) fn apply_domain_event(
                 )));
             }
             if let ExecutionEventKind::ToolCallStarted { tool_call_id, .. } = &event.kind {
-                let expected_id = ToolCallId::parse(format!(
-                    "tool-call-{}",
-                    *state.next_tool_call + 1
-                ))
-                .expect("generated tool call id");
+                let expected_id =
+                    ToolCallId::parse(format!("tool-call-{}", *state.next_tool_call + 1))
+                        .expect("generated tool call id");
                 if *tool_call_id != expected_id {
                     return Err(JournalError::InvalidEvent(format!(
                         "tool-call identity cursor mismatch: expected {expected_id}, found {tool_call_id}"

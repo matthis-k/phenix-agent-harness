@@ -131,7 +131,9 @@ fn journal_replay_restart_continues_protocol_with_monotonic_ids_and_events() {
         .collect::<Vec<_>>();
     assert!(!new_events.is_empty());
     assert_eq!(new_events[0].sequence, cursor + 1);
-    assert!(new_events.iter().all(|event| event.execution_id == execution_id(2)));
+    assert!(new_events
+        .iter()
+        .all(|event| event.execution_id == execution_id(2)));
 }
 
 #[test]
@@ -174,11 +176,7 @@ fn streaming_order_and_cancellation_are_deterministic() {
         .collect::<Vec<_>>();
     assert_eq!(
         stream,
-        vec![
-            "reasoning:thinking-1",
-            "content:chunk-1",
-            "content:chunk-2"
-        ]
+        vec!["reasoning:thinking-1", "content:chunk-1", "content:chunk-2"]
     );
 }
 
