@@ -2,8 +2,8 @@ use phenix_backend::ToolPresentation;
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionState, ExecutionTarget, SessionId, WorkflowDefinition,
-    WorkflowExecutionPolicy, WorkflowStep,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, SessionId,
+    WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
 };
 use phenix_protocol::Command;
 use serde_json::json;
@@ -73,6 +73,60 @@ fn rejected_empty_submit_does_not_consume_execution_identity_or_emit_events() {
     assert!(runtime.snapshot().executions.is_empty());
 
     let execution = runtime.submit(&session.id, "valid").unwrap();
+    assert_eq!(execution.id, execution_id(1));
+}
+
+#[test]
+fn frontend_layer_can_start_a_registered_top_level_callable_without_a_wrapper_execution() {
+    let mut runtime = ConductorRuntime::new();
+    runtime
+        .register_agent(descriptor("scout", CallableKind::Agent))
+        .unwrap();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+
+    let execution = runtime
+        .start_session_callable(
+            &session.id,
+            &CallableId::parse("scout").unwrap(),
+            "inspect the repository",
+        )
+        .unwrap();
+
+    assert_eq!(execution.session_id, session.id);
+    assert_eq!(execution.parent_execution, None);
+    assert_eq!(execution.kind, ExecutionKind::Agent);
+    assert_eq!(execution.state, ExecutionState::Pending);
+    assert_eq!(runtime.snapshot().executions, vec![execution]);
+}
+
+#[test]
+fn rejected_top_level_callable_does_not_create_durable_execution_state() {
+    let mut runtime = ConductorRuntime::new();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let before_entries = runtime.journal().entries.len();
+    let before_events = runtime.events_since(0);
+
+    let result = runtime.start_session_callable(
+        &session.id,
+        &CallableId::parse("missing").unwrap(),
+        "inspect the repository",
+    );
+
+    assert!(matches!(result, Err(ConductorError::CallableRegistry(_))));
+    assert!(runtime.snapshot().executions.is_empty());
+    assert_eq!(runtime.journal().entries.len(), before_entries);
+    assert_eq!(runtime.events_since(0), before_events);
+
+    runtime
+        .register_agent(descriptor("scout", CallableKind::Agent))
+        .unwrap();
+    let execution = runtime
+        .start_session_callable(
+            &session.id,
+            &CallableId::parse("scout").unwrap(),
+            "valid callable",
+        )
+        .unwrap();
     assert_eq!(execution.id, execution_id(1));
 }
 

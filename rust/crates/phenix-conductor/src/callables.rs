@@ -1,6 +1,13 @@
-use crate::{ExecutionProvider, ExecutionProviderBinding};
+use crate::{
+    CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
+    ExecutionProvider, ExecutionProviderBinding, InvocationPolicyContext, InvocationSubject,
+    JournalExecutionPayload,
+};
 use phenix_backend::ToolResult;
-use phenix_core::{CallableDescriptor, CallableId, CallableKind, WorkflowDefinition};
+use phenix_core::{
+    CallableDescriptor, CallableId, CallableKind, ExecutionEventKind, ExecutionId, ExecutionKind,
+    ExecutionState, ExecutionSummary, SessionId, WorkflowDefinition,
+};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -290,6 +297,149 @@ impl CallableRegistry {
     }
 }
 
+impl ConductorRuntime {
+    /// Start an agent or workflow as a first-class top-level execution in a
+    /// session. This is the conductor-owned entrypoint used by frontends; it
+    /// does not synthesize a model-backed wrapper execution.
+    pub fn start_session_callable(
+        &mut self,
+        session_id: &SessionId,
+        callable: &CallableId,
+        objective: impl Into<String>,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        let objective = objective.into();
+        if objective.trim().is_empty() {
+            return Err(ConductorError::EmptyInput);
+        }
+        let descriptor = self.callables.descriptor(callable)?.clone();
+        let execution_id = self.new_execution_id();
+
+        match descriptor.kind {
+            CallableKind::Agent => {
+                self.callables.execution_provider(callable)?;
+                self.check_session_callable_policy(
+                    session_id,
+                    &execution_id,
+                    &descriptor,
+                    CallableOperation::StartAgent,
+                )?;
+                self.create_session_callable_execution(
+                    session_id,
+                    execution_id,
+                    ExecutionKind::Agent,
+                    callable.clone(),
+                    ExecutionPayload::Invocation { input: objective },
+                )
+            }
+            CallableKind::Workflow => {
+                let definition = self.callables.workflow(callable)?.clone();
+                self.check_session_callable_policy(
+                    session_id,
+                    &execution_id,
+                    &definition.descriptor,
+                    CallableOperation::StartWorkflow,
+                )?;
+                for step in &definition.steps {
+                    let step_descriptor = self.callables.descriptor(&step.callable)?.clone();
+                    self.callables.execution_provider(&step.callable)?;
+                    self.check_session_callable_policy(
+                        session_id,
+                        &execution_id,
+                        &step_descriptor,
+                        CallableOperation::StartWorkflowStep,
+                    )?;
+                }
+                let summary = self.create_session_callable_execution(
+                    session_id,
+                    execution_id,
+                    ExecutionKind::Workflow,
+                    callable.clone(),
+                    ExecutionPayload::Workflow {
+                        objective,
+                        next_step: 0,
+                    },
+                )?;
+                self.set_state(&summary.id, ExecutionState::Running)?;
+                self.advance_workflow(&summary.id)?;
+                Ok(self
+                    .executions
+                    .get(&summary.id)
+                    .expect("workflow exists after top-level creation")
+                    .summary
+                    .clone())
+            }
+            CallableKind::Tool => {
+                Err(CallableRegistryError::NotExecutable(callable.clone()).into())
+            }
+        }
+    }
+
+    fn check_session_callable_policy(
+        &self,
+        session_id: &SessionId,
+        execution_id: &ExecutionId,
+        descriptor: &CallableDescriptor,
+        operation: CallableOperation,
+    ) -> Result<(), ConductorError> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?;
+        let context = InvocationPolicyContext {
+            session_id,
+            execution_id,
+            config_revision: &session.summary.config_revision,
+            subject: InvocationSubject::Callable {
+                descriptor,
+                operation,
+            },
+        };
+        self.policy
+            .check(&context)
+            .map_err(|denial| ConductorError::PolicyDenied {
+                execution_id: execution_id.clone(),
+                denial,
+            })
+    }
+
+    fn create_session_callable_execution(
+        &mut self,
+        session_id: &SessionId,
+        execution_id: ExecutionId,
+        kind: ExecutionKind,
+        callable: CallableId,
+        payload: ExecutionPayload,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        let target = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?
+            .summary
+            .default_target
+            .clone();
+        let summary = ExecutionSummary {
+            id: execution_id,
+            session_id: session_id.clone(),
+            parent_execution: None,
+            kind,
+            callable: Some(callable),
+            target,
+            state: ExecutionState::Pending,
+        };
+        self.record_domain_event(DomainEvent::ExecutionCreated {
+            execution: summary.clone(),
+            payload: JournalExecutionPayload::from(&payload),
+        })?;
+        self.push_event(
+            &summary.id,
+            ExecutionEventKind::ExecutionStateChanged {
+                state: ExecutionState::Pending,
+            },
+        )?;
+        Ok(summary)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,7 +447,10 @@ mod tests {
         ExecutionProviderError, ExecutionProviderHost, ExecutionProviderKind,
         ExecutionProviderRequest,
     };
-    use phenix_core::{CallablePolicy, CapabilitySet, ExecutionId};
+    use phenix_core::{
+        BackendId, CallablePolicy, CapabilitySet, ExecutionTarget, InferenceOptions, ModelId,
+        ModelTarget, ProviderId, WorkflowExecutionPolicy, WorkflowStep,
+    };
     use serde_json::json;
 
     fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
@@ -310,6 +463,15 @@ mod tests {
             capabilities: CapabilitySet::default(),
             policy: CallablePolicy::default(),
         }
+    }
+
+    fn fixed(name: &str) -> ExecutionTarget {
+        ExecutionTarget::Fixed(ModelTarget {
+            backend: BackendId::parse("mock").unwrap(),
+            provider: ProviderId::parse("mock").unwrap(),
+            model: ModelId::parse(name).unwrap(),
+            inference: InferenceOptions::default(),
+        })
     }
 
     struct TestProvider;
@@ -378,8 +540,8 @@ mod tests {
         registry
             .register_workflow(WorkflowDefinition {
                 descriptor: descriptor("workflow", CallableKind::Workflow),
-                policy: phenix_core::WorkflowExecutionPolicy::Sequential,
-                steps: vec![phenix_core::WorkflowStep {
+                policy: WorkflowExecutionPolicy::Sequential,
+                steps: vec![WorkflowStep {
                     callable: CallableId::parse("native").unwrap(),
                     objective: None,
                 }],
@@ -400,5 +562,64 @@ mod tests {
             .unwrap();
         assert!(result.success);
         assert_eq!(result.output, r#"{"value":1}"#);
+    }
+
+    #[test]
+    fn session_agent_entrypoint_is_parentless_and_uses_session_target() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(descriptor("scout", CallableKind::Agent))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let execution = runtime
+            .start_session_callable(&session.id, &CallableId::parse("scout").unwrap(), "inspect")
+            .unwrap();
+
+        assert_eq!(execution.parent_execution, None);
+        assert_eq!(execution.kind, ExecutionKind::Agent);
+        assert_eq!(
+            execution.callable,
+            Some(CallableId::parse("scout").unwrap())
+        );
+        assert_eq!(execution.target, fixed("fixed"));
+        assert_eq!(execution.state, ExecutionState::Pending);
+    }
+
+    #[test]
+    fn session_workflow_entrypoint_creates_normal_child_execution_tree() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(descriptor("worker", CallableKind::Agent))
+            .unwrap();
+        runtime
+            .register_workflow(WorkflowDefinition {
+                descriptor: descriptor("implement", CallableKind::Workflow),
+                policy: WorkflowExecutionPolicy::Sequential,
+                steps: vec![WorkflowStep {
+                    callable: CallableId::parse("worker").unwrap(),
+                    objective: None,
+                }],
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let workflow = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("implement").unwrap(),
+                "implement it",
+            )
+            .unwrap();
+
+        assert_eq!(workflow.parent_execution, None);
+        assert_eq!(workflow.kind, ExecutionKind::Workflow);
+        assert_eq!(workflow.state, ExecutionState::Running);
+        let child = runtime
+            .snapshot()
+            .executions
+            .into_iter()
+            .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .expect("workflow started its first ordinary child execution");
+        assert_eq!(child.kind, ExecutionKind::Agent);
+        assert_eq!(child.callable, Some(CallableId::parse("worker").unwrap()));
     }
 }
