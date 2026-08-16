@@ -173,6 +173,9 @@ fn routed_context_is_reconstructed_from_the_journal_after_runtime_restore() {
         .unwrap();
 
     let journal = first_server.runtime().journal().clone();
+    let journal_json = serde_json::to_string(&journal).unwrap();
+    assert!(journal_json.contains("remember alpha"));
+    assert!(!journal_json.contains("Continue the same Phenix conversation"));
     drop(first_server);
 
     let mut restored = ConductorRuntime::restore(journal).unwrap();
