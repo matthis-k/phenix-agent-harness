@@ -4,7 +4,7 @@ use phenix_core::{
     ExecutionSummary, ExecutionTarget, ModelTarget, SessionId, SessionSummary, ToolCallId,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -341,14 +341,16 @@ pub(crate) fn apply_domain_event(
                     )));
                 }
             }
-            if state.resolved_routes.contains_key(execution_id) {
-                return Err(JournalError::InvalidEvent(format!(
-                    "execution {execution_id} was resolved more than once"
-                )));
+            match state.resolved_routes.entry(execution_id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(route.clone());
+                }
+                Entry::Occupied(_) => {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "execution {execution_id} was resolved more than once"
+                    )));
+                }
             }
-            state
-                .resolved_routes
-                .insert(execution_id.clone(), route.clone());
         }
         DomainEvent::FrontendEvent { event } => {
             let expected = *state.next_event + 1;
