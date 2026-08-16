@@ -368,7 +368,9 @@ impl ConductorRuntime {
                     .summary
                     .clone())
             }
-            CallableKind::Tool => Err(CallableRegistryError::NotExecutable(callable.clone()).into()),
+            CallableKind::Tool => {
+                Err(CallableRegistryError::NotExecutable(callable.clone()).into())
+            }
         }
     }
 
@@ -570,16 +572,15 @@ mod tests {
             .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let execution = runtime
-            .start_session_callable(
-                &session.id,
-                &CallableId::parse("scout").unwrap(),
-                "inspect",
-            )
+            .start_session_callable(&session.id, &CallableId::parse("scout").unwrap(), "inspect")
             .unwrap();
 
         assert_eq!(execution.parent_execution, None);
         assert_eq!(execution.kind, ExecutionKind::Agent);
-        assert_eq!(execution.callable, Some(CallableId::parse("scout").unwrap()));
+        assert_eq!(
+            execution.callable,
+            Some(CallableId::parse("scout").unwrap())
+        );
         assert_eq!(execution.target, fixed("fixed"));
         assert_eq!(execution.state, ExecutionState::Pending);
     }
