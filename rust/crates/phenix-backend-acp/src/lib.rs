@@ -15,7 +15,7 @@ use phenix_backend::{
 use phenix_core::{
     AuthenticationMethodDescriptor, AuthenticationMethodId, AuthenticationMethodKind,
     AuthenticationState, BackendCatalog, BackendId, InferenceOptions, ModelDescriptor, ModelId,
-    ModelTarget, ProviderId,
+    ModelTarget, ProviderId, SessionId,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -67,20 +67,50 @@ impl AcpBackendConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AcpBackend {
     config: AcpBackendConfig,
+    persistent_sessions: BTreeMap<SessionId, Arc<AcpPersistentSession>>,
 }
 
 impl AcpBackend {
     #[must_use]
     pub fn new(config: AcpBackendConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            persistent_sessions: BTreeMap::new(),
+        }
     }
 
     #[must_use]
     pub fn config(&self) -> &AcpBackendConfig {
         &self.config
+    }
+
+    fn validate_session_request(&self, request: &BackendSessionRequest) -> Result<(), BackendError> {
+        if request.model.backend != self.config.backend {
+            return Err(BackendError::Unsupported(format!(
+                "ACP backend {} cannot serve target backend {}",
+                self.config.backend, request.model.backend
+            )));
+        }
+        if request.model.provider != self.config.provider {
+            return Err(BackendError::Unsupported(format!(
+                "ACP backend provider {} cannot serve target provider {}",
+                self.config.provider, request.model.provider
+            )));
+        }
+        if request.model.inference.effort.is_some() {
+            return Err(BackendError::Unsupported(
+                "ACP inference effort mapping is not implemented in R7".to_owned(),
+            ));
+        }
+        if !request.tools.callables().is_empty() {
+            return Err(BackendError::Unsupported(
+                "ACP conductor-tool provisioning is not implemented in R7".to_owned(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -89,7 +119,7 @@ impl Backend for AcpBackend {
         BackendCapabilities {
             tool_presentations: BTreeSet::new(),
             images: false,
-            persistent_sessions: false,
+            persistent_sessions: true,
         }
     }
 
@@ -120,33 +150,32 @@ impl Backend for AcpBackend {
         &mut self,
         request: BackendSessionRequest,
     ) -> Result<Arc<dyn BackendSession>, BackendError> {
-        if request.model.backend != self.config.backend {
-            return Err(BackendError::Unsupported(format!(
-                "ACP backend {} cannot serve target backend {}",
-                self.config.backend, request.model.backend
-            )));
-        }
-        if request.model.provider != self.config.provider {
-            return Err(BackendError::Unsupported(format!(
-                "ACP backend provider {} cannot serve target provider {}",
-                self.config.provider, request.model.provider
-            )));
-        }
-        if request.model.inference.effort.is_some() {
-            return Err(BackendError::Unsupported(
-                "ACP inference effort mapping is not implemented in R7".to_owned(),
-            ));
-        }
-        if !request.tools.callables().is_empty() {
-            return Err(BackendError::Unsupported(
-                "ACP conductor-tool provisioning is not implemented in R7".to_owned(),
-            ));
-        }
+        self.validate_session_request(&request)?;
         Ok(Arc::new(AcpBackendSession {
             config: self.config.clone(),
             model: request.model,
             cancellation: Mutex::new(CancellationState::default()),
         }))
+    }
+
+    fn open_persistent_session(
+        &mut self,
+        session_id: &SessionId,
+        request: BackendSessionRequest,
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
+        self.validate_session_request(&request)?;
+        if let Some(session) = self.persistent_sessions.get(session_id) {
+            session.set_model(request.model)?;
+            return Ok(session.clone());
+        }
+
+        let session = Arc::new(AcpPersistentSession::start(
+            self.config.clone(),
+            request.model,
+        )?);
+        self.persistent_sessions
+            .insert(session_id.clone(), session.clone());
+        Ok(session)
     }
 }
 
@@ -154,6 +183,45 @@ impl Backend for AcpBackend {
 struct CancellationState {
     requested: bool,
     signal: Option<mpsc::Sender<()>>,
+}
+
+fn arm_cancellation(
+    cancellation: &Mutex<CancellationState>,
+) -> Result<Option<mpsc::Receiver<()>>, BackendError> {
+    let mut cancellation = cancellation
+        .lock()
+        .map_err(|_| BackendError::Protocol("ACP cancellation state lock poisoned".to_owned()))?;
+    if cancellation.signal.is_some() {
+        return Err(BackendError::Protocol(
+            "ACP backend session is already executing".to_owned(),
+        ));
+    }
+    if std::mem::take(&mut cancellation.requested) {
+        return Ok(None);
+    }
+    let (signal, receiver) = mpsc::channel();
+    cancellation.signal = Some(signal);
+    Ok(Some(receiver))
+}
+
+fn disarm_cancellation(cancellation: &Mutex<CancellationState>) -> Result<(), BackendError> {
+    let mut cancellation = cancellation
+        .lock()
+        .map_err(|_| BackendError::Protocol("ACP cancellation state lock poisoned".to_owned()))?;
+    cancellation.signal = None;
+    cancellation.requested = false;
+    Ok(())
+}
+
+fn request_cancellation(cancellation: &Mutex<CancellationState>) -> Result<(), BackendError> {
+    let mut cancellation = cancellation
+        .lock()
+        .map_err(|_| BackendError::Protocol("ACP cancellation state lock poisoned".to_owned()))?;
+    cancellation.requested = true;
+    if let Some(signal) = cancellation.signal.as_ref() {
+        let _ = signal.send(());
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -165,28 +233,11 @@ struct AcpBackendSession {
 
 impl AcpBackendSession {
     fn arm_cancellation(&self) -> Result<Option<mpsc::Receiver<()>>, BackendError> {
-        let mut cancellation = self.cancellation.lock().map_err(|_| {
-            BackendError::Protocol("ACP cancellation state lock poisoned".to_owned())
-        })?;
-        if cancellation.signal.is_some() {
-            return Err(BackendError::Protocol(
-                "ACP backend session is already executing".to_owned(),
-            ));
-        }
-        if cancellation.requested {
-            return Ok(None);
-        }
-        let (signal, receiver) = mpsc::channel();
-        cancellation.signal = Some(signal);
-        Ok(Some(receiver))
+        arm_cancellation(&self.cancellation)
     }
 
     fn disarm_cancellation(&self) -> Result<(), BackendError> {
-        let mut cancellation = self.cancellation.lock().map_err(|_| {
-            BackendError::Protocol("ACP cancellation state lock poisoned".to_owned())
-        })?;
-        cancellation.signal = None;
-        Ok(())
+        disarm_cancellation(&self.cancellation)
     }
 }
 
@@ -213,38 +264,107 @@ impl BackendSession for AcpBackendSession {
             });
             drop(tx);
 
-            let mut host_error = None;
-            loop {
-                match rx.recv() {
-                    Ok(WorkerMessage::Event(event)) => {
-                        if host_error.is_none() {
-                            host_error = host.emit(event).err();
-                        }
-                    }
-                    Ok(WorkerMessage::Done(result)) => return host_error.map_or(result, Err),
-                    Err(error) => {
-                        return Err(host_error.unwrap_or_else(|| {
-                            BackendError::Transport(format!(
-                                "ACP worker channel closed before completion: {error}"
-                            ))
-                        }));
-                    }
-                }
-            }
+            receive_worker_messages(rx, host)
         });
         self.disarm_cancellation()?;
         result
     }
 
     fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
-        let mut cancellation = self.cancellation.lock().map_err(|_| {
-            BackendError::Protocol("ACP cancellation state lock poisoned".to_owned())
-        })?;
-        cancellation.requested = true;
-        if let Some(signal) = cancellation.signal.as_ref() {
-            let _ = signal.send(());
-        }
+        request_cancellation(&self.cancellation)
+    }
+}
+
+struct AcpPersistentSession {
+    model: Mutex<ModelTarget>,
+    commands: mpsc::Sender<PersistentCommand>,
+    cancellation: Mutex<CancellationState>,
+}
+
+impl AcpPersistentSession {
+    fn start(config: AcpBackendConfig, model: ModelTarget) -> Result<Self, BackendError> {
+        let (commands, command_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let worker_model = model.clone();
+        thread::spawn(move || {
+            let ready_error = ready_tx.clone();
+            if let Err(error) = block_on(run_persistent_session(
+                config,
+                worker_model,
+                command_rx,
+                ready_tx,
+            )) {
+                let _ = ready_error.send(Err(error));
+            }
+        });
+        ready_rx.recv().map_err(|error| {
+            BackendError::Transport(format!(
+                "ACP persistent session worker closed during startup: {error}"
+            ))
+        })??;
+        Ok(Self {
+            model: Mutex::new(model),
+            commands,
+            cancellation: Mutex::new(CancellationState::default()),
+        })
+    }
+
+    fn set_model(&self, model: ModelTarget) -> Result<(), BackendError> {
+        *self
+            .model
+            .lock()
+            .map_err(|_| BackendError::Protocol("ACP persistent model lock poisoned".to_owned()))? =
+            model;
         Ok(())
+    }
+}
+
+impl BackendSession for AcpPersistentSession {
+    fn execute(
+        &self,
+        request: BackendExecutionRequest,
+        host: &mut dyn BackendHost,
+    ) -> Result<(), BackendError> {
+        let Some(cancellation) = arm_cancellation(&self.cancellation)? else {
+            return Ok(());
+        };
+        let model = self
+            .model
+            .lock()
+            .map_err(|_| BackendError::Protocol("ACP persistent model lock poisoned".to_owned()))?
+            .clone();
+        let (events, event_rx) = mpsc::channel();
+        let send_result = self.commands.send(PersistentCommand::Execute {
+            model,
+            prompt: request.prompt,
+            events,
+            cancellation,
+        });
+        let result = match send_result {
+            Ok(()) => receive_worker_messages(event_rx, host),
+            Err(error) => Err(BackendError::Transport(format!(
+                "ACP persistent session worker is unavailable: {error}"
+            ))),
+        };
+        disarm_cancellation(&self.cancellation)?;
+        result
+    }
+
+    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+        request_cancellation(&self.cancellation)
+    }
+}
+
+struct PersistentCommand {
+    model: ModelTarget,
+    prompt: String,
+    events: mpsc::Sender<WorkerMessage>,
+    cancellation: mpsc::Receiver<()>,
+}
+
+impl PersistentCommand {
+    const fn into_execute(self) -> Self {
+        self
     }
 }
 
@@ -252,6 +372,30 @@ impl BackendSession for AcpBackendSession {
 enum WorkerMessage {
     Event(BackendEvent),
     Done(Result<(), BackendError>),
+}
+
+fn receive_worker_messages(
+    rx: mpsc::Receiver<WorkerMessage>,
+    host: &mut dyn BackendHost,
+) -> Result<(), BackendError> {
+    let mut host_error = None;
+    loop {
+        match rx.recv() {
+            Ok(WorkerMessage::Event(event)) => {
+                if host_error.is_none() {
+                    host_error = host.emit(event).err();
+                }
+            }
+            Ok(WorkerMessage::Done(result)) => return host_error.map_or(result, Err),
+            Err(error) => {
+                return Err(host_error.unwrap_or_else(|| {
+                    BackendError::Transport(format!(
+                        "ACP worker channel closed before completion: {error}"
+                    ))
+                }));
+            }
+        }
+    }
 }
 
 async fn discover_catalog(config: AcpBackendConfig) -> Result<BackendCatalog, BackendError> {
@@ -380,14 +524,7 @@ async fn run_turn(
                 .block_task()
                 .await?;
             let session_id = session.session_id.clone();
-            let cancel_connection = connection.clone();
-            let cancel_session_id = session_id.clone();
-            thread::spawn(move || {
-                if cancellation.recv().is_ok() {
-                    let _ = cancel_connection
-                        .send_notification(CancelNotification::new(cancel_session_id));
-                }
-            });
+            spawn_cancel_forwarder(connection.clone(), session_id.clone(), cancellation);
             let config_options = serde_json::to_value(&session.config_options)
                 .map_err(agent_client_protocol::Error::into_internal_error)?;
             let selection = exact_model_selection(&config_options, model.model.as_str())
@@ -416,6 +553,155 @@ async fn run_turn(
         .map_err(|error| BackendError::Transport(error.to_string()))?;
 
     Ok(())
+}
+
+async fn run_persistent_session(
+    config: AcpBackendConfig,
+    initial_model: ModelTarget,
+    commands: mpsc::Receiver<PersistentCommand>,
+    ready: mpsc::SyncSender<Result<(), BackendError>>,
+) -> Result<(), BackendError> {
+    let agent = new_agent(&config);
+    let active_events = Arc::new(Mutex::new(None::<mpsc::Sender<WorkerMessage>>));
+    let notification_events = active_events.clone();
+
+    agent_client_protocol::Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _connection| {
+                if let Some(event) = normalize_update(notification.update) {
+                    if let Ok(events) = notification_events.lock() {
+                        if let Some(events) = events.as_ref() {
+                            let _ = events.send(WorkerMessage::Event(event));
+                        }
+                    }
+                }
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |_request: RequestPermissionRequest, responder, _connection| {
+                responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                ))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(agent, move |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let session = connection
+                .send_request(NewSessionRequest::new(config.cwd))
+                .block_task()
+                .await?;
+            let session_id = session.session_id.clone();
+            let config_options = serde_json::to_value(&session.config_options)
+                .map_err(agent_client_protocol::Error::into_internal_error)?;
+            let initial_selection =
+                exact_model_selection(&config_options, initial_model.model.as_str())
+                    .map_err(to_acp_error)?;
+            let model_config_id = initial_selection.config_id;
+            let mut current_model = initial_selection.current_value;
+            if current_model.as_deref() != Some(initial_model.model.as_str()) {
+                connection
+                    .send_request(SetSessionConfigOptionRequest::new(
+                        session_id.clone(),
+                        model_config_id.clone(),
+                        initial_model.model.as_str(),
+                    ))
+                    .block_task()
+                    .await?;
+                current_model = Some(initial_model.model.as_str().to_owned());
+            }
+            ready.send(Ok(())).map_err(|error| {
+                agent_client_protocol::Error::internal_error()
+                    .data(format!("persistent ACP startup receiver closed: {error}"))
+            })?;
+
+            while let Ok(command) = commands.recv() {
+                let command = command.into_execute();
+                let validation = exact_model_selection(&config_options, command.model.model.as_str())
+                    .map_err(to_acp_error);
+                if let Err(error) = validation {
+                    let message = error.to_string();
+                    let _ = command.events.send(WorkerMessage::Done(Err(
+                        BackendError::Unsupported(message.clone()),
+                    )));
+                    return Err(error);
+                }
+                if current_model.as_deref() != Some(command.model.model.as_str()) {
+                    if let Err(error) = connection
+                        .send_request(SetSessionConfigOptionRequest::new(
+                            session_id.clone(),
+                            model_config_id.clone(),
+                            command.model.model.as_str(),
+                        ))
+                        .block_task()
+                        .await
+                    {
+                        let message = error.to_string();
+                        let _ = command.events.send(WorkerMessage::Done(Err(
+                            BackendError::Transport(message),
+                        )));
+                        return Err(error);
+                    }
+                    current_model = Some(command.model.model.as_str().to_owned());
+                }
+
+                {
+                    let mut active = active_events.lock().map_err(|_| {
+                        agent_client_protocol::Error::internal_error()
+                            .data("persistent ACP event sink lock poisoned")
+                    })?;
+                    *active = Some(command.events.clone());
+                }
+                spawn_cancel_forwarder(
+                    connection.clone(),
+                    session_id.clone(),
+                    command.cancellation,
+                );
+                let prompt_result = connection
+                    .send_request(PromptRequest::new(
+                        session_id.clone(),
+                        vec![ContentBlock::Text(TextContent::new(command.prompt))],
+                    ))
+                    .block_task()
+                    .await;
+                if let Ok(mut active) = active_events.lock() {
+                    *active = None;
+                }
+                match prompt_result {
+                    Ok(_) => {
+                        let _ = command.events.send(WorkerMessage::Done(Ok(())));
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        let _ = command.events.send(WorkerMessage::Done(Err(
+                            BackendError::Transport(message),
+                        )));
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|error| BackendError::Transport(error.to_string()))
+}
+
+fn spawn_cancel_forwarder(
+    connection: ConnectionTo<Agent>,
+    session_id: agent_client_protocol::schema::v1::SessionId,
+    cancellation: mpsc::Receiver<()>,
+) {
+    thread::spawn(move || {
+        if cancellation.recv().is_ok() {
+            let _ = connection.send_notification(CancelNotification::new(session_id));
+        }
+    });
 }
 
 fn new_agent(config: &AcpBackendConfig) -> AcpAgent {
@@ -652,6 +938,8 @@ mod tests {
         let execution = phenix_core::ExecutionId::parse("execution-1").unwrap();
         session.cancel(&execution).unwrap();
         assert!(session.arm_cancellation().unwrap().is_none());
+        assert!(session.arm_cancellation().unwrap().is_some());
+        session.disarm_cancellation().unwrap();
     }
 
     #[test]
@@ -661,6 +949,8 @@ mod tests {
         let cancellation = session.arm_cancellation().unwrap().unwrap();
         session.cancel(&execution).unwrap();
         assert!(cancellation.recv().is_ok());
+        session.disarm_cancellation().unwrap();
+        assert!(session.arm_cancellation().unwrap().is_some());
         session.disarm_cancellation().unwrap();
     }
 
@@ -727,5 +1017,10 @@ mod tests {
             }),
             Err(BackendError::Unsupported(_))
         ));
+    }
+
+    #[test]
+    fn acp_backend_advertises_persistent_sessions() {
+        assert!(AcpBackend::new(config()).capabilities().persistent_sessions);
     }
 }
