@@ -190,15 +190,27 @@ impl Backend for AcpBackend {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CancellationSignal {
+    Cancel,
+    Complete,
+}
+
+#[derive(Debug)]
+struct ArmedCancellation {
+    receiver: mpsc::Receiver<CancellationSignal>,
+    completion: mpsc::Sender<CancellationSignal>,
+}
+
 #[derive(Debug, Default)]
 struct CancellationState {
     requested: bool,
-    signal: Option<mpsc::Sender<()>>,
+    signal: Option<mpsc::Sender<CancellationSignal>>,
 }
 
 fn arm_cancellation(
     cancellation: &Mutex<CancellationState>,
-) -> Result<Option<mpsc::Receiver<()>>, BackendError> {
+) -> Result<Option<ArmedCancellation>, BackendError> {
     let mut cancellation = cancellation
         .lock()
         .map_err(|_| BackendError::Protocol("ACP cancellation state lock poisoned".to_owned()))?;
@@ -211,8 +223,11 @@ fn arm_cancellation(
         return Ok(None);
     }
     let (signal, receiver) = mpsc::channel();
-    cancellation.signal = Some(signal);
-    Ok(Some(receiver))
+    cancellation.signal = Some(signal.clone());
+    Ok(Some(ArmedCancellation {
+        receiver,
+        completion: signal,
+    }))
 }
 
 fn disarm_cancellation(cancellation: &Mutex<CancellationState>) -> Result<(), BackendError> {
@@ -230,7 +245,7 @@ fn request_cancellation(cancellation: &Mutex<CancellationState>) -> Result<(), B
         .map_err(|_| BackendError::Protocol("ACP cancellation state lock poisoned".to_owned()))?;
     cancellation.requested = true;
     if let Some(signal) = cancellation.signal.as_ref() {
-        let _ = signal.send(());
+        let _ = signal.send(CancellationSignal::Cancel);
     }
     Ok(())
 }
@@ -244,7 +259,7 @@ struct AcpBackendSession {
 }
 
 impl AcpBackendSession {
-    fn arm_cancellation(&self) -> Result<Option<mpsc::Receiver<()>>, BackendError> {
+    fn arm_cancellation(&self) -> Result<Option<ArmedCancellation>, BackendError> {
         arm_cancellation(&self.cancellation)
     }
 
@@ -409,7 +424,7 @@ struct PersistentCommand {
     tools: PreparedToolSurface,
     prompt: String,
     events: mpsc::Sender<WorkerMessage>,
-    cancellation: mpsc::Receiver<()>,
+    cancellation: ArmedCancellation,
 }
 
 impl PersistentCommand {
@@ -551,7 +566,7 @@ async fn run_turn(
     tools: PreparedToolSurface,
     prompt: String,
     events: mpsc::Sender<WorkerMessage>,
-    cancellation: mpsc::Receiver<()>,
+    cancellation: ArmedCancellation,
 ) -> Result<(), BackendError> {
     let agent = new_agent(&config);
     let notification_events = events.clone();
@@ -622,7 +637,6 @@ async fn run_turn(
             }
             let session = connection.send_request(new_session).block_task().await?;
             let session_id = session.session_id.clone();
-            spawn_cancel_forwarder(connection.clone(), session_id.clone(), cancellation);
             let config_options = serde_json::to_value(&session.config_options)
                 .map_err(agent_client_protocol::Error::into_internal_error)?;
             let selection = exact_model_selection(&config_options, model.model.as_str())
@@ -643,6 +657,8 @@ async fn run_turn(
                     .bind_execution(&tools, events.clone())
                     .map_err(to_acp_error)?;
             }
+            let cancel_forwarder =
+                spawn_cancel_forwarder(connection.clone(), session_id.clone(), cancellation);
             let prompt_result = connection
                 .send_request(PromptRequest::new(
                     session_id,
@@ -651,6 +667,7 @@ async fn run_turn(
                 .block_task()
                 .await;
             bridge.unbind_execution();
+            drop(cancel_forwarder);
             prompt_result?;
             Ok(())
         })
@@ -828,7 +845,7 @@ async fn run_persistent_session(
                         return Err(agent_client_protocol::Error::internal_error().data(message));
                     }
                 }
-                spawn_cancel_forwarder(
+                let cancel_forwarder = spawn_cancel_forwarder(
                     connection.clone(),
                     session_id.clone(),
                     command.cancellation,
@@ -841,6 +858,7 @@ async fn run_persistent_session(
                     .block_task()
                     .await;
                 bridge.unbind_execution();
+                drop(cancel_forwarder);
                 if let Ok(mut active) = active_events.lock() {
                     *active = None;
                 }
@@ -863,16 +881,38 @@ async fn run_persistent_session(
         .map_err(|error| BackendError::Transport(error.to_string()))
 }
 
+struct CancelForwarder {
+    completion: mpsc::Sender<CancellationSignal>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for CancelForwarder {
+    fn drop(&mut self) {
+        let _ = self.completion.send(CancellationSignal::Complete);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 fn spawn_cancel_forwarder(
     connection: ConnectionTo<Agent>,
     session_id: agent_client_protocol::schema::v1::SessionId,
-    cancellation: mpsc::Receiver<()>,
-) {
-    thread::spawn(move || {
-        if cancellation.recv().is_ok() {
+    cancellation: ArmedCancellation,
+) -> CancelForwarder {
+    let ArmedCancellation {
+        receiver,
+        completion,
+    } = cancellation;
+    let thread = thread::spawn(move || {
+        if matches!(receiver.recv(), Ok(CancellationSignal::Cancel)) {
             let _ = connection.send_notification(CancelNotification::new(session_id));
         }
     });
+    CancelForwarder {
+        completion,
+        thread: Some(thread),
+    }
 }
 
 fn new_agent(config: &AcpBackendConfig) -> AcpAgent {
@@ -1126,7 +1166,7 @@ mod tests {
         let execution = phenix_core::ExecutionId::parse("execution-1").unwrap();
         let cancellation = session.arm_cancellation().unwrap().unwrap();
         session.cancel(&execution).unwrap();
-        assert!(cancellation.recv().is_ok());
+        assert_eq!(cancellation.receiver.recv(), Ok(CancellationSignal::Cancel));
         session.disarm_cancellation().unwrap();
         assert!(session.arm_cancellation().unwrap().is_some());
         session.disarm_cancellation().unwrap();
