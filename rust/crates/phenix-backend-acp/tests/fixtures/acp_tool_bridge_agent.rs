@@ -30,7 +30,10 @@ fn model_options() -> Vec<SessionConfigOption> {
 }
 
 fn params(value: Value) -> Map<String, Value> {
-    value.as_object().cloned().expect("fixture params are objects")
+    value
+        .as_object()
+        .cloned()
+        .expect("fixture params are objects")
 }
 
 fn response_value(response: agent_client_protocol::schema::v1::MessageMcpResponse) -> Value {
@@ -47,8 +50,7 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
             async |request: InitializeRequest, responder, _connection| {
                 responder.respond(
                     InitializeResponse::new(request.protocol_version).agent_capabilities(
-                        AgentCapabilities::new()
-                            .mcp_capabilities(McpCapabilities::new().acp(true)),
+                        AgentCapabilities::new().mcp_capabilities(McpCapabilities::new().acp(true)),
                     ),
                 )
             },
@@ -137,10 +139,7 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
                     ))?;
 
                     let listed = connection
-                        .send_request(MessageMcpRequest::new(
-                            connection_id.clone(),
-                            "tools/list",
-                        ))
+                        .send_request(MessageMcpRequest::new(connection_id.clone(), "tools/list"))
                         .block_task()
                         .await?;
                     let listed = response_value(listed);
@@ -163,8 +162,7 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
                         .block_task()
                         .await?;
                     let called = response_value(called);
-                    if called["isError"] != false
-                        || called["content"][0]["text"] != "echo:from-acp"
+                    if called["isError"] != false || called["content"][0]["text"] != "echo:from-acp"
                     {
                         return Err(agent_client_protocol::Error::internal_error()
                             .data("unexpected conductor tool result"));
