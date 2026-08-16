@@ -304,6 +304,29 @@ mod tests {
     }
 
     #[test]
+    fn replay_rejects_corrupted_fixed_resolution() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed()).unwrap();
+        let execution = runtime.submit(&session.id, "work").unwrap();
+        runtime.resolve_invocation(&execution.id).unwrap();
+        let mut journal = runtime.journal().clone();
+        let route = journal
+            .entries
+            .iter_mut()
+            .find_map(|entry| match &mut entry.event {
+                DomainEvent::InvocationResolved { route, .. } => Some(route),
+                _ => None,
+            })
+            .expect("fixed invocation is resolved in the journal");
+        route.model.model = ModelId::parse("corrupted").unwrap();
+
+        assert!(matches!(
+            ConductorRuntime::restore(journal),
+            Err(PersistenceError::InvalidJournal(_))
+        ));
+    }
+
+    #[test]
     fn replay_rejects_semantically_invalid_identity_cursor() {
         let mut runtime = ConductorRuntime::new();
         runtime.create_session(None, None, fixed()).unwrap();
