@@ -721,19 +721,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-backend"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+]
+
+[[package]]
 name = "phenix-conductor"
 version = "0.1.0"
 dependencies = [
  "clap",
- "phenix-runtime-api",
+ "phenix-backend",
+ "phenix-core",
+ "phenix-protocol",
  "serde_json",
 ]
 
 [[package]]
-name = "phenix-runtime-api"
+name = "phenix-core"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "phenix-protocol"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
