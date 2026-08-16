@@ -87,7 +87,10 @@ impl AcpBackend {
         &self.config
     }
 
-    fn validate_session_request(&self, request: &BackendSessionRequest) -> Result<(), BackendError> {
+    fn validate_session_request(
+        &self,
+        request: &BackendSessionRequest,
+    ) -> Result<(), BackendError> {
         if request.model.backend != self.config.backend {
             return Err(BackendError::Unsupported(format!(
                 "ACP backend {} cannot serve target backend {}",
@@ -310,11 +313,9 @@ impl AcpPersistentSession {
     }
 
     fn set_model(&self, model: ModelTarget) -> Result<(), BackendError> {
-        *self
-            .model
-            .lock()
-            .map_err(|_| BackendError::Protocol("ACP persistent model lock poisoned".to_owned()))? =
-            model;
+        *self.model.lock().map_err(|_| {
+            BackendError::Protocol("ACP persistent model lock poisoned".to_owned())
+        })? = model;
         Ok(())
     }
 }
@@ -623,13 +624,17 @@ async fn run_persistent_session(
 
             while let Ok(command) = commands.recv() {
                 let command = command.into_execute();
-                let validation = exact_model_selection(&config_options, command.model.model.as_str())
-                    .map_err(to_acp_error);
+                let validation =
+                    exact_model_selection(&config_options, command.model.model.as_str())
+                        .map_err(to_acp_error);
                 if let Err(error) = validation {
                     let message = error.to_string();
-                    let _ = command.events.send(WorkerMessage::Done(Err(
-                        BackendError::Unsupported(message.clone()),
-                    )));
+                    let _ =
+                        command
+                            .events
+                            .send(WorkerMessage::Done(Err(BackendError::Unsupported(
+                                message.clone(),
+                            ))));
                     return Err(error);
                 }
                 if current_model.as_deref() != Some(command.model.model.as_str()) {
@@ -643,9 +648,9 @@ async fn run_persistent_session(
                         .await
                     {
                         let message = error.to_string();
-                        let _ = command.events.send(WorkerMessage::Done(Err(
-                            BackendError::Transport(message),
-                        )));
+                        let _ = command
+                            .events
+                            .send(WorkerMessage::Done(Err(BackendError::Transport(message))));
                         return Err(error);
                     }
                     current_model = Some(command.model.model.as_str().to_owned());
@@ -679,9 +684,9 @@ async fn run_persistent_session(
                     }
                     Err(error) => {
                         let message = error.to_string();
-                        let _ = command.events.send(WorkerMessage::Done(Err(
-                            BackendError::Transport(message),
-                        )));
+                        let _ = command
+                            .events
+                            .send(WorkerMessage::Done(Err(BackendError::Transport(message))));
                         return Err(error);
                     }
                 }
