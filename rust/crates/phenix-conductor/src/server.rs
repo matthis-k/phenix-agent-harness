@@ -1073,10 +1073,7 @@ mod tests {
 
         let runtime = server.runtime();
         for id in [&root.id, &workflow.id, &child.id] {
-            assert_eq!(
-                runtime.execution_state(id),
-                Some(ExecutionState::Cancelled)
-            );
+            assert_eq!(runtime.execution_state(id), Some(ExecutionState::Cancelled));
         }
         assert_eq!(
             runtime.execution_state(&unrelated.id),
