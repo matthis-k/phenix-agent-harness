@@ -51,6 +51,7 @@ id_type!(BackendId);
 id_type!(ProviderId);
 id_type!(ModelId);
 id_type!(RoutingProfileId);
+id_type!(AuthenticationMethodId);
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InferenceOptions {
@@ -63,6 +64,47 @@ pub struct ModelTarget {
     pub provider: ProviderId,
     pub model: ModelId,
     pub inference: InferenceOptions,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelDescriptor {
+    pub target: ModelTarget,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthenticationMethodKind {
+    Agent,
+    Environment,
+    Terminal,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AuthenticationMethodDescriptor {
+    pub id: AuthenticationMethodId,
+    pub backend: BackendId,
+    pub provider: ProviderId,
+    pub kind: AuthenticationMethodKind,
+    pub name: String,
+    pub description: Option<String>,
+    pub selectable: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthenticationState {
+    NotRequired,
+    Required,
+    Authenticated,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BackendCatalog {
+    pub backend: BackendId,
+    pub models: Vec<ModelDescriptor>,
+    pub authentication_state: AuthenticationState,
+    pub authentication_methods: Vec<AuthenticationMethodDescriptor>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
