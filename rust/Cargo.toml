@@ -6,6 +6,7 @@ members = [
   "crates/phenix-core",
   "crates/phenix-protocol",
   "crates/phenix-backend",
+  "crates/phenix-backend-acp",
   "crates/phenix-conductor",
 ]
 
