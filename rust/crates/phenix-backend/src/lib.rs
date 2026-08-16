@@ -46,6 +46,8 @@ pub struct BackendCapabilities {
     pub persistent_sessions: bool,
 }
 
+/// Semantic conductor-owned callable provision before backend presentation is
+/// selected.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolProvision {
     pub callables: Vec<CallableDescriptor>,
@@ -53,7 +55,7 @@ pub struct ToolProvision {
 
 /// A `ToolProvision` after backend capability negotiation. Empty provisions do
 /// not require a presentation; non-empty provisions always carry the concrete
-/// transport representation chosen before the backend session is opened.
+/// transport representation selected before the backend session is opened.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedToolSurface {
     pub presentation: Option<ToolPresentation>,
@@ -84,7 +86,7 @@ impl ToolProvision {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendSessionRequest {
     pub model: ModelTarget,
-    pub tools: ToolProvision,
+    pub tools: PreparedToolSurface,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -180,6 +182,20 @@ mod tests {
         }
     }
 
+    fn provision() -> ToolProvision {
+        ToolProvision {
+            callables: vec![CallableDescriptor {
+                id: phenix_core::CallableId::parse("echo").unwrap(),
+                kind: phenix_core::CallableKind::Tool,
+                description: "echo".to_owned(),
+                input_schema: serde_json::json!({"type": "object"}),
+                output_schema: serde_json::json!({"type": "object"}),
+                capabilities: phenix_core::CapabilitySet::default(),
+                policy: phenix_core::CallablePolicy::default(),
+            }],
+        }
+    }
+
     #[test]
     fn empty_tool_provision_needs_no_presentation() {
         let surface = ToolProvision {
@@ -193,38 +209,18 @@ mod tests {
 
     #[test]
     fn tool_presentation_is_selected_from_backend_capability() {
-        let surface = ToolProvision {
-            callables: vec![CallableDescriptor {
-                id: phenix_core::CallableId::parse("echo").unwrap(),
-                kind: phenix_core::CallableKind::Tool,
-                description: "echo".to_owned(),
-                input_schema: serde_json::json!({"type": "object"}),
-                output_schema: serde_json::json!({"type": "object"}),
-                capabilities: phenix_core::CapabilitySet::default(),
-                policy: phenix_core::CallablePolicy::default(),
-            }],
-        }
-        .prepare(&capabilities(ToolHostingCapability::Native))
-        .unwrap();
+        let surface = provision()
+            .prepare(&capabilities(ToolHostingCapability::Native))
+            .unwrap();
         assert_eq!(surface.presentation, Some(ToolPresentation::Native));
         assert_eq!(surface.callables.len(), 1);
     }
 
     #[test]
     fn required_tool_surface_rejects_unsupported_backend() {
-        let error = ToolProvision {
-            callables: vec![CallableDescriptor {
-                id: phenix_core::CallableId::parse("echo").unwrap(),
-                kind: phenix_core::CallableKind::Tool,
-                description: "echo".to_owned(),
-                input_schema: serde_json::json!({"type": "object"}),
-                output_schema: serde_json::json!({"type": "object"}),
-                capabilities: phenix_core::CapabilitySet::default(),
-                policy: phenix_core::CallablePolicy::default(),
-            }],
-        }
-        .prepare(&capabilities(ToolHostingCapability::Unsupported))
-        .unwrap_err();
+        let error = provision()
+            .prepare(&capabilities(ToolHostingCapability::Unsupported))
+            .unwrap_err();
         assert!(matches!(error, BackendError::Unsupported(_)));
     }
 }
