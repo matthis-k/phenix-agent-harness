@@ -47,7 +47,9 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
     let run = ProtocolHarness::model(MockModelScript::reply("model must not execute"))
         .configure_runtime(|runtime| {
             runtime
-                .register_tool(tool_descriptor("tool.echo"), |arguments| Ok(arguments.to_owned()))
+                .register_tool(tool_descriptor("tool.echo"), |arguments| {
+                    Ok(arguments.to_owned())
+                })
                 .unwrap();
             runtime
                 .register_agent(descriptor("agent.catalog", CallableKind::Agent, false))
