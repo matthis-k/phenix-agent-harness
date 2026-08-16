@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{
-    AuthenticationMethodId, BackendCatalog, BackendId, ExecutionEvent, ExecutionId,
+    AuthenticationMethodId, BackendCatalog, BackendId, CallableId, ExecutionEvent, ExecutionId,
     ExecutionSummary, ExecutionTarget, SessionId, SessionSummary,
 };
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,11 @@ pub enum Command {
     Submit {
         session_id: SessionId,
         text: String,
+    },
+    StartCallable {
+        session_id: SessionId,
+        callable: CallableId,
+        objective: String,
     },
     CancelExecution {
         execution_id: ExecutionId,
@@ -154,6 +159,25 @@ mod tests {
         assert_eq!(value["id"], 7);
         assert_eq!(value["result"]["type"], "accepted");
         assert!(value.get("Ok").is_none());
+    }
+
+    #[test]
+    fn callable_start_wire_shape_is_typed_and_backend_neutral() {
+        let message = ClientMessage {
+            id: 9,
+            command: Command::StartCallable {
+                session_id: SessionId::parse("session-1").expect("valid session id"),
+                callable: CallableId::parse("workflow.implement").expect("valid callable id"),
+                objective: "implement change".to_owned(),
+            },
+        };
+        let value = serde_json::to_value(message).expect("serialize callable start");
+        assert_eq!(value["command"]["type"], "start_callable");
+        assert_eq!(value["command"]["session_id"], "session-1");
+        assert_eq!(value["command"]["callable"], "workflow.implement");
+        assert_eq!(value["command"]["objective"], "implement change");
+        assert!(value["command"].get("backend").is_none());
+        assert!(value["command"].get("provider").is_none());
     }
 
     #[test]

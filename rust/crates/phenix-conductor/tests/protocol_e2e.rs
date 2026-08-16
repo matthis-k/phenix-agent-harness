@@ -1,7 +1,8 @@
 use phenix_backend::ToolPresentation;
 use phenix_conductor::{
-    CallableOperation, ConductorError, ConductorRuntime, InvocationGuard, InvocationPolicyContext,
-    InvocationSubject, PolicyDenial,
+    CallableOperation, ConductorError, ConductorRuntime, ExecutionProvider, ExecutionProviderError,
+    ExecutionProviderEvent, ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest,
+    InvocationGuard, InvocationPolicyContext, InvocationSubject, PolicyDenial,
 };
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
@@ -11,7 +12,7 @@ use phenix_core::{
 use phenix_protocol::Command;
 use serde_json::json;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 
@@ -20,6 +21,7 @@ mod protocol_harness;
 
 use protocol_harness::{
     execution_id, model_target, MockAction, MockModelScript, ObservedAction, ProtocolHarness,
+    ProtocolSignal,
 };
 
 fn descriptor(id: &str, kind: CallableKind, requires_permission: bool) -> CallableDescriptor {
@@ -170,6 +172,259 @@ fn streaming_order_and_cancellation_are_deterministic() {
         stream,
         vec!["reasoning:thinking-1", "content:chunk-1", "content:chunk-2"]
     );
+}
+
+struct NativeProvider {
+    calls: Arc<AtomicUsize>,
+}
+
+impl ExecutionProvider for NativeProvider {
+    fn kind(&self) -> ExecutionProviderKind {
+        ExecutionProviderKind::Native
+    }
+
+    fn execute(
+        &self,
+        request: &ExecutionProviderRequest,
+        host: &mut dyn ExecutionProviderHost,
+    ) -> Result<(), ExecutionProviderError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        host.emit(ExecutionProviderEvent::ReasoningDelta(format!(
+            "native reasoning: {}",
+            request.objective
+        )))?;
+        host.emit(ExecutionProviderEvent::ContentDelta(format!(
+            "native answer: {}",
+            request.objective
+        )))
+    }
+}
+
+#[test]
+fn typed_callable_command_executes_native_provider_without_model_backend() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider_calls = calls.clone();
+    let run = ProtocolHarness::model(MockModelScript::reply("model must not execute"))
+        .configure_runtime(move |runtime| {
+            runtime
+                .register_provider_agent(
+                    descriptor("agent.native", CallableKind::Agent, false),
+                    NativeProvider {
+                        calls: provider_calls,
+                    },
+                )
+                .unwrap();
+        })
+        .commands([
+            Command::Initialize {
+                after_sequence: Some(0),
+            },
+            Command::CreateSession {
+                parent_session: None,
+                name: Some("native".to_owned()),
+                target: ExecutionTarget::Fixed(model_target("mock-model")),
+            },
+            Command::StartCallable {
+                session_id: phenix_core::SessionId::parse("session-1").unwrap(),
+                callable: CallableId::parse("agent.native").unwrap(),
+                objective: "inspect repository".to_owned(),
+            },
+        ])
+        .run();
+
+    assert!(run.response_ok(1));
+    assert!(run.response_ok(2));
+    assert!(run.response_ok(3));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(run.backend.opened(), 0);
+    assert_eq!(run.backend.executed(), 0);
+    assert_eq!(run.snapshot.executions.len(), 1);
+    let execution = &run.snapshot.executions[0];
+    assert_eq!(execution.parent_execution, None);
+    assert_eq!(
+        execution.callable,
+        Some(CallableId::parse("agent.native").unwrap())
+    );
+    assert_eq!(execution.state, ExecutionState::Completed);
+    assert!(run.has_event(|event| {
+        matches!(
+            &event.kind,
+            ExecutionEventKind::ReasoningDelta { text }
+                if text == "native reasoning: inspect repository"
+        )
+    }));
+    assert!(run.has_event(|event| {
+        matches!(
+            &event.kind,
+            ExecutionEventKind::AssistantContentDelta { text }
+                if text == "native answer: inspect repository"
+        )
+    }));
+}
+
+struct BlockingNativeProvider {
+    started: Arc<ProtocolSignal>,
+    released: Arc<ProtocolSignal>,
+    cancelled: Arc<AtomicUsize>,
+}
+
+impl ExecutionProvider for BlockingNativeProvider {
+    fn kind(&self) -> ExecutionProviderKind {
+        ExecutionProviderKind::Native
+    }
+
+    fn execute(
+        &self,
+        _request: &ExecutionProviderRequest,
+        _host: &mut dyn ExecutionProviderHost,
+    ) -> Result<(), ExecutionProviderError> {
+        self.started.signal();
+        self.released.wait();
+        Ok(())
+    }
+
+    fn cancel(
+        &self,
+        _execution_id: &phenix_core::ExecutionId,
+    ) -> Result<(), ExecutionProviderError> {
+        self.cancelled.fetch_add(1, Ordering::SeqCst);
+        self.released.signal();
+        Ok(())
+    }
+}
+
+#[test]
+fn active_native_provider_cancellation_is_deterministic_and_never_uses_model_backend() {
+    let started = Arc::new(ProtocolSignal::default());
+    let released = Arc::new(ProtocolSignal::default());
+    let cancelled = Arc::new(AtomicUsize::new(0));
+    let provider_started = started.clone();
+    let provider_released = released.clone();
+    let provider_cancelled = cancelled.clone();
+
+    let run = ProtocolHarness::model(MockModelScript::reply("model must not execute"))
+        .configure_runtime(move |runtime| {
+            runtime
+                .register_provider_agent(
+                    descriptor("agent.blocking", CallableKind::Agent, false),
+                    BlockingNativeProvider {
+                        started: provider_started,
+                        released: provider_released,
+                        cancelled: provider_cancelled,
+                    },
+                )
+                .unwrap();
+        })
+        .commands([
+            Command::Initialize {
+                after_sequence: Some(0),
+            },
+            Command::CreateSession {
+                parent_session: None,
+                name: Some("native cancellation".to_owned()),
+                target: ExecutionTarget::Fixed(model_target("mock-model")),
+            },
+            Command::StartCallable {
+                session_id: phenix_core::SessionId::parse("session-1").unwrap(),
+                callable: CallableId::parse("agent.blocking").unwrap(),
+                objective: "wait until cancelled".to_owned(),
+            },
+        ])
+        .after_signal(
+            started,
+            Command::CancelExecution {
+                execution_id: execution_id(1),
+            },
+        )
+        .run();
+
+    assert!(run.response_ok(4));
+    assert_eq!(cancelled.load(Ordering::SeqCst), 1);
+    assert_eq!(run.backend.opened(), 0);
+    assert_eq!(run.backend.executed(), 0);
+    assert_eq!(run.only_execution_state(), Some(&ExecutionState::Cancelled));
+}
+
+#[test]
+fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
+    let run = ProtocolHarness::model(MockModelScript::reply("step complete"))
+        .configure_runtime(|runtime| {
+            runtime
+                .register_agent(descriptor("agent.first", CallableKind::Agent, false))
+                .unwrap();
+            runtime
+                .register_agent(descriptor("agent.second", CallableKind::Agent, false))
+                .unwrap();
+            runtime
+                .register_workflow(WorkflowDefinition {
+                    descriptor: descriptor("workflow.two-step", CallableKind::Workflow, false),
+                    policy: WorkflowExecutionPolicy::Sequential,
+                    steps: vec![
+                        WorkflowStep {
+                            callable: CallableId::parse("agent.first").unwrap(),
+                            objective: Some("first step".to_owned()),
+                        },
+                        WorkflowStep {
+                            callable: CallableId::parse("agent.second").unwrap(),
+                            objective: Some("second step".to_owned()),
+                        },
+                    ],
+                })
+                .unwrap();
+        })
+        .commands([
+            Command::Initialize {
+                after_sequence: Some(0),
+            },
+            Command::CreateSession {
+                parent_session: None,
+                name: Some("workflow".to_owned()),
+                target: ExecutionTarget::Fixed(model_target("mock-model")),
+            },
+            Command::StartCallable {
+                session_id: phenix_core::SessionId::parse("session-1").unwrap(),
+                callable: CallableId::parse("workflow.two-step").unwrap(),
+                objective: "overall objective".to_owned(),
+            },
+        ])
+        .run();
+
+    assert!(run.response_ok(1));
+    assert!(run.response_ok(2));
+    assert!(run.response_ok(3));
+    assert_eq!(run.backend.opened(), 2);
+    assert_eq!(run.backend.executed(), 2);
+    assert_eq!(run.backend.prompts(), vec!["first step", "second step"]);
+    assert_eq!(run.snapshot.executions.len(), 3);
+
+    let workflow = run
+        .snapshot
+        .executions
+        .iter()
+        .find(|execution| {
+            execution
+                .callable
+                .as_ref()
+                .is_some_and(|id| id.as_str() == "workflow.two-step")
+        })
+        .expect("workflow execution exists");
+    assert_eq!(workflow.parent_execution, None);
+    assert_eq!(workflow.state, ExecutionState::Completed);
+    let children = run
+        .snapshot
+        .executions
+        .iter()
+        .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+        .collect::<Vec<_>>();
+    assert_eq!(children.len(), 2);
+    assert!(children
+        .iter()
+        .all(|execution| execution.state == ExecutionState::Completed));
+    assert!(!run
+        .snapshot
+        .executions
+        .iter()
+        .any(|execution| execution.kind == phenix_core::ExecutionKind::Root));
 }
 
 struct DenyModels;

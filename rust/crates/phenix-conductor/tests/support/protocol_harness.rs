@@ -202,6 +202,26 @@ impl MockBackendState {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ProtocolSignal {
+    signaled: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl ProtocolSignal {
+    pub fn signal(&self) {
+        *self.signaled.lock().unwrap() = true;
+        self.changed.notify_all();
+    }
+
+    pub fn wait(&self) {
+        let mut signaled = self.signaled.lock().unwrap();
+        while !*signaled {
+            signaled = self.changed.wait(signaled).unwrap();
+        }
+    }
+}
+
 #[derive(Default)]
 struct CancelGate {
     cancelled: Mutex<bool>,
@@ -382,8 +402,13 @@ impl Read for ChannelInput {
     }
 }
 
+enum DeferredTrigger {
+    BackendAction(usize),
+    Signal(Arc<ProtocolSignal>),
+}
+
 struct DeferredCommand {
-    after_action: usize,
+    trigger: DeferredTrigger,
     message: ClientMessage,
 }
 
@@ -467,7 +492,18 @@ impl ProtocolHarness {
         let id = self.next_request_id;
         self.next_request_id += 1;
         self.deferred_commands.push(DeferredCommand {
-            after_action: action_index,
+            trigger: DeferredTrigger::BackendAction(action_index),
+            message: ClientMessage { id, command },
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn after_signal(mut self, signal: Arc<ProtocolSignal>, command: Command) -> Self {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        self.deferred_commands.push(DeferredCommand {
+            trigger: DeferredTrigger::Signal(signal),
             message: ClientMessage { id, command },
         });
         self
@@ -580,7 +616,10 @@ fn run_protocol(
             input_sender.send(encode_messages(commands)).unwrap();
         }
         for deferred in deferred_commands {
-            feeder_state.wait_for_action(deferred.after_action);
+            match deferred.trigger {
+                DeferredTrigger::BackendAction(index) => feeder_state.wait_for_action(index),
+                DeferredTrigger::Signal(signal) => signal.wait(),
+            }
             input_sender
                 .send(encode_messages([deferred.message]))
                 .unwrap();

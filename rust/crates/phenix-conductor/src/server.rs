@@ -1,13 +1,14 @@
 use crate::{
-    ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload, ExecutionProviderError,
-    JsonFileStore, PersistenceError, ResolvedInvocation,
+    ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload, ExecutionProvider,
+    ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost, ExecutionProviderKind,
+    JsonFileStore, PersistenceError,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
 };
 use phenix_core::{
     AuthenticationMethodId, BackendCatalog, BackendId, CallableId, ExecutionEventKind, ExecutionId,
-    ExecutionState, ExecutionTarget, SessionId,
+    ExecutionKind, ExecutionState, ExecutionTarget, SessionId,
 };
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
@@ -31,15 +32,30 @@ type SharedRuntime = Arc<Mutex<ConductorRuntime>>;
 type ActiveScopes = Arc<Mutex<BTreeMap<ExecutionId, LiveExecutionScope>>>;
 
 struct ExecutionJob {
-    resolved: ResolvedInvocation,
-    backend: SharedBackend,
+    execution_id: ExecutionId,
 }
 
 /// Process-local resources owned by one live execution. Durable execution state
 /// remains in `ConductorRuntime`; this scope is deliberately not persisted.
 #[derive(Clone)]
-struct LiveExecutionScope {
-    backend_session: Arc<dyn BackendSession>,
+enum LiveExecutionScope {
+    Backend(Arc<dyn BackendSession>),
+    Provider(Arc<dyn ExecutionProvider>),
+}
+
+impl LiveExecutionScope {
+    fn cancel(&self, execution_id: &ExecutionId) -> Result<(), ProtocolError> {
+        match self {
+            Self::Backend(session) => match session.cancel(execution_id) {
+                Ok(()) | Err(BackendError::Unsupported(_)) => Ok(()),
+                Err(error) => Err(map_backend_error(error)),
+            },
+            Self::Provider(provider) => match provider.cancel(execution_id) {
+                Ok(()) | Err(ExecutionProviderError::Unsupported(_)) => Ok(()),
+                Err(error) => Err(map_execution_provider_error(error)),
+            },
+        }
+    }
 }
 
 /// RAII lease for one live execution scope. Once installed, every return path
@@ -135,6 +151,7 @@ impl ConductorServer {
         let (execution_sender, execution_receiver) = mpsc::sync_channel(EXECUTION_BUFFER);
 
         let runtime = self.runtime.clone();
+        let backends = self.backends.clone();
         let active_scopes = self.active_scopes.clone();
         let store = self.store.clone();
         let persist_lock = self.persist_lock.clone();
@@ -163,6 +180,7 @@ impl ConductorServer {
                 execution_loop(
                     execution_receiver,
                     runtime,
+                    backends,
                     active_scopes,
                     store,
                     persist_lock,
@@ -218,8 +236,25 @@ impl ConductorServer {
         executions: &SyncSender<ExecutionJob>,
     ) -> Result<(), ServerError> {
         let id = message.id;
-        if let Command::Submit { session_id, text } = &message.command {
-            return self.submit(id, session_id.clone(), text.clone(), output, executions);
+        match &message.command {
+            Command::Submit { session_id, text } => {
+                return self.submit(id, session_id.clone(), text.clone(), output, executions);
+            }
+            Command::StartCallable {
+                session_id,
+                callable,
+                objective,
+            } => {
+                return self.start_callable(
+                    id,
+                    session_id.clone(),
+                    callable.clone(),
+                    objective.clone(),
+                    output,
+                    executions,
+                );
+            }
+            _ => {}
         }
         let persist = matches!(
             &message.command,
@@ -288,6 +323,9 @@ impl ConductorServer {
                 .map(|catalog| Reply::BackendCatalog { catalog })
                 .map_err(map_backend_error),
             Command::Submit { .. } => unreachable!("submit handled before dispatch"),
+            Command::StartCallable { .. } => {
+                unreachable!("callable start handled before dispatch")
+            }
         };
 
         if persist {
@@ -314,6 +352,33 @@ impl ConductorServer {
         };
         let execution_id = execution.id.clone();
         self.persist()?;
+        self.respond(output, request_id, Ok(Reply::Execution { execution }))?;
+        self.enqueue_execution(execution_id, executions)
+    }
+
+    fn start_callable(
+        &mut self,
+        request_id: u64,
+        session_id: SessionId,
+        callable: CallableId,
+        objective: String,
+        output: &SyncSender<ServerMessage>,
+        executions: &SyncSender<ExecutionJob>,
+    ) -> Result<(), ServerError> {
+        let execution =
+            match self
+                .lock_runtime()?
+                .start_session_callable(&session_id, &callable, objective)
+            {
+                Ok(execution) => execution,
+                Err(error) => {
+                    self.respond(output, request_id, Err(map_conductor_error(error)))?;
+                    return Ok(());
+                }
+            };
+        let execution_id = execution.id.clone();
+        let execution_kind = execution.kind.clone();
+        self.persist()?;
         self.respond(
             output,
             request_id,
@@ -322,35 +387,40 @@ impl ConductorServer {
             }),
         )?;
 
-        let resolved = {
-            let mut runtime = self.lock_runtime()?;
-            runtime.resolve_invocation(&execution_id)
-        };
-        let resolved = match resolved {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                self.fail_execution(&execution_id, map_conductor_error(error))?;
-                self.persist()?;
-                return Ok(());
+        if execution_kind == ExecutionKind::Workflow {
+            let pending = {
+                let runtime = self.lock_runtime()?;
+                runtime
+                    .snapshot()
+                    .executions
+                    .into_iter()
+                    .filter(|candidate| {
+                        candidate.parent_execution.as_ref() == Some(&execution_id)
+                            && candidate.state == ExecutionState::Pending
+                    })
+                    .map(|candidate| candidate.id)
+                    .collect::<Vec<_>>()
+            };
+            for child in pending {
+                self.enqueue_execution(child, executions)?;
             }
-        };
-        // A routed decision is durable audit state. Persist it before any
-        // backend session can observe or execute the resolved invocation.
-        self.persist()?;
+            Ok(())
+        } else {
+            self.enqueue_execution(execution_id, executions)
+        }
+    }
 
-        let backend_id = resolved.model.backend.clone();
-        let Some(backend) = self.backends.get(&backend_id).cloned() else {
-            self.fail_execution(
-                &execution_id,
-                map_backend_error(BackendError::Unsupported(format!(
-                    "backend is not registered: {backend_id}"
-                ))),
-            )?;
-            self.persist()?;
-            return Ok(());
-        };
-
-        if executions.send(ExecutionJob { resolved, backend }).is_err() {
+    fn enqueue_execution(
+        &self,
+        execution_id: ExecutionId,
+        executions: &SyncSender<ExecutionJob>,
+    ) -> Result<(), ServerError> {
+        if executions
+            .send(ExecutionJob {
+                execution_id: execution_id.clone(),
+            })
+            .is_err()
+        {
             self.fail_execution(
                 &execution_id,
                 protocol_error(
@@ -369,7 +439,7 @@ impl ConductorServer {
             .lock()
             .map_err(|_| protocol_error(ErrorCode::BackendProtocol, "active scope lock poisoned"))?
             .iter()
-            .map(|(id, scope)| (id.clone(), scope.backend_session.clone()))
+            .map(|(id, scope)| (id.clone(), scope.clone()))
             .collect::<Vec<_>>();
 
         let cancelled_active = {
@@ -388,11 +458,8 @@ impl ConductorServer {
                 .collect::<Vec<_>>()
         };
 
-        for (execution_id, session) in cancelled_active {
-            match session.cancel(&execution_id) {
-                Ok(()) | Err(BackendError::Unsupported(_)) => {}
-                Err(error) => return Err(map_backend_error(error)),
-            }
+        for (execution_id, scope) in cancelled_active {
+            scope.cancel(&execution_id)?;
         }
         Ok(Reply::Accepted)
     }
@@ -478,41 +545,83 @@ impl ConductorServer {
 fn execution_loop(
     executions: Receiver<ExecutionJob>,
     runtime: SharedRuntime,
+    backends: BTreeMap<BackendId, SharedBackend>,
     active_scopes: ActiveScopes,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
     while let Ok(job) = executions.recv() {
-        execute_job(job, &runtime, &active_scopes, store.as_ref(), &persist_lock)?;
+        execute_job_chain(
+            job.execution_id,
+            &runtime,
+            &backends,
+            &active_scopes,
+            store.as_ref(),
+            &persist_lock,
+        )?;
     }
     Ok(())
 }
 
-fn execute_job(
-    job: ExecutionJob,
+fn execute_job_chain(
+    execution_id: ExecutionId,
     runtime: &SharedRuntime,
+    backends: &BTreeMap<BackendId, SharedBackend>,
     active_scopes: &ActiveScopes,
     store: Option<&JsonFileStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
-    let execution_id = job.resolved.execution_id.clone();
-    let capabilities = job
-        .backend
-        .lock()
-        .map_err(|_| ServerError::StatePoisoned("backend"))?
-        .capabilities();
-    let prepared = {
+    let mut current = Some(execution_id);
+    while let Some(execution_id) = current {
+        execute_execution(
+            &execution_id,
+            runtime,
+            backends,
+            active_scopes,
+            store,
+            persist_lock,
+        )?;
+        current = next_workflow_execution(runtime, &execution_id)?;
+    }
+    Ok(())
+}
+
+fn execute_execution(
+    execution_id: &ExecutionId,
+    runtime: &SharedRuntime,
+    backends: &BTreeMap<BackendId, SharedBackend>,
+    active_scopes: &ActiveScopes,
+    store: Option<&JsonFileStore>,
+    persist_lock: &Arc<Mutex<()>>,
+) -> Result<(), ServerError> {
+    let provider_kind = {
         let runtime_guard = runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
-        runtime_guard.prepare_invocation(job.resolved, &capabilities)
+        match runtime_guard.execution_state(execution_id) {
+            Some(ExecutionState::Pending) => runtime_guard.execution_provider_kind(execution_id),
+            Some(state) if is_terminal_state(&state) => return Ok(()),
+            Some(_) => {
+                return fail_shared_execution(
+                    runtime,
+                    execution_id,
+                    protocol_error(
+                        ErrorCode::InvalidRequest,
+                        format!("execution is not pending: {execution_id}"),
+                    ),
+                    store,
+                    persist_lock,
+                );
+            }
+            None => return Ok(()),
+        }
     };
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
+    let provider_kind = match provider_kind {
+        Ok(kind) => kind,
         Err(error) => {
             fail_shared_execution(
                 runtime,
-                &execution_id,
+                execution_id,
                 map_conductor_error(error),
                 store,
                 persist_lock,
@@ -521,8 +630,89 @@ fn execute_job(
         }
     };
 
-    let backend_session = match job
-        .backend
+    match provider_kind {
+        ExecutionProviderKind::Model => execute_model_execution(
+            execution_id,
+            runtime,
+            backends,
+            active_scopes,
+            store,
+            persist_lock,
+        ),
+        _ => execute_provider_execution(execution_id, runtime, active_scopes, store, persist_lock),
+    }
+}
+
+fn execute_model_execution(
+    execution_id: &ExecutionId,
+    runtime: &SharedRuntime,
+    backends: &BTreeMap<BackendId, SharedBackend>,
+    active_scopes: &ActiveScopes,
+    store: Option<&JsonFileStore>,
+    persist_lock: &Arc<Mutex<()>>,
+) -> Result<(), ServerError> {
+    let resolved = {
+        let mut runtime_guard = runtime
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
+        runtime_guard.resolve_invocation(execution_id)
+    };
+    let resolved = match resolved {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            fail_shared_execution(
+                runtime,
+                execution_id,
+                map_conductor_error(error),
+                store,
+                persist_lock,
+            )?;
+            return Ok(());
+        }
+    };
+    // A routed decision is durable audit state. Persist it before any backend
+    // session can observe or execute the resolved invocation.
+    persist_shared(runtime, store, persist_lock)?;
+
+    let backend_id = resolved.model.backend.clone();
+    let Some(backend) = backends.get(&backend_id).cloned() else {
+        fail_shared_execution(
+            runtime,
+            execution_id,
+            map_backend_error(BackendError::Unsupported(format!(
+                "backend is not registered: {backend_id}"
+            ))),
+            store,
+            persist_lock,
+        )?;
+        return Ok(());
+    };
+
+    let capabilities = backend
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("backend"))?
+        .capabilities();
+    let prepared = {
+        let runtime_guard = runtime
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
+        runtime_guard.prepare_invocation(resolved, &capabilities)
+    };
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            fail_shared_execution(
+                runtime,
+                execution_id,
+                map_conductor_error(error),
+                store,
+                persist_lock,
+            )?;
+            return Ok(());
+        }
+    };
+
+    let backend_session = match backend
         .lock()
         .map_err(|_| ServerError::StatePoisoned("backend"))?
         .open_session(prepared.backend_session_request())
@@ -531,7 +721,7 @@ fn execute_job(
         Err(error) => {
             fail_shared_execution(
                 runtime,
-                &execution_id,
+                execution_id,
                 map_backend_error(error),
                 store,
                 persist_lock,
@@ -545,29 +735,101 @@ fn execute_job(
         .map_err(|_| ServerError::StatePoisoned("active scopes"))?
         .insert(
             execution_id.clone(),
-            LiveExecutionScope {
-                backend_session: backend_session.clone(),
-            },
+            LiveExecutionScope::Backend(backend_session.clone()),
         );
     let _scope_lease = LiveExecutionLease {
         scopes: active_scopes.clone(),
         execution_id: execution_id.clone(),
     };
 
+    if !begin_execution(runtime, execution_id, store, persist_lock)? {
+        return Ok(());
+    }
+
+    let mut host = SharedRuntimeHost {
+        runtime: runtime.clone(),
+        execution_id: execution_id.clone(),
+        allowed_tools: prepared.allowed_tools(),
+        store: store.cloned(),
+        persist_lock: persist_lock.clone(),
+    };
+    let result = backend_session.execute(prepared.backend_execution_request(), &mut host);
+    finish_model_execution(runtime, execution_id, result, store, persist_lock)
+}
+
+fn execute_provider_execution(
+    execution_id: &ExecutionId,
+    runtime: &SharedRuntime,
+    active_scopes: &ActiveScopes,
+    store: Option<&JsonFileStore>,
+    persist_lock: &Arc<Mutex<()>>,
+) -> Result<(), ServerError> {
+    let prepared = {
+        let runtime_guard = runtime
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
+        runtime_guard.prepare_provider_execution(execution_id)
+    };
+    let (provider, request) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            fail_shared_execution(
+                runtime,
+                execution_id,
+                map_conductor_error(error),
+                store,
+                persist_lock,
+            )?;
+            return Ok(());
+        }
+    };
+
+    active_scopes
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("active scopes"))?
+        .insert(
+            execution_id.clone(),
+            LiveExecutionScope::Provider(provider.clone()),
+        );
+    let _scope_lease = LiveExecutionLease {
+        scopes: active_scopes.clone(),
+        execution_id: execution_id.clone(),
+    };
+
+    if !begin_execution(runtime, execution_id, store, persist_lock)? {
+        return Ok(());
+    }
+
+    let mut host = SharedProviderHost {
+        runtime: runtime.clone(),
+        execution_id: execution_id.clone(),
+        store: store.cloned(),
+        persist_lock: persist_lock.clone(),
+    };
+    let result = provider.execute(&request, &mut host);
+    finish_provider_execution(runtime, execution_id, result, store, persist_lock)
+}
+
+fn begin_execution(
+    runtime: &SharedRuntime,
+    execution_id: &ExecutionId,
+    store: Option<&JsonFileStore>,
+    persist_lock: &Arc<Mutex<()>>,
+) -> Result<bool, ServerError> {
     let should_execute = {
         let mut runtime_guard = runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
-        match runtime_guard.execution_state(&execution_id) {
+        match runtime_guard.execution_state(execution_id) {
             Some(ExecutionState::Pending) => {
-                runtime_guard.set_state(&execution_id, ExecutionState::Running)?;
+                runtime_guard.set_state(execution_id, ExecutionState::Running)?;
                 true
             }
             Some(state) if is_terminal_state(&state) => false,
             Some(_) => {
                 fail_runtime_execution(
                     &mut runtime_guard,
-                    &execution_id,
+                    execution_id,
                     protocol_error(
                         ErrorCode::InvalidRequest,
                         format!("execution is not pending: {execution_id}"),
@@ -579,35 +841,93 @@ fn execute_job(
         }
     };
     persist_shared(runtime, store, persist_lock)?;
+    Ok(should_execute)
+}
 
-    if should_execute {
-        let mut host = SharedRuntimeHost {
-            runtime: runtime.clone(),
-            execution_id: execution_id.clone(),
-            allowed_tools: prepared.allowed_tools(),
-            store: store.cloned(),
-            persist_lock: persist_lock.clone(),
-        };
-        let result = backend_session.execute(prepared.backend_execution_request(), &mut host);
-
+fn finish_model_execution(
+    runtime: &SharedRuntime,
+    execution_id: &ExecutionId,
+    result: Result<(), BackendError>,
+    store: Option<&JsonFileStore>,
+    persist_lock: &Arc<Mutex<()>>,
+) -> Result<(), ServerError> {
+    {
         let mut runtime_guard = runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
-        if runtime_guard.execution_state(&execution_id) == Some(ExecutionState::Running) {
+        if runtime_guard.execution_state(execution_id) == Some(ExecutionState::Running) {
             match result {
-                Ok(()) => runtime_guard.set_state(&execution_id, ExecutionState::Completed)?,
+                Ok(()) => runtime_guard.set_state(execution_id, ExecutionState::Completed)?,
                 Err(error) => fail_runtime_execution(
                     &mut runtime_guard,
-                    &execution_id,
+                    execution_id,
                     map_backend_error(error),
                 )?,
             }
         }
-        drop(runtime_guard);
-        persist_shared(runtime, store, persist_lock)?;
     }
-
+    persist_shared(runtime, store, persist_lock)?;
     Ok(())
+}
+
+fn finish_provider_execution(
+    runtime: &SharedRuntime,
+    execution_id: &ExecutionId,
+    result: Result<(), ExecutionProviderError>,
+    store: Option<&JsonFileStore>,
+    persist_lock: &Arc<Mutex<()>>,
+) -> Result<(), ServerError> {
+    {
+        let mut runtime_guard = runtime
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
+        if runtime_guard.execution_state(execution_id) == Some(ExecutionState::Running) {
+            match result {
+                Ok(()) => runtime_guard.set_state(execution_id, ExecutionState::Completed)?,
+                Err(error) => fail_runtime_execution(
+                    &mut runtime_guard,
+                    execution_id,
+                    map_execution_provider_error(error),
+                )?,
+            }
+        }
+    }
+    persist_shared(runtime, store, persist_lock)?;
+    Ok(())
+}
+
+fn next_workflow_execution(
+    runtime: &SharedRuntime,
+    completed_execution: &ExecutionId,
+) -> Result<Option<ExecutionId>, ServerError> {
+    let snapshot = runtime
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
+        .snapshot();
+    let Some(parent_id) = snapshot
+        .executions
+        .iter()
+        .find(|execution| execution.id == *completed_execution)
+        .and_then(|execution| execution.parent_execution.clone())
+    else {
+        return Ok(None);
+    };
+    let parent_running = snapshot.executions.iter().any(|execution| {
+        execution.id == parent_id
+            && execution.kind == ExecutionKind::Workflow
+            && execution.state == ExecutionState::Running
+    });
+    if !parent_running {
+        return Ok(None);
+    }
+    Ok(snapshot
+        .executions
+        .into_iter()
+        .find(|execution| {
+            execution.parent_execution.as_ref() == Some(&parent_id)
+                && execution.state == ExecutionState::Pending
+        })
+        .map(|execution| execution.id))
 }
 
 fn fail_shared_execution(
@@ -725,6 +1045,53 @@ impl BackendHost for SharedRuntimeHost {
         };
         self.persist()?;
         Ok(result)
+    }
+}
+
+struct SharedProviderHost {
+    runtime: SharedRuntime,
+    execution_id: ExecutionId,
+    store: Option<JsonFileStore>,
+    persist_lock: Arc<Mutex<()>>,
+}
+
+impl SharedProviderHost {
+    fn persist(&self) -> Result<(), ExecutionProviderError> {
+        persist_shared(&self.runtime, self.store.as_ref(), &self.persist_lock).map_err(|error| {
+            ExecutionProviderError::Failed(format!("failed to persist conductor state: {error}"))
+        })
+    }
+
+    fn lock_runtime(&self) -> Result<MutexGuard<'_, ConductorRuntime>, ExecutionProviderError> {
+        self.runtime.lock().map_err(|_| {
+            ExecutionProviderError::Protocol("conductor runtime lock poisoned".to_owned())
+        })
+    }
+}
+
+impl ExecutionProviderHost for SharedProviderHost {
+    fn emit(&mut self, event: ExecutionProviderEvent) -> Result<(), ExecutionProviderError> {
+        {
+            let mut runtime = self.lock_runtime()?;
+            if runtime.execution_state(&self.execution_id) != Some(ExecutionState::Running) {
+                return Err(ExecutionProviderError::Protocol(format!(
+                    "provider emitted an event after execution {} became terminal",
+                    self.execution_id
+                )));
+            }
+            let kind = match event {
+                ExecutionProviderEvent::ContentDelta(text) => {
+                    ExecutionEventKind::AssistantContentDelta { text }
+                }
+                ExecutionProviderEvent::ReasoningDelta(text) => {
+                    ExecutionEventKind::ReasoningDelta { text }
+                }
+            };
+            runtime
+                .push_event(&self.execution_id, kind)
+                .map_err(|error| ExecutionProviderError::Protocol(error.to_string()))?;
+        }
+        self.persist()
     }
 }
 
@@ -1051,19 +1418,15 @@ mod tests {
             let mut scopes = server.active_scopes.lock().unwrap();
             scopes.insert(
                 child.id.clone(),
-                LiveExecutionScope {
-                    backend_session: Arc::new(CancelOnlySession {
-                        calls: descendant_calls.clone(),
-                    }),
-                },
+                LiveExecutionScope::Backend(Arc::new(CancelOnlySession {
+                    calls: descendant_calls.clone(),
+                })),
             );
             scopes.insert(
                 unrelated.id.clone(),
-                LiveExecutionScope {
-                    backend_session: Arc::new(CancelOnlySession {
-                        calls: unrelated_calls.clone(),
-                    }),
-                },
+                LiveExecutionScope::Backend(Arc::new(CancelOnlySession {
+                    calls: unrelated_calls.clone(),
+                })),
             );
         }
 
