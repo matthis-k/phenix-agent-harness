@@ -2,7 +2,7 @@
 
 use phenix_core::{
     AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId, ExecutionId,
-    ModelTarget,
+    ModelTarget, SessionId,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -100,6 +100,10 @@ impl ToolProvision {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendSessionRequest {
+    /// Stable Phenix conversation identity. Backends that advertise
+    /// `persistent_sessions` may use this identity to reopen/reuse their native
+    /// conversation instead of creating an unrelated conversation per turn.
+    pub session_id: SessionId,
     pub model: ModelTarget,
     pub tools: PreparedToolSurface,
 }
