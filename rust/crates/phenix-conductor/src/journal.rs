@@ -345,9 +345,7 @@ pub(crate) fn apply_domain_event(
         }
         DomainEvent::SessionClosed { session_id } => {
             let session = state.sessions.get_mut(session_id).ok_or_else(|| {
-                JournalError::InvalidEvent(format!(
-                    "close references unknown session {session_id}"
-                ))
+                JournalError::InvalidEvent(format!("close references unknown session {session_id}"))
             })?;
             if session.summary.state == SessionState::Closed {
                 return Err(JournalError::InvalidEvent(format!(
