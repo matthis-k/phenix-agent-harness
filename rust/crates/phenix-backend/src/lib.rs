@@ -185,6 +185,15 @@ pub trait Backend: Send {
                 .to_owned(),
         ))
     }
+
+    /// Dispose any persistent native conversation associated with a stable
+    /// Phenix session. This operation is deliberately idempotent so the
+    /// conductor can fan a terminal session close out to every registered
+    /// backend without tracking which fixed targets the session previously
+    /// touched.
+    fn close_persistent_session(&mut self, _session_id: &SessionId) -> Result<(), BackendError> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -288,5 +297,13 @@ mod tests {
             Err(error) => error,
         };
         assert!(matches!(error, BackendError::Unsupported(_)));
+    }
+
+    #[test]
+    fn persistent_close_is_idempotent_by_default() {
+        let mut backend = CapabilityOnlyPersistentBackend;
+        let session = SessionId::parse("session-1").unwrap();
+        backend.close_persistent_session(&session).unwrap();
+        backend.close_persistent_session(&session).unwrap();
     }
 }

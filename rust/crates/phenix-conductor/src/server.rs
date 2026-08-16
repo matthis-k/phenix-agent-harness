@@ -8,7 +8,7 @@ use phenix_backend::{
 };
 use phenix_core::{
     AuthenticationMethodId, BackendCatalog, BackendId, CallableId, ExecutionEventKind, ExecutionId,
-    ExecutionKind, ExecutionState, ExecutionTarget, SessionId,
+    ExecutionKind, ExecutionState, ExecutionTarget, SessionId, SessionState,
 };
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
@@ -267,6 +267,7 @@ impl ConductorServer {
                 | Command::ForkSession { .. }
                 | Command::RenameSession { .. }
                 | Command::SetSessionTarget { .. }
+                | Command::CloseSession { .. }
                 | Command::CancelExecution { .. }
         );
 
@@ -315,6 +316,7 @@ impl ConductorServer {
                 .set_session_target(&session_id, target)
                 .map(|session| Reply::Session { session })
                 .map_err(map_conductor_error),
+            Command::CloseSession { session_id } => self.close_session(&session_id),
             Command::CancelExecution { execution_id } => self.cancel_execution(&execution_id),
             Command::RefreshBackendCatalog { backend_id } => self
                 .refresh_backend(&backend_id)
@@ -470,6 +472,48 @@ impl ConductorServer {
             scope.cancel(&execution_id)?;
         }
         Ok(Reply::Accepted)
+    }
+
+    fn close_session(&mut self, session_id: &SessionId) -> Result<Reply, ProtocolError> {
+        let session = self
+            .runtime
+            .lock()
+            .map_err(|_| {
+                protocol_error(
+                    ErrorCode::BackendProtocol,
+                    "conductor runtime lock poisoned",
+                )
+            })?
+            .validate_session_close(session_id)
+            .map_err(map_conductor_error)?;
+        if session.state == SessionState::Closed {
+            return Ok(Reply::Session { session });
+        }
+
+        // Backend disposal precedes the durable close marker. A failed backend
+        // therefore leaves the Phenix session active and retryable; backends are
+        // required to make persistent close idempotent because earlier fanout
+        // members may already have completed successfully.
+        for backend in self.backends.values() {
+            backend
+                .lock()
+                .map_err(|_| protocol_error(ErrorCode::BackendTransport, "backend lock poisoned"))?
+                .close_persistent_session(session_id)
+                .map_err(map_backend_error)?;
+        }
+
+        let session = self
+            .runtime
+            .lock()
+            .map_err(|_| {
+                protocol_error(
+                    ErrorCode::BackendProtocol,
+                    "conductor runtime lock poisoned",
+                )
+            })?
+            .close_session(session_id)
+            .map_err(map_conductor_error)?;
+        Ok(Reply::Session { session })
     }
 
     fn fail_execution(
@@ -1110,9 +1154,7 @@ impl ConductorRuntime {
         session_id: &SessionId,
         name: String,
     ) -> Result<phenix_core::SessionSummary, ConductorError> {
-        if !self.sessions.contains_key(session_id) {
-            return Err(ConductorError::UnknownSession(session_id.clone()));
-        }
+        self.ensure_session_active(session_id)?;
         self.record_domain_event(DomainEvent::SessionRenamed {
             session_id: session_id.clone(),
             name,
@@ -1130,9 +1172,7 @@ impl ConductorRuntime {
         session_id: &SessionId,
         target: ExecutionTarget,
     ) -> Result<phenix_core::SessionSummary, ConductorError> {
-        if !self.sessions.contains_key(session_id) {
-            return Err(ConductorError::UnknownSession(session_id.clone()));
-        }
+        self.ensure_session_active(session_id)?;
         self.record_domain_event(DomainEvent::SessionTargetChanged {
             session_id: session_id.clone(),
             target,
@@ -1265,6 +1305,22 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
     match error {
         ConductorError::UnknownSession(id) => {
             let mut error = protocol_error(ErrorCode::UnknownId, format!("unknown session: {id}"));
+            error.session_id = Some(id);
+            error
+        }
+        ConductorError::ClosedSession(id) => {
+            let mut error = protocol_error(
+                ErrorCode::InvalidRequest,
+                format!("session is closed: {id}"),
+            );
+            error.session_id = Some(id);
+            error
+        }
+        ConductorError::SessionHasActiveExecutions(id) => {
+            let mut error = protocol_error(
+                ErrorCode::InvalidRequest,
+                format!("session has active executions and cannot close: {id}"),
+            );
             error.session_id = Some(id);
             error
         }

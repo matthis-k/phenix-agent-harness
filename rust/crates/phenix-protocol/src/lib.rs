@@ -38,6 +38,9 @@ pub enum Command {
         session_id: SessionId,
         target: ExecutionTarget,
     },
+    CloseSession {
+        session_id: SessionId,
+    },
     Submit {
         session_id: SessionId,
         text: String,
@@ -193,6 +196,19 @@ mod tests {
         let value = serde_json::to_value(message).expect("serialize callable catalog request");
         assert_eq!(value["command"]["type"], "get_callable_catalog");
         assert_eq!(value["command"].as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn close_session_is_an_explicit_terminal_operation() {
+        let message = ClientMessage {
+            id: 11,
+            command: Command::CloseSession {
+                session_id: SessionId::parse("session-1").unwrap(),
+            },
+        };
+        let value = serde_json::to_value(message).expect("serialize session close");
+        assert_eq!(value["command"]["type"], "close_session");
+        assert_eq!(value["command"]["session_id"], "session-1");
     }
 
     #[test]

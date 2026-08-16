@@ -32,8 +32,8 @@ use phenix_backend::{
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, ConfigRevisionId, ExecutionEvent,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
-    ExecutionTarget, ModelTarget, RoutingProfile, SessionId, SessionSummary, ToolCallId,
-    WorkflowDefinition,
+    ExecutionTarget, ModelTarget, RoutingProfile, SessionId, SessionState, SessionSummary,
+    ToolCallId, WorkflowDefinition,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -44,6 +44,8 @@ use std::fmt::{self, Display, Formatter};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConductorError {
     UnknownSession(SessionId),
+    ClosedSession(SessionId),
+    SessionHasActiveExecutions(SessionId),
     UnknownExecution(ExecutionId),
     EmptyInput,
     InvalidLifecycle(ExecutionId),
@@ -64,6 +66,10 @@ impl Display for ConductorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownSession(id) => write!(f, "unknown session: {id}"),
+            Self::ClosedSession(id) => write!(f, "session is closed: {id}"),
+            Self::SessionHasActiveExecutions(id) => {
+                write!(f, "session has active executions and cannot close: {id}")
+            }
             Self::UnknownExecution(id) => write!(f, "unknown execution: {id}"),
             Self::EmptyInput => f.write_str("input must not be empty"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
@@ -345,6 +351,7 @@ impl ConductorRuntime {
             name,
             config_revision: self.config_revision.clone(),
             default_target: target,
+            state: SessionState::Active,
         };
         self.record_domain_event(DomainEvent::SessionCreated {
             session: summary.clone(),
@@ -366,6 +373,48 @@ impl ConductorRuntime {
         self.create_session(Some(source.id), name, source.default_target)
     }
 
+    pub fn validate_session_close(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<SessionSummary, ConductorError> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?
+            .summary
+            .clone();
+        if session.state == SessionState::Closed {
+            return Ok(session);
+        }
+        if self.executions.values().any(|execution| {
+            execution.summary.session_id == *session_id && !is_terminal(&execution.summary.state)
+        }) {
+            return Err(ConductorError::SessionHasActiveExecutions(
+                session_id.clone(),
+            ));
+        }
+        Ok(session)
+    }
+
+    pub fn close_session(
+        &mut self,
+        session_id: &SessionId,
+    ) -> Result<SessionSummary, ConductorError> {
+        let session = self.validate_session_close(session_id)?;
+        if session.state == SessionState::Closed {
+            return Ok(session);
+        }
+        self.record_domain_event(DomainEvent::SessionClosed {
+            session_id: session_id.clone(),
+        })?;
+        Ok(self
+            .sessions
+            .get(session_id)
+            .expect("closed session remains present")
+            .summary
+            .clone())
+    }
+
     pub fn submit(
         &mut self,
         session_id: &SessionId,
@@ -375,10 +424,11 @@ impl ConductorRuntime {
         if text.trim().is_empty() {
             return Err(ConductorError::EmptyInput);
         }
+        self.ensure_session_active(session_id)?;
         let target = self
             .sessions
             .get(session_id)
-            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?
+            .expect("active session exists")
             .summary
             .default_target
             .clone();
@@ -487,6 +537,7 @@ impl ConductorRuntime {
             .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?
             .summary
             .clone();
+        self.ensure_session_active(&parent.session_id)?;
         let child = ExecutionSummary {
             id: self.new_execution_id(),
             session_id: parent.session_id,
@@ -1047,6 +1098,18 @@ impl ConductorRuntime {
         Ok(result)
     }
 
+    fn ensure_session_active(&self, session_id: &SessionId) -> Result<(), ConductorError> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?;
+        if session.summary.state == SessionState::Closed {
+            Err(ConductorError::ClosedSession(session_id.clone()))
+        } else {
+            Ok(())
+        }
+    }
+
     fn new_session_id(&self) -> SessionId {
         SessionId::parse(format!("session-{}", self.next_session + 1)).expect("generated id")
     }
@@ -1158,6 +1221,35 @@ mod tests {
         let execution = runtime.submit(&fork.id, "work").unwrap();
         assert_eq!(fork.parent_session, Some(root.id));
         assert_eq!(execution.parent_execution, None);
+    }
+
+    #[test]
+    fn closed_session_is_durable_terminal_but_can_be_forked() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed("a")).unwrap();
+        let closed = runtime.close_session(&session.id).unwrap();
+        assert_eq!(closed.state, SessionState::Closed);
+        assert_eq!(runtime.close_session(&session.id).unwrap(), closed);
+        assert!(matches!(
+            runtime.submit(&session.id, "more"),
+            Err(ConductorError::ClosedSession(id)) if id == session.id
+        ));
+        let fork = runtime
+            .fork_session(&session.id, Some("continuation".to_owned()))
+            .unwrap();
+        assert_eq!(fork.parent_session, Some(session.id));
+        assert_eq!(fork.state, SessionState::Active);
+    }
+
+    #[test]
+    fn close_rejects_nonterminal_execution() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed("a")).unwrap();
+        runtime.submit(&session.id, "work").unwrap();
+        assert!(matches!(
+            runtime.close_session(&session.id),
+            Err(ConductorError::SessionHasActiveExecutions(id)) if id == session.id
+        ));
     }
 
     #[test]
