@@ -545,14 +545,6 @@ async fn authenticate_agent(
         .map_err(|error| BackendError::Transport(error.to_string()))
 }
 
-fn tool_bridge_builder(
-    bridge: ToolBridge,
-    notification_events: mpsc::Sender<WorkerMessage>,
-) -> impl FnOnce() {
-    drop((bridge, notification_events));
-    || {}
-}
-
 async fn run_turn(
     config: AcpBackendConfig,
     model: ModelTarget,
