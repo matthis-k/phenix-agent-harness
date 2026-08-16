@@ -1,6 +1,6 @@
 use crate::{
-    ConductorError, ConductorRuntime, ExecutionPayload, JsonFileStore, PersistenceError,
-    ResolvedInvocation,
+    ConductorError, ConductorRuntime, ExecutionPayload, ExecutionProviderError, JsonFileStore,
+    PersistenceError, ResolvedInvocation,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
@@ -747,16 +747,16 @@ impl ConductorRuntime {
     }
 
     fn interrupt_non_resumable_executions(&mut self) -> Result<(), ConductorError> {
-        let running_model_executions = self
+        let running_invocations = self
             .executions
             .iter()
             .filter(|(_, record)| {
                 record.summary.state == ExecutionState::Running
-                    && matches!(record.payload, ExecutionPayload::Model { .. })
+                    && matches!(record.payload, ExecutionPayload::Invocation { .. })
             })
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
-        for execution_id in running_model_executions {
+        for execution_id in running_invocations {
             self.set_state(&execution_id, ExecutionState::Interrupted)?;
         }
         Ok(())
@@ -851,6 +851,17 @@ fn map_backend_error(error: BackendError) -> ProtocolError {
     }
 }
 
+fn map_execution_provider_error(error: ExecutionProviderError) -> ProtocolError {
+    match error {
+        ExecutionProviderError::Unsupported(message) => {
+            protocol_error(ErrorCode::UnsupportedCapability, message)
+        }
+        ExecutionProviderError::Failed(message) | ExecutionProviderError::Protocol(message) => {
+            protocol_error(ErrorCode::ExecutionProviderFailure, message)
+        }
+    }
+}
+
 fn map_conductor_error(error: ConductorError) -> ProtocolError {
     match error {
         ConductorError::UnknownSession(id) => {
@@ -883,6 +894,14 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.execution_id = Some(id);
             error
         }
+        ConductorError::NonProviderExecution(id) => {
+            let mut error = protocol_error(
+                ErrorCode::UnsupportedCapability,
+                format!("execution is not provider-backed: {id}"),
+            );
+            error.execution_id = Some(id);
+            error
+        }
         ConductorError::PolicyDenied {
             execution_id,
             denial,
@@ -894,6 +913,7 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         ConductorError::CallableRegistry(error) => {
             protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }
+        ConductorError::ExecutionProvider(error) => map_execution_provider_error(error),
         ConductorError::Routing(error) => {
             protocol_error(ErrorCode::RoutingFailure, error.to_string())
         }

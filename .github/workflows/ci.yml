@@ -106,6 +106,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-model-tool-loop
 
+      - name: "conductor / execution_provider_runtime"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-execution-providers
+
       - name: "conductor / stdio_roundtrip"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"

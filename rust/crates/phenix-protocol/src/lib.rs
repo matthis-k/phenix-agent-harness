@@ -94,6 +94,7 @@ pub enum ErrorCode {
     AuthenticationRequired,
     BackendTransport,
     BackendProtocol,
+    ExecutionProviderFailure,
     ToolFailure,
     Cancelled,
 }
@@ -153,5 +154,12 @@ mod tests {
         assert_eq!(value["id"], 7);
         assert_eq!(value["result"]["type"], "accepted");
         assert!(value.get("Ok").is_none());
+    }
+
+    #[test]
+    fn execution_provider_failure_has_stable_wire_code() {
+        let value = serde_json::to_value(ErrorCode::ExecutionProviderFailure)
+            .expect("serialize error code");
+        assert_eq!(value, "execution_provider_failure");
     }
 }

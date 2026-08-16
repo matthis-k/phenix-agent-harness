@@ -461,9 +461,6 @@ impl ProtocolHarness {
         self
     }
 
-    /// Inject a protocol command only after the mock backend has reached the
-    /// given 1-based action index. This is the deterministic alternative to
-    /// timing-sensitive sleeps for cancellation and streaming tests.
     #[must_use]
     pub fn after_action(mut self, action_index: usize, command: Command) -> Self {
         assert!(action_index > 0, "backend action indices are 1-based");

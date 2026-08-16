@@ -8,6 +8,7 @@ pub enum CallableOperation {
     StartAgent,
     StartWorkflow,
     StartWorkflowStep,
+    DispatchProvider,
     InvokeTool,
 }
 
