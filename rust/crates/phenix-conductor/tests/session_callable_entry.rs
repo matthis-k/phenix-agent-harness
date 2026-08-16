@@ -47,3 +47,18 @@ fn frontend_layer_can_start_a_registered_top_level_callable_without_a_wrapper_ex
     assert_eq!(execution.state, ExecutionState::Pending);
     assert_eq!(runtime.snapshot().executions, vec![execution]);
 }
+
+#[test]
+fn rejected_top_level_callable_does_not_create_durable_execution_state() {
+    let mut runtime = ConductorRuntime::new();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+
+    let result = runtime.start_session_callable(
+        &session.id,
+        &CallableId::parse("missing").unwrap(),
+        "inspect the repository",
+    );
+
+    assert!(result.is_err());
+    assert!(runtime.snapshot().executions.is_empty());
+}
