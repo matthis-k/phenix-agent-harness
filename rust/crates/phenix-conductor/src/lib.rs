@@ -11,8 +11,8 @@ pub use routing::{RoutingRegistry, RoutingRegistryError};
 pub use server::{ConductorServer, ServerError};
 
 use phenix_backend::{
-    Backend, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
-    BackendSessionRequest, ToolHostingCapability, ToolInvocation, ToolProvision, ToolResult,
+    Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
+    BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, ConfigRevisionId, ExecutionEvent,
@@ -97,11 +97,58 @@ struct ExecutionRecord {
     payload: ExecutionPayload,
 }
 
+/// Immutable result of conductor-owned target resolution for one model step.
+///
+/// Once this value exists no downstream layer is allowed to route the step
+/// again. It captures both the requested target and the concrete target so
+/// diagnostics can explain a routed decision without making the backend aware
+/// of routing profiles.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ExecutionPlan {
+pub struct ResolvedInvocation {
     pub execution_id: ExecutionId,
+    pub session_id: SessionId,
+    pub config_revision: ConfigRevisionId,
+    pub callable: Option<CallableId>,
+    pub requested_target: ExecutionTarget,
     pub model: ModelTarget,
+    pub prompt: String,
     pub tools: ToolProvision,
+}
+
+/// A resolved invocation after backend capability negotiation and lifecycle
+/// validation. This is the only value from which backend session/execution
+/// requests should be materialized.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedInvocation {
+    pub resolved: ResolvedInvocation,
+    pub tools: PreparedToolSurface,
+}
+
+impl PreparedInvocation {
+    #[must_use]
+    pub fn backend_session_request(&self) -> BackendSessionRequest {
+        BackendSessionRequest {
+            model: self.resolved.model.clone(),
+            tools: self.tools.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn backend_execution_request(&self) -> BackendExecutionRequest {
+        BackendExecutionRequest {
+            execution_id: self.resolved.execution_id.clone(),
+            prompt: self.resolved.prompt.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn allowed_tools(&self) -> BTreeSet<CallableId> {
+        self.tools
+            .callables()
+            .iter()
+            .map(|descriptor| descriptor.id.clone())
+            .collect()
+    }
 }
 
 /// In-memory reference runtime proving conductor-owned semantics before
@@ -381,10 +428,12 @@ impl ConductorRuntime {
         Ok(child)
     }
 
-    pub fn plan_execution(
+    /// Resolve routing and callable visibility exactly once for a model step.
+    /// Backend capabilities intentionally do not participate in model routing.
+    pub fn resolve_invocation(
         &self,
         execution_id: &ExecutionId,
-    ) -> Result<ExecutionPlan, ConductorError> {
+    ) -> Result<ResolvedInvocation, ConductorError> {
         let execution = self
             .executions
             .get(execution_id)
@@ -392,19 +441,51 @@ impl ConductorRuntime {
         if execution.summary.kind == ExecutionKind::Workflow {
             return Err(ConductorError::NonModelExecution(execution_id.clone()));
         }
-        let model = match &execution.summary.target {
+        let ExecutionPayload::Model { prompt } = &execution.payload else {
+            return Err(ConductorError::NonModelExecution(execution_id.clone()));
+        };
+        let requested_target = execution.summary.target.clone();
+        let model = match &requested_target {
             ExecutionTarget::Fixed(model) => model.clone(),
             ExecutionTarget::Routed(profile) => self
                 .routing
                 .resolve(profile, execution.summary.callable.as_ref())?,
         };
-        Ok(ExecutionPlan {
+        let session = self
+            .sessions
+            .get(&execution.summary.session_id)
+            .expect("execution session invariant");
+        Ok(ResolvedInvocation {
             execution_id: execution_id.clone(),
+            session_id: execution.summary.session_id.clone(),
+            config_revision: session.summary.config_revision.clone(),
+            callable: execution.summary.callable.clone(),
+            requested_target,
             model,
+            prompt: prompt.clone(),
             tools: ToolProvision {
                 callables: self.callables.tool_descriptors(),
             },
         })
+    }
+
+    /// Validate that a previously resolved invocation is still runnable and bind
+    /// its semantic tool provision to one concrete backend presentation. No
+    /// routing lookup occurs in this phase.
+    pub fn prepare_invocation(
+        &self,
+        resolved: ResolvedInvocation,
+        capabilities: &BackendCapabilities,
+    ) -> Result<PreparedInvocation, ConductorError> {
+        let execution = self
+            .executions
+            .get(&resolved.execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(resolved.execution_id.clone()))?;
+        if execution.summary.state != ExecutionState::Pending {
+            return Err(ConductorError::InvalidLifecycle(resolved.execution_id));
+        }
+        let tools = resolved.tools.clone().prepare(capabilities)?;
+        Ok(PreparedInvocation { resolved, tools })
     }
 
     pub fn drive_execution(
@@ -412,43 +493,13 @@ impl ConductorRuntime {
         execution_id: &ExecutionId,
         backend: &mut dyn Backend,
     ) -> Result<(), ConductorError> {
-        let plan = self.plan_execution(execution_id)?;
-        let record = self
-            .executions
-            .get(execution_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-        if record.summary.state != ExecutionState::Pending {
-            return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
-        }
-        let ExecutionPayload::Model { prompt } = &record.payload else {
-            return Err(ConductorError::NonModelExecution(execution_id.clone()));
-        };
-        if !plan.tools.callables.is_empty()
-            && matches!(
-                backend.capabilities().tool_hosting,
-                ToolHostingCapability::Unsupported
-            )
-        {
-            return Err(ConductorError::Backend(BackendError::Unsupported(
-                "backend cannot host conductor-provisioned tools".to_owned(),
-            )));
-        }
-        let prompt = prompt.clone();
-        let allowed_tools = plan
-            .tools
-            .callables
-            .iter()
-            .map(|descriptor| descriptor.id.clone())
-            .collect();
-        let backend_session = backend.open_session(BackendSessionRequest {
-            model: plan.model,
-            tools: plan.tools,
-        })?;
+        let resolved = self.resolve_invocation(execution_id)?;
+        let capabilities = backend.capabilities();
+        let prepared = self.prepare_invocation(resolved, &capabilities)?;
+        let allowed_tools = prepared.allowed_tools();
+        let backend_session = backend.open_session(prepared.backend_session_request())?;
         self.set_state(execution_id, ExecutionState::Running)?;
-        let request = BackendExecutionRequest {
-            execution_id: execution_id.clone(),
-            prompt,
-        };
+        let request = prepared.backend_execution_request();
         let result = {
             let mut host = RuntimeHost {
                 runtime: self,
@@ -818,6 +869,7 @@ mod tests {
     use super::*;
     use phenix_core::{
         BackendId, CallablePolicy, CapabilitySet, InferenceOptions, ModelId, ProviderId,
+        RoutingProfileId,
     };
     use serde_json::json;
 
@@ -880,5 +932,34 @@ mod tests {
             .iter()
             .filter(|execution| execution.id == root.id || execution.id == child.id)
             .all(|execution| execution.state == ExecutionState::Cancelled));
+    }
+
+    #[test]
+    fn resolved_invocation_records_routing_origin_and_concrete_target() {
+        let mut runtime = ConductorRuntime::new();
+        let profile = RoutingProfileId::parse("default").unwrap();
+        let concrete = ModelTarget {
+            backend: BackendId::parse("mock").unwrap(),
+            provider: ProviderId::parse("mock").unwrap(),
+            model: ModelId::parse("routed").unwrap(),
+            inference: InferenceOptions::default(),
+        };
+        runtime
+            .register_routing_profile(RoutingProfile {
+                id: profile.clone(),
+                default_target: concrete.clone(),
+                callable_targets: BTreeMap::new(),
+            })
+            .unwrap();
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Routed(profile.clone()))
+            .unwrap();
+        let execution = runtime.submit(&session.id, "work").unwrap();
+        let resolved = runtime.resolve_invocation(&execution.id).unwrap();
+
+        assert_eq!(resolved.requested_target, ExecutionTarget::Routed(profile));
+        assert_eq!(resolved.model, concrete);
+        assert_eq!(resolved.session_id, session.id);
+        assert_eq!(resolved.config_revision.as_str(), "config-1");
     }
 }

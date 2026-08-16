@@ -1,6 +1,6 @@
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
-    BackendSession, BackendSessionRequest, ToolHostingCapability,
+    BackendSession, BackendSessionRequest,
 };
 use phenix_conductor::{ConductorRuntime, ConductorServer};
 use phenix_core::{
@@ -9,6 +9,7 @@ use phenix_core::{
     SessionId,
 };
 use phenix_protocol::{ClientMessage, Command, Reply, ResponsePayload, ServerMessage};
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -45,7 +46,7 @@ fn target() -> ModelTarget {
 impl Backend for BlockingBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            tool_hosting: ToolHostingCapability::Unsupported,
+            tool_presentations: BTreeSet::new(),
             images: false,
             persistent_sessions: false,
         }

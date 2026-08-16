@@ -1,7 +1,9 @@
-use crate::{ConductorError, ConductorRuntime, ExecutionPayload, JsonFileStore, PersistenceError};
+use crate::{
+    ConductorError, ConductorRuntime, ExecutionPayload, JsonFileStore, PersistenceError,
+    ResolvedInvocation,
+};
 use phenix_backend::{
-    Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
-    BackendSession, BackendSessionRequest, ToolHostingCapability, ToolInvocation, ToolResult,
+    Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
 };
 use phenix_core::{
     AuthenticationMethodId, BackendCatalog, BackendId, CallableId, ExecutionEventKind, ExecutionId,
@@ -26,24 +28,41 @@ const EXECUTION_BUFFER: usize = 64;
 
 type SharedBackend = Arc<Mutex<Box<dyn Backend>>>;
 type SharedRuntime = Arc<Mutex<ConductorRuntime>>;
-type ActiveSessions = Arc<Mutex<BTreeMap<ExecutionId, Arc<dyn BackendSession>>>>;
+type ActiveScopes = Arc<Mutex<BTreeMap<ExecutionId, LiveExecutionScope>>>;
 
 struct ExecutionJob {
-    execution_id: ExecutionId,
+    resolved: ResolvedInvocation,
     backend: SharedBackend,
 }
 
-struct PreparedExecution {
-    session_request: BackendSessionRequest,
-    execution_request: BackendExecutionRequest,
-    allowed_tools: BTreeSet<CallableId>,
+/// Process-local resources owned by one live execution. Durable execution state
+/// remains in `ConductorRuntime`; this scope is deliberately not persisted.
+#[derive(Clone)]
+struct LiveExecutionScope {
+    backend_session: Arc<dyn BackendSession>,
+}
+
+/// RAII lease for one live execution scope. Once installed, every return path
+/// from the worker tears the process-local scope down, including error returns
+/// and unwinding. Durable execution state remains owned by `ConductorRuntime`.
+struct LiveExecutionLease {
+    scopes: ActiveScopes,
+    execution_id: ExecutionId,
+}
+
+impl Drop for LiveExecutionLease {
+    fn drop(&mut self) {
+        if let Ok(mut scopes) = self.scopes.lock() {
+            scopes.remove(&self.execution_id);
+        }
+    }
 }
 
 pub struct ConductorServer {
     runtime: SharedRuntime,
     backends: BTreeMap<BackendId, SharedBackend>,
     catalogs: BTreeMap<BackendId, BackendCatalog>,
-    active_sessions: ActiveSessions,
+    active_scopes: ActiveScopes,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
 }
@@ -55,7 +74,7 @@ impl ConductorServer {
             runtime: Arc::new(Mutex::new(runtime)),
             backends: BTreeMap::new(),
             catalogs: BTreeMap::new(),
-            active_sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            active_scopes: Arc::new(Mutex::new(BTreeMap::new())),
             store: None,
             persist_lock: Arc::new(Mutex::new(())),
         }
@@ -116,7 +135,7 @@ impl ConductorServer {
         let (execution_sender, execution_receiver) = mpsc::sync_channel(EXECUTION_BUFFER);
 
         let runtime = self.runtime.clone();
-        let active_sessions = self.active_sessions.clone();
+        let active_scopes = self.active_scopes.clone();
         let store = self.store.clone();
         let persist_lock = self.persist_lock.clone();
 
@@ -144,7 +163,7 @@ impl ConductorServer {
                 execution_loop(
                     execution_receiver,
                     runtime,
-                    active_sessions,
+                    active_scopes,
                     store,
                     persist_lock,
                 )
@@ -303,14 +322,15 @@ impl ConductorServer {
         )?;
         self.persist()?;
 
-        let backend_id = match self.lock_runtime()?.plan_execution(&execution_id) {
-            Ok(plan) => plan.model.backend,
+        let resolved = match self.lock_runtime()?.resolve_invocation(&execution_id) {
+            Ok(resolved) => resolved,
             Err(error) => {
                 self.fail_execution(&execution_id, map_conductor_error(error))?;
                 self.persist()?;
                 return Ok(());
             }
         };
+        let backend_id = resolved.model.backend.clone();
         let Some(backend) = self.backends.get(&backend_id).cloned() else {
             self.fail_execution(
                 &execution_id,
@@ -322,13 +342,7 @@ impl ConductorServer {
             return Ok(());
         };
 
-        if executions
-            .send(ExecutionJob {
-                execution_id: execution_id.clone(),
-                backend,
-            })
-            .is_err()
-        {
+        if executions.send(ExecutionJob { resolved, backend }).is_err() {
             self.fail_execution(
                 &execution_id,
                 protocol_error(
@@ -343,13 +357,11 @@ impl ConductorServer {
 
     fn cancel_execution(&self, root: &ExecutionId) -> Result<Reply, ProtocolError> {
         let active = self
-            .active_sessions
+            .active_scopes
             .lock()
-            .map_err(|_| {
-                protocol_error(ErrorCode::BackendProtocol, "active session lock poisoned")
-            })?
+            .map_err(|_| protocol_error(ErrorCode::BackendProtocol, "active scope lock poisoned"))?
             .iter()
-            .map(|(id, session)| (id.clone(), session.clone()))
+            .map(|(id, scope)| (id.clone(), scope.backend_session.clone()))
             .collect::<Vec<_>>();
 
         let cancelled_active = {
@@ -458,18 +470,12 @@ impl ConductorServer {
 fn execution_loop(
     executions: Receiver<ExecutionJob>,
     runtime: SharedRuntime,
-    active_sessions: ActiveSessions,
+    active_scopes: ActiveScopes,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
     while let Ok(job) = executions.recv() {
-        execute_job(
-            job,
-            &runtime,
-            &active_sessions,
-            store.as_ref(),
-            &persist_lock,
-        )?;
+        execute_job(job, &runtime, &active_scopes, store.as_ref(), &persist_lock)?;
     }
     Ok(())
 }
@@ -477,10 +483,11 @@ fn execution_loop(
 fn execute_job(
     job: ExecutionJob,
     runtime: &SharedRuntime,
-    active_sessions: &ActiveSessions,
+    active_scopes: &ActiveScopes,
     store: Option<&JsonFileStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
+    let execution_id = job.resolved.execution_id.clone();
     let capabilities = job
         .backend
         .lock()
@@ -490,14 +497,14 @@ fn execute_job(
         let runtime_guard = runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
-        runtime_guard.prepare_backend_execution(&job.execution_id, &capabilities)
+        runtime_guard.prepare_invocation(job.resolved, &capabilities)
     };
     let prepared = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
             fail_shared_execution(
                 runtime,
-                &job.execution_id,
+                &execution_id,
                 map_conductor_error(error),
                 store,
                 persist_lock,
@@ -510,13 +517,13 @@ fn execute_job(
         .backend
         .lock()
         .map_err(|_| ServerError::StatePoisoned("backend"))?
-        .open_session(prepared.session_request)
+        .open_session(prepared.backend_session_request())
     {
         Ok(session) => session,
         Err(error) => {
             fail_shared_execution(
                 runtime,
-                &job.execution_id,
+                &execution_id,
                 map_backend_error(error),
                 store,
                 persist_lock,
@@ -525,28 +532,37 @@ fn execute_job(
         }
     };
 
-    active_sessions
+    active_scopes
         .lock()
-        .map_err(|_| ServerError::StatePoisoned("active sessions"))?
-        .insert(job.execution_id.clone(), backend_session.clone());
+        .map_err(|_| ServerError::StatePoisoned("active scopes"))?
+        .insert(
+            execution_id.clone(),
+            LiveExecutionScope {
+                backend_session: backend_session.clone(),
+            },
+        );
+    let _scope_lease = LiveExecutionLease {
+        scopes: active_scopes.clone(),
+        execution_id: execution_id.clone(),
+    };
 
     let should_execute = {
         let mut runtime_guard = runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
-        match runtime_guard.execution_state(&job.execution_id) {
+        match runtime_guard.execution_state(&execution_id) {
             Some(ExecutionState::Pending) => {
-                runtime_guard.set_state(&job.execution_id, ExecutionState::Running)?;
+                runtime_guard.set_state(&execution_id, ExecutionState::Running)?;
                 true
             }
             Some(state) if is_terminal_state(&state) => false,
             Some(_) => {
                 fail_runtime_execution(
                     &mut runtime_guard,
-                    &job.execution_id,
+                    &execution_id,
                     protocol_error(
                         ErrorCode::InvalidRequest,
-                        format!("execution is not pending: {}", job.execution_id),
+                        format!("execution is not pending: {execution_id}"),
                     ),
                 )?;
                 false
@@ -559,22 +575,22 @@ fn execute_job(
     if should_execute {
         let mut host = SharedRuntimeHost {
             runtime: runtime.clone(),
-            execution_id: job.execution_id.clone(),
-            allowed_tools: prepared.allowed_tools,
+            execution_id: execution_id.clone(),
+            allowed_tools: prepared.allowed_tools(),
             store: store.cloned(),
             persist_lock: persist_lock.clone(),
         };
-        let result = backend_session.execute(prepared.execution_request, &mut host);
+        let result = backend_session.execute(prepared.backend_execution_request(), &mut host);
 
         let mut runtime_guard = runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
-        if runtime_guard.execution_state(&job.execution_id) == Some(ExecutionState::Running) {
+        if runtime_guard.execution_state(&execution_id) == Some(ExecutionState::Running) {
             match result {
-                Ok(()) => runtime_guard.set_state(&job.execution_id, ExecutionState::Completed)?,
+                Ok(()) => runtime_guard.set_state(&execution_id, ExecutionState::Completed)?,
                 Err(error) => fail_runtime_execution(
                     &mut runtime_guard,
-                    &job.execution_id,
+                    &execution_id,
                     map_backend_error(error),
                 )?,
             }
@@ -583,10 +599,6 @@ fn execute_job(
         persist_shared(runtime, store, persist_lock)?;
     }
 
-    active_sessions
-        .lock()
-        .map_err(|_| ServerError::StatePoisoned("active sessions"))?
-        .remove(&job.execution_id);
     Ok(())
 }
 
@@ -754,51 +766,6 @@ impl ConductorRuntime {
         self.executions
             .get(execution_id)
             .map(|record| record.summary.state.clone())
-    }
-
-    fn prepare_backend_execution(
-        &self,
-        execution_id: &ExecutionId,
-        capabilities: &BackendCapabilities,
-    ) -> Result<PreparedExecution, ConductorError> {
-        let plan = self.plan_execution(execution_id)?;
-        let record = self
-            .executions
-            .get(execution_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-        if record.summary.state != ExecutionState::Pending {
-            return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
-        }
-        let ExecutionPayload::Model { prompt } = &record.payload else {
-            return Err(ConductorError::NonModelExecution(execution_id.clone()));
-        };
-        if !plan.tools.callables.is_empty()
-            && matches!(
-                capabilities.tool_hosting,
-                ToolHostingCapability::Unsupported
-            )
-        {
-            return Err(ConductorError::Backend(BackendError::Unsupported(
-                "backend cannot host conductor-provisioned tools".to_owned(),
-            )));
-        }
-        let allowed_tools = plan
-            .tools
-            .callables
-            .iter()
-            .map(|descriptor| descriptor.id.clone())
-            .collect();
-        Ok(PreparedExecution {
-            session_request: BackendSessionRequest {
-                model: plan.model,
-                tools: plan.tools,
-            },
-            execution_request: BackendExecutionRequest {
-                execution_id: execution_id.clone(),
-                prompt: prompt.clone(),
-            },
-            allowed_tools,
-        })
     }
 }
 

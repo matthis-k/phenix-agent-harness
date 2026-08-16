@@ -1,6 +1,6 @@
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
-    BackendSession, BackendSessionRequest, ToolHostingCapability,
+    BackendSession, BackendSessionRequest,
 };
 use phenix_conductor::{ConductorRuntime, ConductorServer};
 use phenix_core::{
@@ -8,6 +8,7 @@ use phenix_core::{
     InferenceOptions, ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
 };
 use phenix_protocol::{ClientMessage, Command, ResponsePayload, ServerMessage};
+use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 use std::sync::{Arc, Mutex};
 
@@ -20,7 +21,7 @@ struct MockSession;
 impl Backend for MockBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            tool_hosting: ToolHostingCapability::Unsupported,
+            tool_presentations: BTreeSet::new(),
             images: false,
             persistent_sessions: false,
         }

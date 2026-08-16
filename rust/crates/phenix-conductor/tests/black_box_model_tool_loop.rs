@@ -1,6 +1,6 @@
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
-    BackendSession, BackendSessionRequest, ToolHostingCapability, ToolInvocation,
+    BackendSession, BackendSessionRequest, ToolInvocation, ToolPresentation,
 };
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{
@@ -10,7 +10,7 @@ use phenix_core::{
     WorkflowExecutionPolicy, WorkflowStep,
 };
 use serde_json::json;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -25,7 +25,7 @@ struct MockSession;
 impl Backend for MockBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            tool_hosting: ToolHostingCapability::Unsupported,
+            tool_presentations: BTreeSet::new(),
             images: false,
             persistent_sessions: false,
         }
@@ -67,7 +67,7 @@ struct ToolSession;
 impl Backend for ToolBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            tool_hosting: ToolHostingCapability::Native,
+            tool_presentations: BTreeSet::from([ToolPresentation::Native]),
             images: false,
             persistent_sessions: false,
         }
@@ -77,8 +77,9 @@ impl Backend for ToolBackend {
         &mut self,
         request: BackendSessionRequest,
     ) -> Result<Arc<dyn BackendSession>, BackendError> {
-        assert_eq!(request.tools.callables.len(), 1);
-        assert_eq!(request.tools.callables[0].id.as_str(), "echo");
+        assert_eq!(request.tools.presentation(), Some(ToolPresentation::Native));
+        assert_eq!(request.tools.callables().len(), 1);
+        assert_eq!(request.tools.callables()[0].id.as_str(), "echo");
         self.opened.store(true, Ordering::SeqCst);
         Ok(Arc::new(ToolSession))
     }
@@ -114,7 +115,7 @@ struct UnsupportedBackend {
 impl Backend for UnsupportedBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            tool_hosting: ToolHostingCapability::Unsupported,
+            tool_presentations: BTreeSet::new(),
             images: false,
             persistent_sessions: false,
         }
@@ -237,11 +238,11 @@ fn routed_agent_uses_callable_specific_model() {
     let child = runtime.start_agent(&root.id, &scout, "inspect").unwrap();
 
     assert_eq!(
-        runtime.plan_execution(&root.id).unwrap().model,
+        runtime.resolve_invocation(&root.id).unwrap().model,
         model("root")
     );
     assert_eq!(
-        runtime.plan_execution(&child.id).unwrap().model,
+        runtime.resolve_invocation(&child.id).unwrap().model,
         model("scout")
     );
 }
@@ -282,7 +283,7 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
 
     assert_eq!(workflow.state, ExecutionState::Running);
     assert!(matches!(
-        runtime.plan_execution(&workflow.id),
+        runtime.resolve_invocation(&workflow.id),
         Err(ConductorError::NonModelExecution(_))
     ));
 
