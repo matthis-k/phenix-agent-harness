@@ -111,18 +111,17 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
                                 .data("fixture prompt has no ACP MCP server")
                         })?;
 
-                    // A real agent's model/tool loop is independent work while the ACP transport
-                    // remains available to dispatch the nested client requests. Model that here by
-                    // returning from the Prompt handler immediately and completing its responder
-                    // from a worker thread.
-                    thread::spawn(move || {
-                        let result = block_on(async {
-                            let connected = connection
+                    // Keep the ACP event loop free while the simulated model performs nested
+                    // client requests. This mirrors an actual agent's asynchronous model/tool loop.
+                    let task_connection = connection.clone();
+                    connection.spawn(async move {
+                        let result: Result<(), agent_client_protocol::Error> = async {
+                            let connected = task_connection
                                 .send_request(ConnectMcpRequest::new(server_id))
                                 .block_task()
                                 .await?;
                             let connection_id = connected.connection_id;
-                            let initialized = connection
+                            let initialized = task_connection
                                 .send_request(
                                     MessageMcpRequest::new(connection_id.clone(), "initialize")
                                         .params(params(json!({
@@ -138,12 +137,12 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
                                 return Err(agent_client_protocol::Error::internal_error()
                                     .data("unexpected Phenix MCP server info"));
                             }
-                            connection.send_notification(MessageMcpNotification::new(
+                            task_connection.send_notification(MessageMcpNotification::new(
                                 connection_id.clone(),
                                 "notifications/initialized",
                             ))?;
 
-                            let listed = connection
+                            let listed = task_connection
                                 .send_request(MessageMcpRequest::new(
                                     connection_id.clone(),
                                     "tools/list",
@@ -158,7 +157,7 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
                                     .data("provisioned callable metadata did not reach fixture"));
                             }
 
-                            let called = connection
+                            let called = task_connection
                                 .send_request(
                                     MessageMcpRequest::new(connection_id.clone(), "tools/call")
                                         .params(params(json!({
@@ -176,11 +175,11 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
                                     .data("unexpected conductor tool result"));
                             }
 
-                            connection
+                            task_connection
                                 .send_request(DisconnectMcpRequest::new(connection_id))
                                 .block_task()
                                 .await?;
-                            connection.send_notification(SessionNotification::new(
+                            task_connection.send_notification(SessionNotification::new(
                                 request.session_id,
                                 SessionUpdate::AgentMessageChunk(ContentChunk::new(
                                     ContentBlock::Text(TextContent::new(
@@ -188,12 +187,15 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
                                     )),
                                 )),
                             ))?;
-                            responder.respond(PromptResponse::new(StopReason::EndTurn))
-                        });
-                        if let Err(error) = result {
-                            eprintln!("ACP tool bridge fixture prompt failed: {error}");
+                            Ok(())
                         }
-                    });
+                        .await;
+
+                        match result {
+                            Ok(()) => responder.respond(PromptResponse::new(StopReason::EndTurn)),
+                            Err(error) => responder.respond_with_error(error),
+                        }
+                    })?;
                     Ok(())
                 }
             },
