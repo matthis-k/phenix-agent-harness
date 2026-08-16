@@ -218,8 +218,9 @@ fn cancellation_before_tool_invocation_prevents_handler_and_tool_events() {
     assert_eq!(run.backend.cancelled(), 1);
     assert!(!called.load(Ordering::SeqCst));
     assert!(run.backend.tool_results().is_empty());
-    assert!(!run
-        .has_event(|event| matches!(event.kind, ExecutionEventKind::ToolCallStarted { .. })));
+    assert!(
+        !run.has_event(|event| matches!(event.kind, ExecutionEventKind::ToolCallStarted { .. }))
+    );
     assert!(!run.has_event(|event| {
         matches!(
             &event.kind,
@@ -372,7 +373,8 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
     assert_eq!(second.state, ExecutionState::Pending);
 
     let serialized = serde_json::to_vec(runtime.journal()).unwrap();
-    let mut restored = ConductorRuntime::restore(serde_json::from_slice(&serialized).unwrap()).unwrap();
+    let mut restored =
+        ConductorRuntime::restore(serde_json::from_slice(&serialized).unwrap()).unwrap();
     bind_two_step_workflow(&mut restored);
     assert_eq!(restored.snapshot(), before_restart);
 
