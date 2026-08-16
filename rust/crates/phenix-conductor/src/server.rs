@@ -709,11 +709,23 @@ fn execute_model_execution(
         }
     };
 
-    let backend_session = match backend
-        .lock()
-        .map_err(|_| ServerError::StatePoisoned("backend"))?
-        .open_session(prepared.backend_session_request())
-    {
+    let backend_session = {
+        let mut backend = backend
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("backend"))?;
+        let request = prepared.backend_session_request();
+        if capabilities.persistent_sessions
+            && matches!(
+                &prepared.resolved.requested_target,
+                ExecutionTarget::Fixed(_)
+            )
+        {
+            backend.open_persistent_session(&prepared.resolved.session_id, request)
+        } else {
+            backend.open_session(request)
+        }
+    };
+    let backend_session = match backend_session {
         Ok(session) => session,
         Err(error) => {
             fail_shared_execution(

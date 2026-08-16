@@ -3,6 +3,12 @@ name = "phenix-backend-acp"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "acp-continuity-fixture"
+path = "tests/fixtures/acp_continuity_agent.rs"
+test = false
+bench = false
+
 [dependencies]
 agent-client-protocol.workspace = true
 phenix-backend = { path = "../phenix-backend" }

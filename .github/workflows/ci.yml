@@ -94,6 +94,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test doc
 
+      - name: "phenix-backend-acp / persistent_continuity"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test integration backend-acp-persistent-continuity
+
       - name: "phenix-acp / repeated_prompts"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
@@ -111,6 +117,12 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-execution-providers
+
+      - name: "conductor / fixed_target_continuity"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-fixed-target-continuity
 
       - name: "conductor / stdio_roundtrip"
         env:

@@ -45,6 +45,12 @@
 
       integrationTargets = [
         {
+          id = "backend-acp-persistent-continuity";
+          package = "phenix-backend-acp";
+          test = "persistent_continuity";
+          label = "phenix-backend-acp / persistent_continuity";
+        }
+        {
           id = "phenix-acp-repeated-prompts";
           package = "phenix-acp";
           test = "repeated_prompts";
@@ -64,6 +70,12 @@
           package = "phenix-conductor";
           test = "execution_provider_runtime";
           label = "conductor / execution_provider_runtime";
+        }
+        {
+          id = "conductor-fixed-target-continuity";
+          package = "phenix-conductor";
+          test = "fixed_target_continuity";
+          label = "conductor / fixed_target_continuity";
         }
         {
           id = "conductor-stdio-roundtrip";
