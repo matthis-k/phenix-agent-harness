@@ -112,6 +112,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-execution-providers
 
+      - name: "conductor / fixed_target_continuity"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-fixed-target-continuity
+
       - name: "conductor / stdio_roundtrip"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
