@@ -1,16 +1,20 @@
 #![forbid(unsafe_code)]
 
+mod mcp_bridge;
+
 use agent_client_protocol::schema::v1::{
-    AuthMethod, AuthenticateRequest, CancelNotification, ContentBlock, ContentChunk, ErrorCode,
-    InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
+    AuthMethod, AuthenticateRequest, CancelNotification, ConnectMcpRequest, ContentBlock,
+    ContentChunk, DisconnectMcpRequest, ErrorCode, InitializeRequest, MessageMcpNotification,
+    MessageMcpRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
+use mcp_bridge::{BridgeToolRequest, ToolBridge};
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
-    BackendSession, BackendSessionRequest,
+    BackendSession, BackendSessionRequest, PreparedToolSurface, ToolPresentation,
 };
 use phenix_core::{
     AuthenticationMethodDescriptor, AuthenticationMethodId, AuthenticationMethodKind,
@@ -108,9 +112,11 @@ impl AcpBackend {
                 "ACP inference effort mapping is not implemented in R7".to_owned(),
             ));
         }
-        if !request.tools.callables().is_empty() {
+        if !request.tools.is_empty()
+            && request.tools.presentation() != Some(ToolPresentation::AcpExtension)
+        {
             return Err(BackendError::Unsupported(
-                "ACP conductor-tool provisioning is not implemented in R7".to_owned(),
+                "ACP conductor tools require the negotiated ACP extension presentation".to_owned(),
             ));
         }
         Ok(())
@@ -120,7 +126,7 @@ impl AcpBackend {
 impl Backend for AcpBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            tool_presentations: BTreeSet::new(),
+            tool_presentations: BTreeSet::from([ToolPresentation::AcpExtension]),
             images: false,
             persistent_sessions: true,
         }
@@ -157,6 +163,7 @@ impl Backend for AcpBackend {
         Ok(Arc::new(AcpBackendSession {
             config: self.config.clone(),
             model: request.model,
+            tools: request.tools,
             cancellation: Mutex::new(CancellationState::default()),
         }))
     }
@@ -168,13 +175,14 @@ impl Backend for AcpBackend {
     ) -> Result<Arc<dyn BackendSession>, BackendError> {
         self.validate_session_request(&request)?;
         if let Some(session) = self.persistent_sessions.get(session_id) {
-            session.set_model(request.model)?;
+            session.set_request(request.model, request.tools)?;
             return Ok(session.clone());
         }
 
         let session = Arc::new(AcpPersistentSession::start(
             self.config.clone(),
             request.model,
+            request.tools,
         )?);
         self.persistent_sessions
             .insert(session_id.clone(), session.clone());
@@ -231,6 +239,7 @@ fn request_cancellation(cancellation: &Mutex<CancellationState>) -> Result<(), B
 struct AcpBackendSession {
     config: AcpBackendConfig,
     model: ModelTarget,
+    tools: PreparedToolSurface,
     cancellation: Mutex<CancellationState>,
 }
 
@@ -255,6 +264,7 @@ impl BackendSession for AcpBackendSession {
         };
         let config = self.config.clone();
         let model = self.model.clone();
+        let tools = self.tools.clone();
         let prompt = request.prompt;
         let (tx, rx) = mpsc::channel();
 
@@ -262,7 +272,14 @@ impl BackendSession for AcpBackendSession {
             let worker_tx = tx.clone();
             scope.spawn(move || {
                 let done_tx = worker_tx.clone();
-                let result = block_on(run_turn(config, model, prompt, worker_tx, cancellation));
+                let result = block_on(run_turn(
+                    config,
+                    model,
+                    tools,
+                    prompt,
+                    worker_tx,
+                    cancellation,
+                ));
                 let _ = done_tx.send(WorkerMessage::Done(result));
             });
             drop(tx);
@@ -280,42 +297,65 @@ impl BackendSession for AcpBackendSession {
 
 struct AcpPersistentSession {
     model: Mutex<ModelTarget>,
+    tools: Mutex<PreparedToolSurface>,
+    bridge_available: bool,
     commands: mpsc::Sender<PersistentCommand>,
     cancellation: Mutex<CancellationState>,
 }
 
 impl AcpPersistentSession {
-    fn start(config: AcpBackendConfig, model: ModelTarget) -> Result<Self, BackendError> {
+    fn start(
+        config: AcpBackendConfig,
+        model: ModelTarget,
+        tools: PreparedToolSurface,
+    ) -> Result<Self, BackendError> {
         let (commands, command_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let worker_model = model.clone();
+        let worker_tools = tools.clone();
         thread::spawn(move || {
             let ready_error = ready_tx.clone();
             if let Err(error) = block_on(run_persistent_session(
                 config,
                 worker_model,
+                worker_tools,
                 command_rx,
                 ready_tx,
             )) {
                 let _ = ready_error.send(Err(error));
             }
         });
-        ready_rx.recv().map_err(|error| {
+        let bridge_available = ready_rx.recv().map_err(|error| {
             BackendError::Transport(format!(
                 "ACP persistent session worker closed during startup: {error}"
             ))
         })??;
         Ok(Self {
             model: Mutex::new(model),
+            tools: Mutex::new(tools),
+            bridge_available,
             commands,
             cancellation: Mutex::new(CancellationState::default()),
         })
     }
 
-    fn set_model(&self, model: ModelTarget) -> Result<(), BackendError> {
+    fn set_request(
+        &self,
+        model: ModelTarget,
+        tools: PreparedToolSurface,
+    ) -> Result<(), BackendError> {
+        if !tools.is_empty() && !self.bridge_available {
+            return Err(BackendError::Unsupported(
+                "ACP agent does not advertise native MCP-over-ACP support for this persistent session"
+                    .to_owned(),
+            ));
+        }
         *self.model.lock().map_err(|_| {
             BackendError::Protocol("ACP persistent model lock poisoned".to_owned())
         })? = model;
+        *self.tools.lock().map_err(|_| {
+            BackendError::Protocol("ACP persistent tool surface lock poisoned".to_owned())
+        })? = tools;
         Ok(())
     }
 }
@@ -334,9 +374,17 @@ impl BackendSession for AcpPersistentSession {
             .lock()
             .map_err(|_| BackendError::Protocol("ACP persistent model lock poisoned".to_owned()))?
             .clone();
+        let tools = self
+            .tools
+            .lock()
+            .map_err(|_| {
+                BackendError::Protocol("ACP persistent tool surface lock poisoned".to_owned())
+            })?
+            .clone();
         let (events, event_rx) = mpsc::channel();
         let send_result = self.commands.send(PersistentCommand {
             model,
+            tools,
             prompt: request.prompt,
             events,
             cancellation,
@@ -358,6 +406,7 @@ impl BackendSession for AcpPersistentSession {
 
 struct PersistentCommand {
     model: ModelTarget,
+    tools: PreparedToolSurface,
     prompt: String,
     events: mpsc::Sender<WorkerMessage>,
     cancellation: mpsc::Receiver<()>,
@@ -372,6 +421,7 @@ impl PersistentCommand {
 #[derive(Debug)]
 enum WorkerMessage {
     Event(BackendEvent),
+    ToolCall(BridgeToolRequest),
     Done(Result<(), BackendError>),
 }
 
@@ -386,6 +436,16 @@ fn receive_worker_messages(
                 if host_error.is_none() {
                     host_error = host.emit(event).err();
                 }
+            }
+            Ok(WorkerMessage::ToolCall(request)) => {
+                let result = if let Some(error) = host_error.as_ref() {
+                    Err(BackendError::Protocol(format!(
+                        "backend host already failed before tool invocation: {error}"
+                    )))
+                } else {
+                    host.invoke_tool(request.invocation)
+                };
+                let _ = request.response.send(result);
             }
             Ok(WorkerMessage::Done(result)) => return host_error.map_or(result, Err),
             Err(error) => {
@@ -485,15 +545,29 @@ async fn authenticate_agent(
         .map_err(|error| BackendError::Transport(error.to_string()))
 }
 
+fn tool_bridge_builder(
+    bridge: ToolBridge,
+    notification_events: mpsc::Sender<WorkerMessage>,
+) -> impl FnOnce() {
+    drop((bridge, notification_events));
+    || {}
+}
+
 async fn run_turn(
     config: AcpBackendConfig,
     model: ModelTarget,
+    tools: PreparedToolSurface,
     prompt: String,
     events: mpsc::Sender<WorkerMessage>,
     cancellation: mpsc::Receiver<()>,
 ) -> Result<(), BackendError> {
     let agent = new_agent(&config);
     let notification_events = events.clone();
+    let bridge = ToolBridge::default();
+    let connect_bridge = bridge.clone();
+    let message_bridge = bridge.clone();
+    let notification_bridge = bridge.clone();
+    let disconnect_bridge = bridge.clone();
 
     agent_client_protocol::Client
         .builder()
@@ -506,6 +580,12 @@ async fn run_turn(
             },
             agent_client_protocol::on_receive_notification!(),
         )
+        .on_receive_notification(
+            async move |notification: MessageMcpNotification, _connection| {
+                notification_bridge.notification(notification)
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
         .on_receive_request(
             async move |_request: RequestPermissionRequest, responder, _connection| {
                 responder.respond(RequestPermissionResponse::new(
@@ -514,16 +594,41 @@ async fn run_turn(
             },
             agent_client_protocol::on_receive_request!(),
         )
+        .on_receive_request(
+            async move |request: ConnectMcpRequest, responder, _connection| {
+                responder.respond(connect_bridge.connect(request)?)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: MessageMcpRequest, responder, _connection| {
+                responder.respond(message_bridge.message(request)?)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: DisconnectMcpRequest, responder, _connection| {
+                responder.respond(disconnect_bridge.disconnect(request)?)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
-            connection
+            let initialized = connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
                 .block_task()
                 .await?;
+            if !tools.is_empty() && !initialized.agent_capabilities.mcp_capabilities.acp {
+                return Err(to_acp_error(BackendError::Unsupported(
+                    "ACP agent does not advertise native MCP-over-ACP support".to_owned(),
+                )));
+            }
 
-            let session = connection
-                .send_request(NewSessionRequest::new(config.cwd))
-                .block_task()
-                .await?;
+            let mut new_session = NewSessionRequest::new(config.cwd);
+            if !tools.is_empty() {
+                bridge.provision(&tools).map_err(to_acp_error)?;
+                new_session = new_session.mcp_servers(vec![bridge.server()]);
+            }
+            let session = connection.send_request(new_session).block_task().await?;
             let session_id = session.session_id.clone();
             spawn_cancel_forwarder(connection.clone(), session_id.clone(), cancellation);
             let config_options = serde_json::to_value(&session.config_options)
@@ -541,13 +646,20 @@ async fn run_turn(
                     .await?;
             }
 
-            connection
+            if !tools.is_empty() {
+                bridge
+                    .bind_execution(&tools, events.clone())
+                    .map_err(to_acp_error)?;
+            }
+            let prompt_result = connection
                 .send_request(PromptRequest::new(
                     session_id,
                     vec![ContentBlock::Text(TextContent::new(prompt))],
                 ))
                 .block_task()
-                .await?;
+                .await;
+            bridge.unbind_execution();
+            prompt_result?;
             Ok(())
         })
         .await
@@ -559,12 +671,18 @@ async fn run_turn(
 async fn run_persistent_session(
     config: AcpBackendConfig,
     initial_model: ModelTarget,
+    initial_tools: PreparedToolSurface,
     commands: mpsc::Receiver<PersistentCommand>,
-    ready: mpsc::SyncSender<Result<(), BackendError>>,
+    ready: mpsc::SyncSender<Result<bool, BackendError>>,
 ) -> Result<(), BackendError> {
     let agent = new_agent(&config);
     let active_events = Arc::new(Mutex::new(None::<mpsc::Sender<WorkerMessage>>));
     let notification_events = active_events.clone();
+    let bridge = ToolBridge::default();
+    let connect_bridge = bridge.clone();
+    let message_bridge = bridge.clone();
+    let notification_bridge = bridge.clone();
+    let disconnect_bridge = bridge.clone();
 
     agent_client_protocol::Client
         .builder()
@@ -581,6 +699,12 @@ async fn run_persistent_session(
             },
             agent_client_protocol::on_receive_notification!(),
         )
+        .on_receive_notification(
+            async move |notification: MessageMcpNotification, _connection| {
+                notification_bridge.notification(notification)
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
         .on_receive_request(
             async move |_request: RequestPermissionRequest, responder, _connection| {
                 responder.respond(RequestPermissionResponse::new(
@@ -589,15 +713,42 @@ async fn run_persistent_session(
             },
             agent_client_protocol::on_receive_request!(),
         )
+        .on_receive_request(
+            async move |request: ConnectMcpRequest, responder, _connection| {
+                responder.respond(connect_bridge.connect(request)?)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: MessageMcpRequest, responder, _connection| {
+                responder.respond(message_bridge.message(request)?)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: DisconnectMcpRequest, responder, _connection| {
+                responder.respond(disconnect_bridge.disconnect(request)?)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
         .connect_with(agent, move |connection: ConnectionTo<Agent>| async move {
-            connection
+            let initialized = connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
                 .block_task()
                 .await?;
-            let session = connection
-                .send_request(NewSessionRequest::new(config.cwd))
-                .block_task()
-                .await?;
+            let bridge_available = initialized.agent_capabilities.mcp_capabilities.acp;
+            if !initial_tools.is_empty() && !bridge_available {
+                return Err(to_acp_error(BackendError::Unsupported(
+                    "ACP agent does not advertise native MCP-over-ACP support".to_owned(),
+                )));
+            }
+
+            let mut new_session = NewSessionRequest::new(config.cwd);
+            if bridge_available {
+                bridge.provision(&initial_tools).map_err(to_acp_error)?;
+                new_session = new_session.mcp_servers(vec![bridge.server()]);
+            }
+            let session = connection.send_request(new_session).block_task().await?;
             let session_id = session.session_id.clone();
             let config_options = serde_json::to_value(&session.config_options)
                 .map_err(agent_client_protocol::Error::into_internal_error)?;
@@ -617,7 +768,7 @@ async fn run_persistent_session(
                     .await?;
                 current_model = Some(initial_model.model.as_str().to_owned());
             }
-            ready.send(Ok(())).map_err(|error| {
+            ready.send(Ok(bridge_available)).map_err(|error| {
                 agent_client_protocol::Error::internal_error()
                     .data(format!("persistent ACP startup receiver closed: {error}"))
             })?;
@@ -636,6 +787,14 @@ async fn run_persistent_session(
                                 message.clone(),
                             ))));
                     return Err(error);
+                }
+                if !command.tools.is_empty() && !bridge_available {
+                    let _ = command.events.send(WorkerMessage::Done(Err(
+                        BackendError::Unsupported(
+                            "ACP agent does not advertise native MCP-over-ACP support".to_owned(),
+                        ),
+                    )));
+                    continue;
                 }
                 if current_model.as_deref() != Some(command.model.model.as_str()) {
                     if let Err(error) = connection
@@ -663,6 +822,16 @@ async fn run_persistent_session(
                     })?;
                     *active = Some(command.events.clone());
                 }
+                if bridge_available {
+                    if let Err(error) = bridge.bind_execution(&command.tools, command.events.clone()) {
+                        if let Ok(mut active) = active_events.lock() {
+                            *active = None;
+                        }
+                        let message = error.to_string();
+                        let _ = command.events.send(WorkerMessage::Done(Err(error)));
+                        return Err(agent_client_protocol::Error::internal_error().data(message));
+                    }
+                }
                 spawn_cancel_forwarder(
                     connection.clone(),
                     session_id.clone(),
@@ -675,6 +844,7 @@ async fn run_persistent_session(
                     ))
                     .block_task()
                     .await;
+                bridge.unbind_execution();
                 if let Ok(mut active) = active_events.lock() {
                     *active = None;
                 }
@@ -929,10 +1099,17 @@ mod tests {
         }
     }
 
+    fn empty_tools() -> PreparedToolSurface {
+        ToolProvision::default()
+            .prepare(&AcpBackend::new(config()).capabilities())
+            .unwrap()
+    }
+
     fn backend_session() -> AcpBackendSession {
         AcpBackendSession {
             config: config(),
             model: model(),
+            tools: empty_tools(),
             cancellation: Mutex::new(CancellationState::default()),
         }
     }
@@ -1025,7 +1202,11 @@ mod tests {
     }
 
     #[test]
-    fn acp_backend_advertises_persistent_sessions() {
-        assert!(AcpBackend::new(config()).capabilities().persistent_sessions);
+    fn acp_backend_advertises_persistent_sessions_and_native_tool_bridge() {
+        let capabilities = AcpBackend::new(config()).capabilities();
+        assert!(capabilities.persistent_sessions);
+        assert!(capabilities
+            .tool_presentations
+            .contains(&ToolPresentation::AcpExtension));
     }
 }
