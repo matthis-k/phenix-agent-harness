@@ -193,9 +193,8 @@ fn cancellation_before_tool_invocation_prevents_handler_and_tool_events() {
     assert_eq!(run.backend.cancelled(), 1);
     assert!(!called.load(Ordering::SeqCst));
     assert!(run.backend.tool_results().is_empty());
-    assert!(!run.has_event(|event| {
-        matches!(event.kind, ExecutionEventKind::ToolCallStarted { .. })
-    }));
+    assert!(!run
+        .has_event(|event| { matches!(event.kind, ExecutionEventKind::ToolCallStarted { .. }) }));
     assert!(!run.has_event(|event| {
         matches!(
             &event.kind,

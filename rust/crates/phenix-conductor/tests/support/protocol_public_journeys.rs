@@ -8,9 +8,7 @@ use phenix_core::{
     AuthenticationState, BackendCatalog, BackendId, ExecutionState, ExecutionTarget,
     InferenceOptions, ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
 };
-use phenix_protocol::{
-    ClientMessage, Command, ErrorCode, Reply, ResponsePayload, ServerMessage,
-};
+use phenix_protocol::{ClientMessage, Command, ErrorCode, Reply, ResponsePayload, ServerMessage};
 use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 use std::sync::{
@@ -205,7 +203,9 @@ impl BackendSession for AuthSession {
         _request: BackendExecutionRequest,
         host: &mut dyn BackendHost,
     ) -> Result<(), BackendError> {
-        host.emit(BackendEvent::ContentDelta("authenticated answer".to_owned()))?;
+        host.emit(BackendEvent::ContentDelta(
+            "authenticated answer".to_owned(),
+        ))?;
         Ok(())
     }
 
@@ -277,14 +277,20 @@ fn catalog_authentication_and_model_retarget_form_one_serialized_journey() {
         panic!("initialize returned the wrong reply");
     };
     assert_eq!(backends.len(), 1);
-    assert_eq!(backends[0].authentication_state, AuthenticationState::Required);
+    assert_eq!(
+        backends[0].authentication_state,
+        AuthenticationState::Required
+    );
     assert_eq!(backends[0].models.len(), 2);
     assert_eq!(backends[0].authentication_methods, vec![login_method()]);
 
     let Reply::BackendCatalog { catalog } = ok_reply(&messages, 2) else {
         panic!("authentication returned the wrong reply");
     };
-    assert_eq!(catalog.authentication_state, AuthenticationState::Authenticated);
+    assert_eq!(
+        catalog.authentication_state,
+        AuthenticationState::Authenticated
+    );
     assert_eq!(state.auth_calls.load(Ordering::SeqCst), 1);
 
     let Reply::Session { session } = ok_reply(&messages, 4) else {

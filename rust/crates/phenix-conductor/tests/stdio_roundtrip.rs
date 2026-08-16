@@ -12,10 +12,10 @@ use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 use std::sync::{Arc, Mutex};
 
-#[path = "support/server_cancellation.rs"]
-mod server_cancellation;
 #[path = "support/protocol_public_journeys.rs"]
 mod protocol_public_journeys;
+#[path = "support/server_cancellation.rs"]
+mod server_cancellation;
 
 struct MockBackend;
 struct MockSession;
