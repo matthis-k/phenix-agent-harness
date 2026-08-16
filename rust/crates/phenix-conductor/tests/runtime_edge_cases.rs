@@ -10,6 +10,8 @@ use serde_json::json;
 
 #[path = "support/protocol_harness.rs"]
 mod protocol_harness;
+#[path = "support/canonical_journeys.rs"]
+mod canonical_journeys;
 
 use protocol_harness::{execution_id, model_target, MockAction, MockModelScript, ProtocolHarness};
 
