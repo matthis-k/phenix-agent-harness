@@ -29,7 +29,10 @@ pub fn serve_unix_socket(
 
     thread::scope(|scope| -> Result<(), Box<dyn std::error::Error>> {
         let conductor = scope.spawn(move || {
-            server.serve_ndjson(BufReader::new(ChannelReader::new(input_receiver)), conductor_output)
+            server.serve_ndjson(
+                BufReader::new(ChannelReader::new(input_receiver)),
+                conductor_output,
+            )
         });
 
         for incoming in listener.incoming() {
@@ -37,7 +40,8 @@ pub fn serve_unix_socket(
             let writer = stream.try_clone()?;
             *active_output
                 .lock()
-                .map_err(|_| io::Error::other("local service output lock poisoned"))? = Some(writer);
+                .map_err(|_| io::Error::other("local service output lock poisoned"))? =
+                Some(writer);
 
             let mut reader = BufReader::new(stream);
             let mut line = String::new();

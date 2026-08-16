@@ -191,7 +191,11 @@ mod unix_service {
             "phenix-conductor-service-{}-{unique}",
             std::process::id()
         ));
-        (root.clone(), root.join("conductor.sock"), root.join("state.json"))
+        (
+            root.clone(),
+            root.join("conductor.sock"),
+            root.join("state.json"),
+        )
     }
 
     fn spawn_service(socket: &Path, state: &Path) -> Child {
@@ -330,7 +334,10 @@ mod unix_service {
             panic!("restart initialize returned wrong reply");
         };
         assert_eq!(snapshot.sessions.len(), 1);
-        assert_eq!(snapshot.sessions[0].id, SessionId::parse("session-1").unwrap());
+        assert_eq!(
+            snapshot.sessions[0].id,
+            SessionId::parse("session-1").unwrap()
+        );
         assert_eq!(snapshot.sessions[0].name.as_deref(), Some("durable"));
 
         drop(restarted);
