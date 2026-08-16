@@ -1,9 +1,9 @@
 use phenix_backend::ToolPresentation;
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, ExecutionEventKind,
-    ExecutionState, ExecutionTarget, SessionId, WorkflowDefinition, WorkflowExecutionPolicy,
-    WorkflowStep,
+    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionEventKind, ExecutionState, ExecutionTarget, SessionId, WorkflowDefinition,
+    WorkflowExecutionPolicy, WorkflowStep,
 };
 use phenix_protocol::Command;
 use serde_json::json;
@@ -184,9 +184,15 @@ fn cancelled_turn_can_be_followed_by_a_new_turn_after_replay() {
     assert!(continued.response_ok(2));
     assert_eq!(continued.backend.prompts(), vec!["next turn"]);
     assert_eq!(continued.snapshot.executions.len(), 2);
-    assert_eq!(continued.snapshot.executions[0].state, ExecutionState::Cancelled);
+    assert_eq!(
+        continued.snapshot.executions[0].state,
+        ExecutionState::Cancelled
+    );
     assert_eq!(continued.snapshot.executions[1].id, execution_id(2));
-    assert_eq!(continued.snapshot.executions[1].state, ExecutionState::Completed);
+    assert_eq!(
+        continued.snapshot.executions[1].state,
+        ExecutionState::Completed
+    );
 }
 
 #[test]
@@ -214,9 +220,15 @@ fn failed_turn_can_be_followed_by_a_new_turn_after_replay() {
 
     assert_eq!(continued.backend.prompts(), vec!["retry"]);
     assert_eq!(continued.snapshot.executions.len(), 2);
-    assert_eq!(continued.snapshot.executions[0].state, ExecutionState::Failed);
+    assert_eq!(
+        continued.snapshot.executions[0].state,
+        ExecutionState::Failed
+    );
     assert_eq!(continued.snapshot.executions[1].id, execution_id(2));
-    assert_eq!(continued.snapshot.executions[1].state, ExecutionState::Completed);
+    assert_eq!(
+        continued.snapshot.executions[1].state,
+        ExecutionState::Completed
+    );
 }
 
 #[test]
@@ -362,7 +374,10 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
         .iter()
         .all(|execution| execution.state == ExecutionState::Cancelled));
     assert!(!snapshot.executions.iter().any(|execution| {
-        execution.callable.as_ref().is_some_and(|callable| callable.as_str() == "agent.second")
+        execution
+            .callable
+            .as_ref()
+            .is_some_and(|callable| callable.as_str() == "agent.second")
     }));
 }
 
