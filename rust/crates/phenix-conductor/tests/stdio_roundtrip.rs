@@ -7,7 +7,7 @@ use phenix_core::{
     AuthenticationState, BackendCatalog, BackendId, ExecutionEventKind, ExecutionTarget,
     InferenceOptions, ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
 };
-use phenix_protocol::{ClientMessage, Command, ResponsePayload, ServerMessage};
+use phenix_protocol::{ClientMessage, Command, Reply, ResponsePayload, ServerMessage};
 use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 use std::sync::{Arc, Mutex};
@@ -169,4 +169,180 @@ fn stdio_server_runs_a_model_turn_over_phenix_protocol() {
                 )
         )
     }));
+}
+
+#[cfg(unix)]
+mod unix_service {
+    use super::*;
+    use std::fs;
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixStream;
+    use std::path::{Path, PathBuf};
+    use std::process::{Child, Command as ProcessCommand, Stdio};
+    use std::thread;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    fn unique_paths() -> (PathBuf, PathBuf, PathBuf) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "phenix-conductor-service-{}-{unique}",
+            std::process::id()
+        ));
+        (
+            root.clone(),
+            root.join("conductor.sock"),
+            root.join("state.json"),
+        )
+    }
+
+    fn spawn_service(socket: &Path, state: &Path) -> Child {
+        ProcessCommand::new(env!("CARGO_BIN_EXE_phenix-conductor"))
+            .arg("--socket")
+            .arg(socket)
+            .arg("--state")
+            .arg(state)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn local conductor service")
+    }
+
+    fn connect_service(child: &mut Child, socket: &Path) -> UnixStream {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match UnixStream::connect(socket) {
+                Ok(stream) => return stream,
+                Err(error) if Instant::now() < deadline => {
+                    if let Some(status) = child.try_wait().expect("inspect conductor process") {
+                        panic!("conductor exited before socket became ready: {status}: {error}");
+                    }
+                    thread::yield_now();
+                }
+                Err(error) => panic!("conductor socket did not become ready: {error}"),
+            }
+        }
+    }
+
+    fn request(
+        writer: &mut UnixStream,
+        reader: &mut BufReader<UnixStream>,
+        message: ClientMessage,
+    ) -> Reply {
+        let id = message.id;
+        writer.write_all(line(message).as_bytes()).unwrap();
+        writer.flush().unwrap();
+
+        loop {
+            let mut response_line = String::new();
+            assert!(reader.read_line(&mut response_line).unwrap() > 0);
+            let message = serde_json::from_str::<ServerMessage>(&response_line).unwrap();
+            match message {
+                ServerMessage::Response {
+                    id: response_id,
+                    response: ResponsePayload::Ok { result },
+                } if response_id == id => return result,
+                ServerMessage::Response {
+                    id: response_id,
+                    response: ResponsePayload::Error { error },
+                } if response_id == id => panic!("request {id} failed: {error:?}"),
+                _ => {}
+            }
+        }
+    }
+
+    fn initialize(stream: &UnixStream, id: u64) -> Reply {
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        request(
+            &mut writer,
+            &mut reader,
+            ClientMessage {
+                id,
+                command: Command::Initialize {
+                    after_sequence: Some(0),
+                },
+            },
+        )
+    }
+
+    #[test]
+    fn unix_service_reconnects_frontends_and_restores_same_state_after_process_restart() {
+        let (root, socket, state) = unique_paths();
+        fs::create_dir_all(&root).unwrap();
+
+        let mut first_process = spawn_service(&socket, &state);
+        let first_stream = connect_service(&mut first_process, &socket);
+        let mut writer = first_stream.try_clone().unwrap();
+        let mut reader = BufReader::new(first_stream.try_clone().unwrap());
+
+        let Reply::Initialized { snapshot, .. } = request(
+            &mut writer,
+            &mut reader,
+            ClientMessage {
+                id: 1,
+                command: Command::Initialize {
+                    after_sequence: Some(0),
+                },
+            },
+        ) else {
+            panic!("initialize returned wrong reply");
+        };
+        assert!(snapshot.sessions.is_empty());
+
+        let Reply::Session { session } = request(
+            &mut writer,
+            &mut reader,
+            ClientMessage {
+                id: 2,
+                command: Command::CreateSession {
+                    parent_session: None,
+                    name: Some("durable".to_owned()),
+                    target: ExecutionTarget::Fixed(fixed_model()),
+                },
+            },
+        ) else {
+            panic!("create session returned wrong reply");
+        };
+        assert_eq!(session.id, SessionId::parse("session-1").unwrap());
+        assert!(state.exists(), "service did not persist its journal");
+
+        drop(reader);
+        drop(writer);
+        drop(first_stream);
+
+        let reconnect = connect_service(&mut first_process, &socket);
+        let Reply::Initialized { snapshot, .. } = initialize(&reconnect, 3) else {
+            panic!("reconnect initialize returned wrong reply");
+        };
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(snapshot.sessions[0].name.as_deref(), Some("durable"));
+        drop(reconnect);
+
+        first_process.kill().unwrap();
+        first_process.wait().unwrap();
+        if socket.exists() {
+            fs::remove_file(&socket).unwrap();
+        }
+
+        let mut restarted_process = spawn_service(&socket, &state);
+        let restarted = connect_service(&mut restarted_process, &socket);
+        let Reply::Initialized { snapshot, .. } = initialize(&restarted, 4) else {
+            panic!("restart initialize returned wrong reply");
+        };
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(
+            snapshot.sessions[0].id,
+            SessionId::parse("session-1").unwrap()
+        );
+        assert_eq!(snapshot.sessions[0].name.as_deref(), Some("durable"));
+
+        drop(restarted);
+        restarted_process.kill().unwrap();
+        restarted_process.wait().unwrap();
+        let _ = fs::remove_dir_all(root);
+    }
 }
