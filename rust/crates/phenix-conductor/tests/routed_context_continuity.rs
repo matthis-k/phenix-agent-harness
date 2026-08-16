@@ -4,9 +4,7 @@ mod protocol_harness;
 use phenix_conductor::{ConductorRuntime, ConductorServer};
 use phenix_core::{ExecutionTarget, RoutingProfile, RoutingProfileId, SessionId};
 use phenix_protocol::{ClientMessage, Command};
-use protocol_harness::{
-    backend_id, model_target, MockBackend, MockBackendState, MockModelScript,
-};
+use protocol_harness::{backend_id, model_target, MockBackend, MockBackendState, MockModelScript};
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -40,10 +38,7 @@ fn routed_turn_replays_prior_conversation_after_model_route_changes() {
         .unwrap();
 
     let state = Arc::new(MockBackendState::default());
-    let backend = MockBackend::new(
-        state.clone(),
-        MockModelScript::reply("alpha acknowledged"),
-    );
+    let backend = MockBackend::new(state.clone(), MockModelScript::reply("alpha acknowledged"));
     let mut server = ConductorServer::new(runtime);
     server
         .register_backend(backend_id(), Box::new(backend))

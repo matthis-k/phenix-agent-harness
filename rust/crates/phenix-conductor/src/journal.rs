@@ -1,7 +1,8 @@
 use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
 use phenix_core::{
-    ConfigRevisionId, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState,
-    ExecutionSummary, ExecutionTarget, ModelTarget, SessionId, SessionSummary, ToolCallId,
+    ConfigRevisionId, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
+    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, SessionId, SessionSummary,
+    ToolCallId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
