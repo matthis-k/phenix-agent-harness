@@ -1,12 +1,17 @@
 #![forbid(unsafe_code)]
 
 mod callables;
+mod execution_provider;
 mod persistence;
 mod policy;
 mod routing;
 mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError};
+pub use execution_provider::{
+    ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
+    ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest,
+};
 pub use persistence::{JsonFileStore, PersistenceError, RuntimeCheckpoint};
 pub use policy::{
     CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
@@ -38,11 +43,13 @@ pub enum ConductorError {
     EmptyInput,
     InvalidLifecycle(ExecutionId),
     NonModelExecution(ExecutionId),
+    NonProviderExecution(ExecutionId),
     PolicyDenied {
         execution_id: ExecutionId,
         denial: PolicyDenial,
     },
     CallableRegistry(CallableRegistryError),
+    ExecutionProvider(ExecutionProviderError),
     Routing(RoutingRegistryError),
     Backend(BackendError),
 }
@@ -55,13 +62,14 @@ impl Display for ConductorError {
             Self::EmptyInput => f.write_str("input must not be empty"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
             Self::NonModelExecution(id) => {
-                write!(
-                    f,
-                    "execution is conductor-owned and has no backend session: {id}"
-                )
+                write!(f, "execution is not model-provider backed: {id}")
+            }
+            Self::NonProviderExecution(id) => {
+                write!(f, "execution is not non-model-provider backed: {id}")
             }
             Self::PolicyDenied { denial, .. } => Display::fmt(denial, f),
             Self::CallableRegistry(error) => Display::fmt(error, f),
+            Self::ExecutionProvider(error) => Display::fmt(error, f),
             Self::Routing(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
         }
@@ -82,6 +90,12 @@ impl From<CallableRegistryError> for ConductorError {
     }
 }
 
+impl From<ExecutionProviderError> for ConductorError {
+    fn from(value: ExecutionProviderError) -> Self {
+        Self::ExecutionProvider(value)
+    }
+}
+
 impl From<RoutingRegistryError> for ConductorError {
     fn from(value: RoutingRegistryError) -> Self {
         Self::Routing(value)
@@ -93,9 +107,12 @@ struct SessionRecord {
     summary: SessionSummary,
 }
 
+/// Input owned by one executable child. The provider binding, not this payload,
+/// decides whether the invocation is model-backed or handled by another
+/// execution provider.
 #[derive(Clone, Debug)]
 enum ExecutionPayload {
-    Model { prompt: String },
+    Invocation { input: String },
     Workflow { objective: String, next_step: usize },
 }
 
@@ -221,8 +238,24 @@ impl ConductorRuntime {
         Ok(())
     }
 
+    /// Register the canonical model-backed agent provider.
     pub fn register_agent(&mut self, descriptor: CallableDescriptor) -> Result<(), ConductorError> {
         self.callables.register_agent(descriptor)?;
+        Ok(())
+    }
+
+    /// Register an agent whose execution is supplied by a backend-neutral
+    /// provider instead of the model backend path.
+    pub fn register_provider_agent<P>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        provider: P,
+    ) -> Result<(), ConductorError>
+    where
+        P: ExecutionProvider + 'static,
+    {
+        self.callables
+            .register_provider_agent(descriptor, provider)?;
         Ok(())
     }
 
@@ -323,8 +356,8 @@ impl ConductorRuntime {
             summary.id.clone(),
             ExecutionRecord {
                 summary: summary.clone(),
-                payload: ExecutionPayload::Model {
-                    prompt: text.clone(),
+                payload: ExecutionPayload::Invocation {
+                    input: text.clone(),
                 },
             },
         );
@@ -353,13 +386,14 @@ impl ConductorRuntime {
             }
             .into());
         }
+        self.callables.execution_provider(callable)?;
         self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgent)?;
         self.create_child(
             parent_id,
             ExecutionKind::Agent,
             callable.clone(),
-            ExecutionPayload::Model {
-                prompt: objective.into(),
+            ExecutionPayload::Invocation {
+                input: objective.into(),
             },
         )
     }
@@ -378,6 +412,7 @@ impl ConductorRuntime {
         )?;
         for step in &definition.steps {
             let descriptor = self.callables.descriptor(&step.callable)?.clone();
+            self.callables.execution_provider(&step.callable)?;
             self.check_callable_policy(
                 parent_id,
                 &descriptor,
@@ -447,6 +482,23 @@ impl ConductorRuntime {
         Ok(child)
     }
 
+    pub fn execution_provider_kind(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<ExecutionProviderKind, ConductorError> {
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        match execution.summary.callable.as_ref() {
+            None if execution.summary.kind == ExecutionKind::Root => {
+                Ok(ExecutionProviderKind::Model)
+            }
+            Some(callable) => Ok(self.callables.execution_provider(callable)?.kind()),
+            None => Err(ConductorError::NonProviderExecution(execution_id.clone())),
+        }
+    }
+
     /// Resolve routing and callable visibility exactly once for a model step.
     /// Backend capabilities intentionally do not participate in model routing.
     pub fn resolve_invocation(
@@ -460,7 +512,10 @@ impl ConductorRuntime {
         if execution.summary.kind == ExecutionKind::Workflow {
             return Err(ConductorError::NonModelExecution(execution_id.clone()));
         }
-        let ExecutionPayload::Model { prompt } = &execution.payload else {
+        if self.execution_provider_kind(execution_id)? != ExecutionProviderKind::Model {
+            return Err(ConductorError::NonModelExecution(execution_id.clone()));
+        }
+        let ExecutionPayload::Invocation { input } = &execution.payload else {
             return Err(ConductorError::NonModelExecution(execution_id.clone()));
         };
         let requested_target = execution.summary.target.clone();
@@ -481,7 +536,7 @@ impl ConductorRuntime {
             callable: execution.summary.callable.clone(),
             requested_target,
             model,
-            prompt: prompt.clone(),
+            prompt: input.clone(),
             tools: ToolProvision {
                 callables: self.callables.tool_descriptors(),
             },
@@ -542,6 +597,79 @@ impl ConductorRuntime {
             .state
             .clone();
         if state == ExecutionState::Running {
+            self.set_state(execution_id, ExecutionState::Completed)?;
+        }
+        Ok(())
+    }
+
+    /// Drive a non-model execution provider through the same execution tree and
+    /// lifecycle used by model-backed agents. The conductor allocates IDs and
+    /// owns state; the provider receives immutable request context and can emit
+    /// normalized output only through its host.
+    pub fn drive_provider_execution(
+        &mut self,
+        execution_id: &ExecutionId,
+    ) -> Result<(), ConductorError> {
+        let (summary, input) = {
+            let execution = self
+                .executions
+                .get(execution_id)
+                .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+            if execution.summary.state != ExecutionState::Pending {
+                return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
+            }
+            let ExecutionPayload::Invocation { input } = &execution.payload else {
+                return Err(ConductorError::NonProviderExecution(execution_id.clone()));
+            };
+            (execution.summary.clone(), input.clone())
+        };
+        let callable = summary
+            .callable
+            .clone()
+            .ok_or_else(|| ConductorError::NonProviderExecution(execution_id.clone()))?;
+        let descriptor = self.callables.descriptor(&callable)?.clone();
+        let binding = self.callables.execution_provider(&callable)?.clone();
+        let Some(provider) = binding.provider().cloned() else {
+            return Err(ConductorError::NonProviderExecution(execution_id.clone()));
+        };
+        self.check_callable_policy(
+            execution_id,
+            &descriptor,
+            CallableOperation::DispatchProvider,
+        )?;
+        let config_revision = self
+            .sessions
+            .get(&summary.session_id)
+            .expect("execution session invariant")
+            .summary
+            .config_revision
+            .clone();
+        let request = ExecutionProviderRequest {
+            execution_id: execution_id.clone(),
+            session_id: summary.session_id,
+            parent_execution: summary.parent_execution,
+            callable,
+            config_revision,
+            objective: input,
+        };
+
+        self.set_state(execution_id, ExecutionState::Running)?;
+        let result = {
+            let mut host = ProviderRuntimeHost {
+                runtime: self,
+                execution_id: execution_id.clone(),
+            };
+            provider.execute(&request, &mut host)
+        };
+        if let Err(error) = result {
+            self.set_state(execution_id, ExecutionState::Failed)?;
+            return Err(ConductorError::ExecutionProvider(error));
+        }
+        if self
+            .executions
+            .get(execution_id)
+            .is_some_and(|execution| execution.summary.state == ExecutionState::Running)
+        {
             self.set_state(execution_id, ExecutionState::Completed)?;
         }
         Ok(())
@@ -947,6 +1075,28 @@ impl BackendHost for RuntimeHost<'_> {
     fn invoke_tool(&mut self, invocation: ToolInvocation) -> Result<ToolResult, BackendError> {
         self.runtime
             .invoke_tool(&self.execution_id, &self.allowed_tools, invocation)
+    }
+}
+
+struct ProviderRuntimeHost<'a> {
+    runtime: &'a mut ConductorRuntime,
+    execution_id: ExecutionId,
+}
+
+impl ExecutionProviderHost for ProviderRuntimeHost<'_> {
+    fn emit(&mut self, event: ExecutionProviderEvent) -> Result<(), ExecutionProviderError> {
+        let event = match event {
+            ExecutionProviderEvent::ContentDelta(text) => {
+                ExecutionEventKind::AssistantContentDelta { text }
+            }
+            ExecutionProviderEvent::ReasoningDelta(text) => {
+                ExecutionEventKind::ReasoningDelta { text }
+            }
+        };
+        self.runtime
+            .push_event(&self.execution_id, event)
+            .map(|_| ())
+            .map_err(|error| ExecutionProviderError::Protocol(error.to_string()))
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::{ExecutionProvider, ExecutionProviderBinding};
 use phenix_backend::ToolResult;
 use phenix_core::{CallableDescriptor, CallableId, CallableKind, WorkflowDefinition};
 use std::collections::BTreeMap;
@@ -16,6 +17,7 @@ pub enum CallableRegistryError {
         expected: CallableKind,
         actual: CallableKind,
     },
+    NotExecutable(CallableId),
     EmptyWorkflow(CallableId),
     InvalidWorkflowStep {
         workflow: CallableId,
@@ -36,10 +38,11 @@ impl Display for CallableRegistryError {
                 f,
                 "callable {callable} has kind {actual:?}, expected {expected:?}"
             ),
+            Self::NotExecutable(id) => write!(f, "callable is not execution-provider backed: {id}"),
             Self::EmptyWorkflow(id) => write!(f, "workflow has no steps: {id}"),
             Self::InvalidWorkflowStep { workflow, callable } => write!(
                 f,
-                "workflow {workflow} references non-agent or unknown callable {callable}"
+                "workflow {workflow} references non-executable or unknown callable {callable}"
             ),
         }
     }
@@ -49,7 +52,7 @@ impl Error for CallableRegistryError {}
 
 enum CallableImplementation {
     Tool(Arc<ToolHandler>),
-    Agent,
+    Executable(ExecutionProviderBinding),
     Workflow(Box<WorkflowDefinition>),
 }
 
@@ -58,10 +61,17 @@ struct CallableEntry {
     implementation: CallableImplementation,
 }
 
+impl CallableEntry {
+    fn is_executable(&self) -> bool {
+        matches!(&self.implementation, CallableImplementation::Executable(_))
+    }
+}
+
 impl Debug for CallableEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("CallableEntry")
             .field("descriptor", &self.descriptor)
+            .field("executable", &self.is_executable())
             .finish_non_exhaustive()
     }
 }
@@ -95,6 +105,7 @@ impl CallableRegistry {
         )
     }
 
+    /// Register the canonical model-backed agent provider.
     pub fn register_agent(
         &mut self,
         descriptor: CallableDescriptor,
@@ -102,7 +113,26 @@ impl CallableRegistry {
         self.register(
             descriptor,
             CallableKind::Agent,
-            CallableImplementation::Agent,
+            CallableImplementation::Executable(ExecutionProviderBinding::Model),
+        )
+    }
+
+    /// Register an agent whose execution mechanism is conductor-neutral and
+    /// supplied by an explicit provider rather than the model backend path.
+    pub fn register_provider_agent<P>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        provider: P,
+    ) -> Result<(), CallableRegistryError>
+    where
+        P: ExecutionProvider + 'static,
+    {
+        self.register(
+            descriptor,
+            CallableKind::Agent,
+            CallableImplementation::Executable(ExecutionProviderBinding::Provider(Arc::new(
+                provider,
+            ))),
         )
     }
 
@@ -129,7 +159,7 @@ impl CallableRegistry {
                     callable: step.callable.clone(),
                 });
             };
-            if entry.descriptor.kind != CallableKind::Agent {
+            if !entry.is_executable() {
                 return Err(CallableRegistryError::InvalidWorkflowStep {
                     workflow: definition.descriptor.id.clone(),
                     callable: step.callable.clone(),
@@ -197,6 +227,20 @@ impl CallableRegistry {
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))
     }
 
+    pub fn execution_provider(
+        &self,
+        id: &CallableId,
+    ) -> Result<&ExecutionProviderBinding, CallableRegistryError> {
+        let entry = self
+            .entries
+            .get(id)
+            .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
+        match &entry.implementation {
+            CallableImplementation::Executable(provider) => Ok(provider),
+            _ => Err(CallableRegistryError::NotExecutable(id.clone())),
+        }
+    }
+
     pub fn workflow(&self, id: &CallableId) -> Result<&WorkflowDefinition, CallableRegistryError> {
         let entry = self
             .entries
@@ -249,7 +293,11 @@ impl CallableRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{CallablePolicy, CapabilitySet};
+    use crate::{
+        ExecutionProviderError, ExecutionProviderHost, ExecutionProviderKind,
+        ExecutionProviderRequest,
+    };
+    use phenix_core::{CallablePolicy, CapabilitySet, ExecutionId};
     use serde_json::json;
 
     fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
@@ -261,6 +309,26 @@ mod tests {
             output_schema: json!({"type": "object"}),
             capabilities: CapabilitySet::default(),
             policy: CallablePolicy::default(),
+        }
+    }
+
+    struct TestProvider;
+
+    impl ExecutionProvider for TestProvider {
+        fn kind(&self) -> ExecutionProviderKind {
+            ExecutionProviderKind::Native
+        }
+
+        fn execute(
+            &self,
+            _request: &ExecutionProviderRequest,
+            _host: &mut dyn ExecutionProviderHost,
+        ) -> Result<(), ExecutionProviderError> {
+            Ok(())
+        }
+
+        fn cancel(&self, _execution_id: &ExecutionId) -> Result<(), ExecutionProviderError> {
+            Ok(())
         }
     }
 
@@ -277,6 +345,46 @@ mod tests {
             ),
             Err(CallableRegistryError::Duplicate(_))
         ));
+    }
+
+    #[test]
+    fn execution_provider_binding_replaces_bare_agent_marker() {
+        let mut registry = CallableRegistry::default();
+        let model = CallableId::parse("model").unwrap();
+        let native = CallableId::parse("native").unwrap();
+        registry
+            .register_agent(descriptor("model", CallableKind::Agent))
+            .unwrap();
+        registry
+            .register_provider_agent(descriptor("native", CallableKind::Agent), TestProvider)
+            .unwrap();
+
+        assert_eq!(
+            registry.execution_provider(&model).unwrap().kind(),
+            crate::ExecutionProviderKind::Model
+        );
+        assert_eq!(
+            registry.execution_provider(&native).unwrap().kind(),
+            crate::ExecutionProviderKind::Native
+        );
+    }
+
+    #[test]
+    fn workflows_validate_executable_binding_not_agent_marker_implementation() {
+        let mut registry = CallableRegistry::default();
+        registry
+            .register_provider_agent(descriptor("native", CallableKind::Agent), TestProvider)
+            .unwrap();
+        registry
+            .register_workflow(WorkflowDefinition {
+                descriptor: descriptor("workflow", CallableKind::Workflow),
+                policy: phenix_core::WorkflowExecutionPolicy::Sequential,
+                steps: vec![phenix_core::WorkflowStep {
+                    callable: CallableId::parse("native").unwrap(),
+                    objective: None,
+                }],
+            })
+            .unwrap();
     }
 
     #[test]

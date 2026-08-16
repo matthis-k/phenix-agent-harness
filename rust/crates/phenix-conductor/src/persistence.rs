@@ -13,19 +13,19 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-const CHECKPOINT_FORMAT_VERSION: u64 = 1;
+const CHECKPOINT_FORMAT_VERSION: u64 = 2;
 
 #[derive(Clone, Debug, PartialEq)]
 enum PersistedExecutionPayload {
-    Model { prompt: String },
+    Invocation { input: String },
     Workflow { objective: String, next_step: usize },
 }
 
 impl From<&ExecutionPayload> for PersistedExecutionPayload {
     fn from(value: &ExecutionPayload) -> Self {
         match value {
-            ExecutionPayload::Model { prompt } => Self::Model {
-                prompt: prompt.clone(),
+            ExecutionPayload::Invocation { input } => Self::Invocation {
+                input: input.clone(),
             },
             ExecutionPayload::Workflow {
                 objective,
@@ -41,7 +41,7 @@ impl From<&ExecutionPayload> for PersistedExecutionPayload {
 impl From<PersistedExecutionPayload> for ExecutionPayload {
     fn from(value: PersistedExecutionPayload) -> Self {
         match value {
-            PersistedExecutionPayload::Model { prompt } => Self::Model { prompt },
+            PersistedExecutionPayload::Invocation { input } => Self::Invocation { input },
             PersistedExecutionPayload::Workflow {
                 objective,
                 next_step,
@@ -63,9 +63,9 @@ impl PersistedExecution {
     fn to_value(&self) -> Result<Value, PersistenceError> {
         let summary = serde_json::to_value(&self.summary)?;
         let payload = match &self.payload {
-            PersistedExecutionPayload::Model { prompt } => json!({
-                "kind": "model",
-                "prompt": prompt,
+            PersistedExecutionPayload::Invocation { input } => json!({
+                "kind": "invocation",
+                "input": input,
             }),
             PersistedExecutionPayload::Workflow {
                 objective,
@@ -90,11 +90,11 @@ impl PersistedExecution {
             PersistenceError::InvalidFormat("payload kind must be a string".into())
         })?;
         let payload = match kind {
-            "model" => PersistedExecutionPayload::Model {
-                prompt: required(payload, "prompt")?
+            "invocation" => PersistedExecutionPayload::Invocation {
+                input: required(payload, "input")?
                     .as_str()
                     .ok_or_else(|| {
-                        PersistenceError::InvalidFormat("model prompt must be a string".into())
+                        PersistenceError::InvalidFormat("invocation input must be a string".into())
                     })?
                     .to_owned(),
             },
@@ -122,8 +122,9 @@ impl PersistedExecution {
 }
 
 /// Durable mutable conductor state. Executable callables, routing tables,
-/// invocation guards, and backend sessions are intentionally excluded and must
-/// be rebound from the pinned immutable config revision after restore.
+/// invocation guards, execution-provider bindings, and live backend/provider
+/// sessions are intentionally excluded and must be rebound from the pinned
+/// immutable config revision after restore.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeCheckpoint {
     config_revision: ConfigRevisionId,

@@ -60,6 +60,12 @@
           label = "conductor / black_box_model_tool_loop";
         }
         {
+          id = "conductor-execution-providers";
+          package = "phenix-conductor";
+          test = "execution_provider_runtime";
+          label = "conductor / execution_provider_runtime";
+        }
+        {
           id = "conductor-stdio-roundtrip";
           package = "phenix-conductor";
           test = "stdio_roundtrip";
