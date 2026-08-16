@@ -6,6 +6,9 @@ use std::error::Error;
 use std::io;
 use std::path::PathBuf;
 
+#[cfg(unix)]
+mod local_service;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "phenix-conductor",
@@ -20,6 +23,10 @@ struct Arguments {
     /// Durable conductor checkpoint. If omitted the process is ephemeral.
     #[arg(long, value_name = "FILE")]
     state: Option<PathBuf>,
+
+    /// Serve reconnectable frontends over this local Unix socket instead of stdio.
+    #[arg(long, value_name = "FILE")]
+    socket: Option<PathBuf>,
 
     /// ACP backend command used by the minimal R9 process wiring.
     #[arg(long, value_name = "PROGRAM")]
@@ -40,6 +47,10 @@ struct Arguments {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments = Arguments::parse();
+    if arguments.socket.is_some() && arguments.state.is_none() {
+        return Err("--socket requires --state so the persistent service has durable state".into());
+    }
+
     let cwd = arguments
         .cwd
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -54,6 +65,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         let config = AcpBackendConfig::new(backend_id.clone(), provider_id, command, cwd)
             .args(arguments.acp_args);
         server.register_backend(backend_id, Box::new(AcpBackend::new(config)))?;
+    }
+
+    if let Some(socket) = arguments.socket {
+        #[cfg(unix)]
+        {
+            return local_service::serve_unix_socket(server, socket);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = server;
+            let _ = socket;
+            return Err("--socket is only supported on Unix platforms".into());
+        }
     }
 
     let stdin = io::stdin();
