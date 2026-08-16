@@ -1,14 +1,15 @@
-mod support;
+#[path = "support/protocol_harness.rs"]
+mod protocol_harness;
 
 use phenix_conductor::{ConductorRuntime, ConductorServer};
 use phenix_core::{ExecutionTarget, RoutingProfile, RoutingProfileId, SessionId};
 use phenix_protocol::{ClientMessage, Command};
+use protocol_harness::{
+    backend_id, model_target, MockBackend, MockBackendState, MockModelScript,
+};
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::sync::Arc;
-use support::protocol_harness::{
-    backend_id, model_target, MockBackend, MockBackendState, MockModelScript,
-};
 
 fn encode(messages: impl IntoIterator<Item = ClientMessage>) -> Vec<u8> {
     messages
