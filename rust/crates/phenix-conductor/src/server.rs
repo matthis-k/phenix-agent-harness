@@ -609,7 +609,7 @@ fn execute_execution(
         match runtime_guard.execution_state(execution_id) {
             Some(ExecutionState::Pending) => runtime_guard.execution_provider_kind(execution_id),
             Some(state) if is_terminal_state(&state) => return Ok(()),
-            Some(ExecutionState::Running) => return Ok(()),
+            Some(_) => return Ok(()),
             None => return Ok(()),
         }
     };
