@@ -186,6 +186,14 @@ pub enum ExecutionState {
     Interrupted,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionState {
+    #[default]
+    Active,
+    Closed,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: SessionId,
@@ -193,6 +201,8 @@ pub struct SessionSummary {
     pub name: Option<String>,
     pub config_revision: ConfigRevisionId,
     pub default_target: ExecutionTarget,
+    #[serde(default)]
+    pub state: SessionState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -263,5 +273,21 @@ mod tests {
     fn target_is_one_mode_only() {
         let target = ExecutionTarget::Routed(RoutingProfileId::parse("default").unwrap());
         assert!(matches!(target, ExecutionTarget::Routed(_)));
+    }
+
+    #[test]
+    fn missing_session_state_deserializes_as_active_for_old_journals() {
+        let value = serde_json::json!({
+            "id": "session-1",
+            "parent_session": null,
+            "name": null,
+            "config_revision": "config-1",
+            "default_target": {
+                "kind": "routed",
+                "value": "default"
+            }
+        });
+        let session: SessionSummary = serde_json::from_value(value).unwrap();
+        assert_eq!(session.state, SessionState::Active);
     }
 }
