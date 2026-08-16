@@ -4,62 +4,77 @@ use phenix_core::{
     AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId, ExecutionId,
     ModelTarget,
 };
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ToolHostingCapability {
-    Native,
-    McpStdio,
-    AcpExtension,
-    Unsupported,
-}
 
 /// Concrete representation used to materialize conductor-owned callables for a
 /// backend session. This is intentionally distinct from callable semantics:
 /// the same `ToolProvision` may be represented natively, through MCP, or by an
 /// ACP extension without changing the callable contract itself.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum ToolPresentation {
     Native,
     McpStdio,
     AcpExtension,
 }
 
-impl ToolHostingCapability {
-    #[must_use]
-    pub fn presentation(&self) -> Option<ToolPresentation> {
-        match self {
-            Self::Native => Some(ToolPresentation::Native),
-            Self::McpStdio => Some(ToolPresentation::McpStdio),
-            Self::AcpExtension => Some(ToolPresentation::AcpExtension),
-            Self::Unsupported => None,
-        }
-    }
-}
+const TOOL_PRESENTATION_PREFERENCE: [ToolPresentation; 3] = [
+    ToolPresentation::Native,
+    ToolPresentation::AcpExtension,
+    ToolPresentation::McpStdio,
+];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BackendCapabilities {
-    pub tool_hosting: ToolHostingCapability,
+    /// Every representation this backend can use for conductor-owned callables.
+    /// The conductor selects one deterministic presentation per session.
+    pub tool_presentations: BTreeSet<ToolPresentation>,
     pub images: bool,
     pub persistent_sessions: bool,
 }
 
+impl BackendCapabilities {
+    #[must_use]
+    pub fn preferred_tool_presentation(&self) -> Option<ToolPresentation> {
+        TOOL_PRESENTATION_PREFERENCE
+            .into_iter()
+            .find(|presentation| self.tool_presentations.contains(presentation))
+    }
+}
+
 /// Semantic conductor-owned callable provision before backend presentation is
 /// selected.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToolProvision {
     pub callables: Vec<CallableDescriptor>,
 }
 
-/// A `ToolProvision` after backend capability negotiation. Empty provisions do
-/// not require a presentation; non-empty provisions always carry the concrete
-/// transport representation selected before the backend session is opened.
+/// A `ToolProvision` after backend capability negotiation. Construction is
+/// private so an empty surface cannot claim a presentation and a populated
+/// surface cannot bypass conductor-owned negotiation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedToolSurface {
-    pub presentation: Option<ToolPresentation>,
-    pub callables: Vec<CallableDescriptor>,
+    presentation: Option<ToolPresentation>,
+    callables: Vec<CallableDescriptor>,
+}
+
+impl PreparedToolSurface {
+    #[must_use]
+    pub fn presentation(&self) -> Option<ToolPresentation> {
+        self.presentation
+    }
+
+    #[must_use]
+    pub fn callables(&self) -> &[CallableDescriptor] {
+        &self.callables
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.callables.is_empty()
+    }
 }
 
 impl ToolProvision {
@@ -73,7 +88,7 @@ impl ToolProvision {
                 callables: self.callables,
             });
         }
-        let presentation = capabilities.tool_hosting.presentation().ok_or_else(|| {
+        let presentation = capabilities.preferred_tool_presentation().ok_or_else(|| {
             BackendError::Unsupported("backend cannot host conductor-provisioned tools".to_owned())
         })?;
         Ok(PreparedToolSurface {
@@ -174,9 +189,11 @@ impl Error for BackendError {}
 mod tests {
     use super::*;
 
-    fn capabilities(tool_hosting: ToolHostingCapability) -> BackendCapabilities {
+    fn capabilities(
+        presentations: impl IntoIterator<Item = ToolPresentation>,
+    ) -> BackendCapabilities {
         BackendCapabilities {
-            tool_hosting,
+            tool_presentations: presentations.into_iter().collect(),
             images: false,
             persistent_sessions: false,
         }
@@ -184,29 +201,27 @@ mod tests {
 
     #[test]
     fn empty_tool_provision_needs_no_presentation() {
-        let surface = ToolProvision {
-            callables: Vec::new(),
-        }
-        .prepare(&capabilities(ToolHostingCapability::Unsupported))
-        .unwrap();
-        assert_eq!(surface.presentation, None);
-        assert!(surface.callables.is_empty());
+        let surface = ToolProvision::default()
+            .prepare(&capabilities([]))
+            .unwrap();
+        assert_eq!(surface.presentation(), None);
+        assert!(surface.is_empty());
     }
 
     #[test]
-    fn hosting_capability_maps_to_concrete_presentation() {
+    fn backend_can_advertise_multiple_presentations_with_deterministic_preference() {
+        let capabilities = capabilities([
+            ToolPresentation::McpStdio,
+            ToolPresentation::AcpExtension,
+            ToolPresentation::Native,
+        ]);
         assert_eq!(
-            ToolHostingCapability::Native.presentation(),
+            capabilities.preferred_tool_presentation(),
             Some(ToolPresentation::Native)
         );
         assert_eq!(
-            ToolHostingCapability::McpStdio.presentation(),
-            Some(ToolPresentation::McpStdio)
+            capabilities([]).preferred_tool_presentation(),
+            None
         );
-        assert_eq!(
-            ToolHostingCapability::AcpExtension.presentation(),
-            Some(ToolPresentation::AcpExtension)
-        );
-        assert_eq!(ToolHostingCapability::Unsupported.presentation(), None);
     }
 }
