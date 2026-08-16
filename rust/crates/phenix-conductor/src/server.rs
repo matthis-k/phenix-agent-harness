@@ -1,6 +1,6 @@
 use crate::{
-    ConductorError, ConductorRuntime, ExecutionPayload, ExecutionProviderError, JsonFileStore,
-    PersistenceError, ResolvedInvocation,
+    ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload, ExecutionProviderError,
+    JsonFileStore, PersistenceError, ResolvedInvocation,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
@@ -82,7 +82,7 @@ impl ConductorServer {
 
     pub fn load_or_new(store: JsonFileStore) -> Result<Self, ServerError> {
         let runtime = match store.load() {
-            Ok(checkpoint) => ConductorRuntime::restore(checkpoint)?,
+            Ok(journal) => ConductorRuntime::restore(journal)?,
             Err(PersistenceError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
                 ConductorRuntime::new()
             }
@@ -322,7 +322,11 @@ impl ConductorServer {
         )?;
         self.persist()?;
 
-        let resolved = match self.lock_runtime()?.resolve_invocation(&execution_id) {
+        let resolved = {
+            let mut runtime = self.lock_runtime()?;
+            runtime.resolve_invocation(&execution_id)
+        };
+        let resolved = match resolved {
             Ok(resolved) => resolved,
             Err(error) => {
                 self.fail_execution(&execution_id, map_conductor_error(error))?;
@@ -330,6 +334,10 @@ impl ConductorServer {
                 return Ok(());
             }
         };
+        // A routed decision is durable audit state. Persist it before any
+        // backend session can observe or execute the resolved invocation.
+        self.persist()?;
+
         let backend_id = resolved.model.backend.clone();
         let Some(backend) = self.backends.get(&backend_id).cloned() else {
             self.fail_execution(
@@ -650,12 +658,13 @@ fn persist_shared(
     };
     let _persist_guard = persist_lock
         .lock()
-        .map_err(|_| PersistenceError::InvalidFormat("persistence lock poisoned".to_owned()))?;
-    let checkpoint = runtime
+        .map_err(|_| PersistenceError::InvalidJournal("persistence lock poisoned".to_owned()))?;
+    let journal = runtime
         .lock()
-        .map_err(|_| PersistenceError::InvalidFormat("runtime lock poisoned".to_owned()))?
-        .checkpoint();
-    store.save(&checkpoint)
+        .map_err(|_| PersistenceError::InvalidJournal("runtime lock poisoned".to_owned()))?
+        .journal()
+        .clone();
+    store.save(&journal)
 }
 
 struct SharedRuntimeHost {
@@ -725,12 +734,19 @@ impl ConductorRuntime {
         session_id: &SessionId,
         name: String,
     ) -> Result<phenix_core::SessionSummary, ConductorError> {
-        let session = self
+        if !self.sessions.contains_key(session_id) {
+            return Err(ConductorError::UnknownSession(session_id.clone()));
+        }
+        self.record_domain_event(DomainEvent::SessionRenamed {
+            session_id: session_id.clone(),
+            name,
+        })?;
+        Ok(self
             .sessions
-            .get_mut(session_id)
-            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?;
-        session.summary.name = Some(name);
-        Ok(session.summary.clone())
+            .get(session_id)
+            .expect("renamed session remains present")
+            .summary
+            .clone())
     }
 
     fn set_session_target(
@@ -738,12 +754,19 @@ impl ConductorRuntime {
         session_id: &SessionId,
         target: ExecutionTarget,
     ) -> Result<phenix_core::SessionSummary, ConductorError> {
-        let session = self
+        if !self.sessions.contains_key(session_id) {
+            return Err(ConductorError::UnknownSession(session_id.clone()));
+        }
+        self.record_domain_event(DomainEvent::SessionTargetChanged {
+            session_id: session_id.clone(),
+            target,
+        })?;
+        Ok(self
             .sessions
-            .get_mut(session_id)
-            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?;
-        session.summary.default_target = target;
-        Ok(session.summary.clone())
+            .get(session_id)
+            .expect("retargeted session remains present")
+            .summary
+            .clone())
     }
 
     fn interrupt_non_resumable_executions(&mut self) -> Result<(), ConductorError> {
@@ -914,6 +937,9 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }
         ConductorError::ExecutionProvider(error) => map_execution_provider_error(error),
+        ConductorError::Journal(error) => {
+            protocol_error(ErrorCode::BackendProtocol, error.to_string())
+        }
         ConductorError::Routing(error) => {
             protocol_error(ErrorCode::RoutingFailure, error.to_string())
         }
