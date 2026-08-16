@@ -121,7 +121,7 @@ fn rejected_top_level_callable_does_not_create_durable_execution_state() {
         .register_agent(descriptor("scout", CallableKind::Agent))
         .unwrap();
     let execution = runtime
-        .start_session_callable(&session.id, &CallableId::parse("scout").unwrap(), "valid")
+        .start_session_callable(&session.id, &CallableId::parse("scout").unwrap(), "valid callable")
         .unwrap();
     assert_eq!(execution.id, execution_id(1));
 }
