@@ -1234,7 +1234,9 @@ mod tests {
             runtime.submit(&session.id, "more"),
             Err(ConductorError::ClosedSession(id)) if id == session.id
         ));
-        let fork = runtime.fork_session(&session.id, Some("continuation".to_owned())).unwrap();
+        let fork = runtime
+            .fork_session(&session.id, Some("continuation".to_owned()))
+            .unwrap();
         assert_eq!(fork.parent_session, Some(session.id));
         assert_eq!(fork.state, SessionState::Active);
     }
