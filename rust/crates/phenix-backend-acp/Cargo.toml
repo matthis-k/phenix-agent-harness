@@ -1,0 +1,10 @@
+[package]
+name = "phenix-backend-acp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+agent-client-protocol.workspace = true
+phenix-backend = { path = "../phenix-backend" }
+phenix-core = { path = "../phenix-core" }
+serde_json.workspace = true
