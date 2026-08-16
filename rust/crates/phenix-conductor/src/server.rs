@@ -497,9 +497,7 @@ impl ConductorServer {
         for backend in self.backends.values() {
             backend
                 .lock()
-                .map_err(|_| {
-                    protocol_error(ErrorCode::BackendTransport, "backend lock poisoned")
-                })?
+                .map_err(|_| protocol_error(ErrorCode::BackendTransport, "backend lock poisoned"))?
                 .close_persistent_session(session_id)
                 .map_err(map_backend_error)?;
         }
@@ -1311,8 +1309,10 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error
         }
         ConductorError::ClosedSession(id) => {
-            let mut error =
-                protocol_error(ErrorCode::InvalidRequest, format!("session is closed: {id}"));
+            let mut error = protocol_error(
+                ErrorCode::InvalidRequest,
+                format!("session is closed: {id}"),
+            );
             error.session_id = Some(id);
             error
         }
