@@ -2,7 +2,7 @@
 
 use phenix_core::{
     AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId, ExecutionId,
-    ModelTarget,
+    ModelTarget, SessionId,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -161,10 +161,30 @@ pub trait Backend: Send {
         ))
     }
 
+    /// Materialize an execution-local backend session. Backends without native
+    /// conversation persistence may create a fresh session for every call.
     fn open_session(
         &mut self,
         request: BackendSessionRequest,
     ) -> Result<Arc<dyn BackendSession>, BackendError>;
+
+    /// Open or reuse the native conversation associated with one stable Phenix
+    /// session. The conductor calls this only for a fixed target when the
+    /// backend advertises `persistent_sessions`.
+    ///
+    /// A backend must not advertise that capability without implementing this
+    /// method: silently falling back to `open_session` would turn a multi-turn
+    /// conversation into unrelated backend turns while claiming continuity.
+    fn open_persistent_session(
+        &mut self,
+        _session_id: &SessionId,
+        _request: BackendSessionRequest,
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
+        Err(BackendError::Unsupported(
+            "backend advertises persistent sessions but does not implement stable session opening"
+                .to_owned(),
+        ))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -188,6 +208,7 @@ impl Error for BackendError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_core::{BackendId, InferenceOptions, ModelId, ProviderId};
 
     fn capabilities(
         presentations: impl IntoIterator<Item = ToolPresentation>,
@@ -196,6 +217,36 @@ mod tests {
             tool_presentations: presentations.into_iter().collect(),
             images: false,
             persistent_sessions: false,
+        }
+    }
+
+    fn model() -> ModelTarget {
+        ModelTarget {
+            backend: BackendId::parse("mock").unwrap(),
+            provider: ProviderId::parse("mock-provider").unwrap(),
+            model: ModelId::parse("mock-model").unwrap(),
+            inference: InferenceOptions::default(),
+        }
+    }
+
+    struct CapabilityOnlyPersistentBackend;
+
+    impl Backend for CapabilityOnlyPersistentBackend {
+        fn capabilities(&self) -> BackendCapabilities {
+            BackendCapabilities {
+                tool_presentations: BTreeSet::new(),
+                images: false,
+                persistent_sessions: true,
+            }
+        }
+
+        fn open_session(
+            &mut self,
+            _request: BackendSessionRequest,
+        ) -> Result<Arc<dyn BackendSession>, BackendError> {
+            Err(BackendError::Protocol(
+                "ephemeral opening should not satisfy persistent contract".to_owned(),
+            ))
         }
     }
 
@@ -219,5 +270,23 @@ mod tests {
             Some(ToolPresentation::Native)
         );
         assert_eq!(capabilities([]).preferred_tool_presentation(), None);
+    }
+
+    #[test]
+    fn persistent_capability_does_not_silently_fall_back_to_ephemeral_opening() {
+        let mut backend = CapabilityOnlyPersistentBackend;
+        let request = BackendSessionRequest {
+            model: model(),
+            tools: ToolProvision::default()
+                .prepare(&backend.capabilities())
+                .unwrap(),
+        };
+        let error = match backend
+            .open_persistent_session(&SessionId::parse("session-1").unwrap(), request)
+        {
+            Ok(_) => panic!("persistent opening must require an implementation"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, BackendError::Unsupported(_)));
     }
 }
