@@ -327,13 +327,7 @@ impl ConductorServer {
             return Ok(());
         };
 
-        if executions
-            .send(ExecutionJob {
-                resolved,
-                backend,
-            })
-            .is_err()
-        {
+        if executions.send(ExecutionJob { resolved, backend }).is_err() {
             self.fail_execution(
                 &execution_id,
                 protocol_error(
@@ -350,9 +344,7 @@ impl ConductorServer {
         let active = self
             .active_scopes
             .lock()
-            .map_err(|_| {
-                protocol_error(ErrorCode::BackendProtocol, "active scope lock poisoned")
-            })?
+            .map_err(|_| protocol_error(ErrorCode::BackendProtocol, "active scope lock poisoned"))?
             .iter()
             .map(|(id, scope)| (id.clone(), scope.backend_session.clone()))
             .collect::<Vec<_>>();
@@ -468,13 +460,7 @@ fn execution_loop(
     persist_lock: Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
     while let Ok(job) = executions.recv() {
-        execute_job(
-            job,
-            &runtime,
-            &active_scopes,
-            store.as_ref(),
-            &persist_lock,
-        )?;
+        execute_job(job, &runtime, &active_scopes, store.as_ref(), &persist_lock)?;
     }
     Ok(())
 }
