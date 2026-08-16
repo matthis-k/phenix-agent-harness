@@ -144,7 +144,7 @@ impl PreparedInvocation {
     #[must_use]
     pub fn allowed_tools(&self) -> BTreeSet<CallableId> {
         self.tools
-            .callables
+            .callables()
             .iter()
             .map(|descriptor| descriptor.id.clone())
             .collect()
