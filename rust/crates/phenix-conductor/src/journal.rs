@@ -200,18 +200,19 @@ pub(crate) fn apply_domain_event(
                     )));
                 }
             }
-            if state.sessions.contains_key(&session.id) {
-                return Err(JournalError::InvalidEvent(format!(
-                    "duplicate session id: {}",
-                    session.id
-                )));
+            match state.sessions.entry(session.id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(SessionRecord {
+                        summary: session.clone(),
+                    });
+                }
+                Entry::Occupied(_) => {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "duplicate session id: {}",
+                        session.id
+                    )));
+                }
             }
-            state.sessions.insert(
-                session.id.clone(),
-                SessionRecord {
-                    summary: session.clone(),
-                },
-            );
             *state.next_session += 1;
         }
         DomainEvent::SessionRenamed { session_id, name } => {
@@ -254,19 +255,20 @@ pub(crate) fn apply_domain_event(
                     )));
                 }
             }
-            if state.executions.contains_key(&execution.id) {
-                return Err(JournalError::InvalidEvent(format!(
-                    "duplicate execution id: {}",
-                    execution.id
-                )));
+            match state.executions.entry(execution.id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(ExecutionRecord {
+                        summary: execution.clone(),
+                        payload: payload.clone().into(),
+                    });
+                }
+                Entry::Occupied(_) => {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "duplicate execution id: {}",
+                        execution.id
+                    )));
+                }
             }
-            state.executions.insert(
-                execution.id.clone(),
-                ExecutionRecord {
-                    summary: execution.clone(),
-                    payload: payload.clone().into(),
-                },
-            );
             *state.next_execution += 1;
         }
         DomainEvent::ExecutionStateChanged {
