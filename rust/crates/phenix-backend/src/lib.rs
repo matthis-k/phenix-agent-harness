@@ -209,13 +209,13 @@ mod tests {
 
     #[test]
     fn backend_can_advertise_multiple_presentations_with_deterministic_preference() {
-        let capabilities = capabilities([
+        let supported = capabilities([
             ToolPresentation::McpStdio,
             ToolPresentation::AcpExtension,
             ToolPresentation::Native,
         ]);
         assert_eq!(
-            capabilities.preferred_tool_presentation(),
+            supported.preferred_tool_presentation(),
             Some(ToolPresentation::Native)
         );
         assert_eq!(capabilities([]).preferred_tool_presentation(), None);
