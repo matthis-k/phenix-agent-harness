@@ -215,6 +215,7 @@ impl ToolBridge {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct BridgeToolRequest {
     pub(super) invocation: ToolInvocation,
     pub(super) response: mpsc::SyncSender<Result<ToolResult, BackendError>>,
