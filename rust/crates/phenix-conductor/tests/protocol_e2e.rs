@@ -21,6 +21,7 @@ mod protocol_harness;
 
 use protocol_harness::{
     execution_id, model_target, MockAction, MockModelScript, ObservedAction, ProtocolHarness,
+    ProtocolSignal,
 };
 
 fn descriptor(id: &str, kind: CallableKind, requires_permission: bool) -> CallableDescriptor {
@@ -259,6 +260,86 @@ fn typed_callable_command_executes_native_provider_without_model_backend() {
                 if text == "native answer: inspect repository"
         )
     }));
+}
+
+struct BlockingNativeProvider {
+    started: Arc<ProtocolSignal>,
+    released: Arc<ProtocolSignal>,
+    cancelled: Arc<AtomicUsize>,
+}
+
+impl ExecutionProvider for BlockingNativeProvider {
+    fn kind(&self) -> ExecutionProviderKind {
+        ExecutionProviderKind::Native
+    }
+
+    fn execute(
+        &self,
+        _request: &ExecutionProviderRequest,
+        _host: &mut dyn ExecutionProviderHost,
+    ) -> Result<(), ExecutionProviderError> {
+        self.started.signal();
+        self.released.wait();
+        Ok(())
+    }
+
+    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), ExecutionProviderError> {
+        self.cancelled.fetch_add(1, Ordering::SeqCst);
+        self.released.signal();
+        Ok(())
+    }
+}
+
+#[test]
+fn active_native_provider_cancellation_is_deterministic_and_never_uses_model_backend() {
+    let started = Arc::new(ProtocolSignal::default());
+    let released = Arc::new(ProtocolSignal::default());
+    let cancelled = Arc::new(AtomicUsize::new(0));
+    let provider_started = started.clone();
+    let provider_released = released.clone();
+    let provider_cancelled = cancelled.clone();
+
+    let run = ProtocolHarness::model(MockModelScript::reply("model must not execute"))
+        .configure_runtime(move |runtime| {
+            runtime
+                .register_provider_agent(
+                    descriptor("agent.blocking", CallableKind::Agent, false),
+                    BlockingNativeProvider {
+                        started: provider_started,
+                        released: provider_released,
+                        cancelled: provider_cancelled,
+                    },
+                )
+                .unwrap();
+        })
+        .commands([
+            Command::Initialize {
+                after_sequence: Some(0),
+            },
+            Command::CreateSession {
+                parent_session: None,
+                name: Some("native cancellation".to_owned()),
+                target: ExecutionTarget::Fixed(model_target("mock-model")),
+            },
+            Command::StartCallable {
+                session_id: phenix_core::SessionId::parse("session-1").unwrap(),
+                callable: CallableId::parse("agent.blocking").unwrap(),
+                objective: "wait until cancelled".to_owned(),
+            },
+        ])
+        .after_signal(
+            started,
+            Command::CancelExecution {
+                execution_id: execution_id(1),
+            },
+        )
+        .run();
+
+    assert!(run.response_ok(4));
+    assert_eq!(cancelled.load(Ordering::SeqCst), 1);
+    assert_eq!(run.backend.opened(), 0);
+    assert_eq!(run.backend.executed(), 0);
+    assert_eq!(run.only_execution_state(), Some(&ExecutionState::Cancelled));
 }
 
 #[test]
