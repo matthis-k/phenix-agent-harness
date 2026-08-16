@@ -34,11 +34,7 @@ impl ToolBridge {
         McpServer::Acp(McpServerAcp::new(SERVER_NAME, SERVER_ID))
     }
 
-    pub(super) fn bind(
-        &self,
-        tools: &PreparedToolSurface,
-        worker: mpsc::Sender<WorkerMessage>,
-    ) -> Result<(), BackendError> {
+    pub(super) fn provision(&self, tools: &PreparedToolSurface) -> Result<(), BackendError> {
         if !tools.is_empty() && tools.presentation() != Some(ToolPresentation::AcpExtension) {
             return Err(BackendError::Unsupported(
                 "ACP tool bridge requires the negotiated ACP extension presentation".to_owned(),
@@ -54,13 +50,25 @@ impl ToolBridge {
             .cloned()
             .map(|callable| (callable.id.as_str().to_owned(), callable))
             .collect();
+        Ok(())
+    }
+
+    pub(super) fn bind_execution(
+        &self,
+        tools: &PreparedToolSurface,
+        worker: mpsc::Sender<WorkerMessage>,
+    ) -> Result<(), BackendError> {
+        self.provision(tools)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| BackendError::Protocol("ACP tool bridge lock poisoned".to_owned()))?;
         state.worker = Some(worker);
         Ok(())
     }
 
-    pub(super) fn unbind(&self) {
+    pub(super) fn unbind_execution(&self) {
         if let Ok(mut state) = self.state.lock() {
-            state.callables.clear();
             state.worker = None;
         }
     }
@@ -273,8 +281,7 @@ mod tests {
     #[test]
     fn list_tools_preserves_callable_schema() {
         let bridge = ToolBridge::default();
-        let (worker, _rx) = mpsc::channel();
-        bridge.bind(&surface(), worker).unwrap();
+        bridge.provision(&surface()).unwrap();
         let listed = bridge.list_tools().unwrap();
         assert_eq!(listed["tools"][0]["name"], "phenix.echo");
         assert_eq!(listed["tools"][0]["inputSchema"]["type"], "object");
