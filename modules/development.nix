@@ -66,6 +66,12 @@
           label = "conductor / execution_provider_runtime";
         }
         {
+          id = "conductor-fixed-target-continuity";
+          package = "phenix-conductor";
+          test = "fixed_target_continuity";
+          label = "conductor / fixed_target_continuity";
+        }
+        {
           id = "conductor-stdio-roundtrip";
           package = "phenix-conductor";
           test = "stdio_roundtrip";
