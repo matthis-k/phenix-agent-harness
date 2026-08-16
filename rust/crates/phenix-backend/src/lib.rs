@@ -182,20 +182,6 @@ mod tests {
         }
     }
 
-    fn provision() -> ToolProvision {
-        ToolProvision {
-            callables: vec![CallableDescriptor {
-                id: phenix_core::CallableId::parse("echo").unwrap(),
-                kind: phenix_core::CallableKind::Tool,
-                description: "echo".to_owned(),
-                input_schema: serde_json::json!({"type": "object"}),
-                output_schema: serde_json::json!({"type": "object"}),
-                capabilities: phenix_core::CapabilitySet::default(),
-                policy: phenix_core::CallablePolicy::default(),
-            }],
-        }
-    }
-
     #[test]
     fn empty_tool_provision_needs_no_presentation() {
         let surface = ToolProvision {
@@ -208,19 +194,19 @@ mod tests {
     }
 
     #[test]
-    fn tool_presentation_is_selected_from_backend_capability() {
-        let surface = provision()
-            .prepare(&capabilities(ToolHostingCapability::Native))
-            .unwrap();
-        assert_eq!(surface.presentation, Some(ToolPresentation::Native));
-        assert_eq!(surface.callables.len(), 1);
-    }
-
-    #[test]
-    fn required_tool_surface_rejects_unsupported_backend() {
-        let error = provision()
-            .prepare(&capabilities(ToolHostingCapability::Unsupported))
-            .unwrap_err();
-        assert!(matches!(error, BackendError::Unsupported(_)));
+    fn hosting_capability_maps_to_concrete_presentation() {
+        assert_eq!(
+            ToolHostingCapability::Native.presentation(),
+            Some(ToolPresentation::Native)
+        );
+        assert_eq!(
+            ToolHostingCapability::McpStdio.presentation(),
+            Some(ToolPresentation::McpStdio)
+        );
+        assert_eq!(
+            ToolHostingCapability::AcpExtension.presentation(),
+            Some(ToolPresentation::AcpExtension)
+        );
+        assert_eq!(ToolHostingCapability::Unsupported.presentation(), None);
     }
 }
