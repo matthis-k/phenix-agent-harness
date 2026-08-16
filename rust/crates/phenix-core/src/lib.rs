@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -100,6 +100,32 @@ pub struct CallableDescriptor {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RoutingProfile {
+    pub id: RoutingProfileId,
+    pub default_target: ModelTarget,
+    pub callable_targets: BTreeMap<CallableId, ModelTarget>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowExecutionPolicy {
+    Sequential,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowStep {
+    pub callable: CallableId,
+    pub objective: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowDefinition {
+    pub descriptor: CallableDescriptor,
+    pub policy: WorkflowExecutionPolicy,
+    pub steps: Vec<WorkflowStep>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionKind {
     Root,
@@ -190,6 +216,7 @@ pub enum ExecutionEventKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn target_is_one_mode_only() {
         let target = ExecutionTarget::Routed(RoutingProfileId::parse("default").unwrap());
