@@ -789,11 +789,13 @@ async fn run_persistent_session(
                     return Err(error);
                 }
                 if !command.tools.is_empty() && !bridge_available {
-                    let _ = command.events.send(WorkerMessage::Done(Err(
-                        BackendError::Unsupported(
-                            "ACP agent does not advertise native MCP-over-ACP support".to_owned(),
-                        ),
-                    )));
+                    let _ =
+                        command
+                            .events
+                            .send(WorkerMessage::Done(Err(BackendError::Unsupported(
+                                "ACP agent does not advertise native MCP-over-ACP support"
+                                    .to_owned(),
+                            ))));
                     continue;
                 }
                 if current_model.as_deref() != Some(command.model.model.as_str()) {
@@ -823,7 +825,9 @@ async fn run_persistent_session(
                     *active = Some(command.events.clone());
                 }
                 if bridge_available {
-                    if let Err(error) = bridge.bind_execution(&command.tools, command.events.clone()) {
+                    if let Err(error) =
+                        bridge.bind_execution(&command.tools, command.events.clone())
+                    {
                         if let Ok(mut active) = active_events.lock() {
                             *active = None;
                         }

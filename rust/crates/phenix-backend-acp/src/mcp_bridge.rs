@@ -176,15 +176,19 @@ impl ToolBridge {
         let name = params.get("name").and_then(Value::as_str).ok_or_else(|| {
             agent_client_protocol::Error::invalid_params().data("tools/call is missing name")
         })?;
-        let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
 
         let (callable, worker) = {
             let state = self.state.lock().map_err(|_| {
                 agent_client_protocol::Error::internal_error().data("ACP tool bridge lock poisoned")
             })?;
             let callable = state.callables.get(name).ok_or_else(|| {
-                agent_client_protocol::Error::invalid_params()
-                    .data(format!("tool is not provisioned for this execution: {name}"))
+                agent_client_protocol::Error::invalid_params().data(format!(
+                    "tool is not provisioned for this execution: {name}"
+                ))
             })?;
             let worker = state.worker.clone().ok_or_else(|| {
                 agent_client_protocol::Error::internal_error()
