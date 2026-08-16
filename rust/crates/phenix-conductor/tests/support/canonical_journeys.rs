@@ -2,8 +2,8 @@ use super::{descriptor, fixed_target, protocol_harness, session_id};
 use phenix_backend::ToolPresentation;
 use phenix_conductor::ConductorRuntime;
 use phenix_core::{
-    BackendId, CallableKind, ExecutionEventKind, ExecutionState, ExecutionTarget, RoutingProfile,
-    RoutingProfileId,
+    BackendId, CallableId, CallableKind, ExecutionEventKind, ExecutionState, ExecutionTarget,
+    RoutingProfile, RoutingProfileId, WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
 };
 use phenix_protocol::{Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage};
 use protocol_harness::{execution_id, model_target, MockAction, MockModelScript, ProtocolHarness};
@@ -24,6 +24,31 @@ fn response_error(run: &protocol_harness::ProtocolRun, id: u64) -> &ProtocolErro
             _ => None,
         })
         .unwrap_or_else(|| panic!("request {id} did not return a protocol error"))
+}
+
+fn bind_two_step_workflow(runtime: &mut ConductorRuntime) {
+    runtime
+        .register_agent(descriptor("agent.first", CallableKind::Agent))
+        .unwrap();
+    runtime
+        .register_agent(descriptor("agent.second", CallableKind::Agent))
+        .unwrap();
+    runtime
+        .register_workflow(WorkflowDefinition {
+            descriptor: descriptor("workflow.two-step", CallableKind::Workflow),
+            policy: WorkflowExecutionPolicy::Sequential,
+            steps: vec![
+                WorkflowStep {
+                    callable: CallableId::parse("agent.first").unwrap(),
+                    objective: Some("first".to_owned()),
+                },
+                WorkflowStep {
+                    callable: CallableId::parse("agent.second").unwrap(),
+                    objective: Some("second".to_owned()),
+                },
+            ],
+        })
+        .unwrap();
 }
 
 #[test]
@@ -194,7 +219,7 @@ fn cancellation_before_tool_invocation_prevents_handler_and_tool_events() {
     assert!(!called.load(Ordering::SeqCst));
     assert!(run.backend.tool_results().is_empty());
     assert!(!run
-        .has_event(|event| { matches!(event.kind, ExecutionEventKind::ToolCallStarted { .. }) }));
+        .has_event(|event| matches!(event.kind, ExecutionEventKind::ToolCallStarted { .. })));
     assert!(!run.has_event(|event| {
         matches!(
             &event.kind,
@@ -300,4 +325,68 @@ fn session_fork_rename_and_model_retarget_survive_journal_replay() {
 
     let restored = ConductorRuntime::restore(run.journal).unwrap();
     assert_eq!(restored.snapshot(), run.snapshot);
+}
+
+#[test]
+fn multi_step_workflow_continues_after_replay_between_steps() {
+    let mut runtime = ConductorRuntime::new();
+    bind_two_step_workflow(&mut runtime);
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let root = runtime.submit(&session.id, "root").unwrap();
+    let workflow = runtime
+        .start_workflow(
+            &root.id,
+            &CallableId::parse("workflow.two-step").unwrap(),
+            "workflow objective",
+        )
+        .unwrap();
+    let first = runtime
+        .snapshot()
+        .executions
+        .into_iter()
+        .find(|execution| {
+            execution.parent_execution.as_ref() == Some(&workflow.id)
+                && execution
+                    .callable
+                    .as_ref()
+                    .is_some_and(|callable| callable.as_str() == "agent.first")
+        })
+        .unwrap();
+    runtime
+        .set_state(&first.id, ExecutionState::Completed)
+        .unwrap();
+
+    let before_restart = runtime.snapshot();
+    let second = before_restart
+        .executions
+        .iter()
+        .find(|execution| {
+            execution.parent_execution.as_ref() == Some(&workflow.id)
+                && execution
+                    .callable
+                    .as_ref()
+                    .is_some_and(|callable| callable.as_str() == "agent.second")
+        })
+        .unwrap()
+        .clone();
+    assert_eq!(second.state, ExecutionState::Pending);
+
+    let serialized = serde_json::to_vec(runtime.journal()).unwrap();
+    let mut restored = ConductorRuntime::restore(serde_json::from_slice(&serialized).unwrap()).unwrap();
+    bind_two_step_workflow(&mut restored);
+    assert_eq!(restored.snapshot(), before_restart);
+
+    restored
+        .set_state(&second.id, ExecutionState::Completed)
+        .unwrap();
+    let final_snapshot = restored.snapshot();
+    assert_eq!(
+        final_snapshot
+            .executions
+            .iter()
+            .find(|execution| execution.id == workflow.id)
+            .unwrap()
+            .state,
+        ExecutionState::Completed
+    );
 }
