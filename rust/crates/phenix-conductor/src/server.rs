@@ -946,3 +946,159 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         ConductorError::Backend(error) => map_backend_error(error),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_backend::{BackendExecutionRequest, BackendSessionRequest};
+    use phenix_core::{
+        CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet, InferenceOptions, ModelId,
+        ModelTarget, ProviderId, WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
+    };
+    use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CancelOnlySession {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl BackendSession for CancelOnlySession {
+        fn execute(
+            &self,
+            _request: BackendExecutionRequest,
+            _host: &mut dyn BackendHost,
+        ) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        fn cancel(&self, _execution_id: &ExecutionId) -> Result<(), BackendError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn model_target() -> ModelTarget {
+        ModelTarget {
+            backend: BackendId::parse("fixture").unwrap(),
+            provider: ProviderId::parse("fixture").unwrap(),
+            model: ModelId::parse("fixture-model").unwrap(),
+            inference: InferenceOptions::default(),
+        }
+    }
+
+    fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
+        CallableDescriptor {
+            id: CallableId::parse(id).unwrap(),
+            kind,
+            description: "server cancellation fixture".to_owned(),
+            input_schema: json!({"type": "object"}),
+            output_schema: json!({"type": "object"}),
+            capabilities: CapabilitySet::default(),
+            policy: CallablePolicy::default(),
+        }
+    }
+
+    #[test]
+    fn cancelling_root_reaches_active_descendant_scope_without_crossing_unrelated_execution() {
+        let descendant_calls = Arc::new(AtomicUsize::new(0));
+        let unrelated_calls = Arc::new(AtomicUsize::new(0));
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(descriptor("agent.child", CallableKind::Agent))
+            .unwrap();
+        runtime
+            .register_workflow(WorkflowDefinition {
+                descriptor: descriptor("workflow.tree", CallableKind::Workflow),
+                policy: WorkflowExecutionPolicy::Sequential,
+                steps: vec![WorkflowStep {
+                    callable: CallableId::parse("agent.child").unwrap(),
+                    objective: Some("child".to_owned()),
+                }],
+            })
+            .unwrap();
+
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(model_target()))
+            .unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let workflow = runtime
+            .start_workflow(
+                &root.id,
+                &CallableId::parse("workflow.tree").unwrap(),
+                "tree",
+            )
+            .unwrap();
+        let child = runtime
+            .snapshot()
+            .executions
+            .into_iter()
+            .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .unwrap();
+        runtime
+            .set_state(&child.id, ExecutionState::Running)
+            .unwrap();
+
+        let unrelated_session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(model_target()))
+            .unwrap();
+        let unrelated = runtime.submit(&unrelated_session.id, "unrelated").unwrap();
+        runtime
+            .set_state(&unrelated.id, ExecutionState::Running)
+            .unwrap();
+
+        let server = ConductorServer::new(runtime);
+        {
+            let mut scopes = server.active_scopes.lock().unwrap();
+            scopes.insert(
+                child.id.clone(),
+                LiveExecutionScope {
+                    backend_session: Arc::new(CancelOnlySession {
+                        calls: descendant_calls.clone(),
+                    }),
+                },
+            );
+            scopes.insert(
+                unrelated.id.clone(),
+                LiveExecutionScope {
+                    backend_session: Arc::new(CancelOnlySession {
+                        calls: unrelated_calls.clone(),
+                    }),
+                },
+            );
+        }
+
+        assert_eq!(server.cancel_execution(&root.id).unwrap(), Reply::Accepted);
+        assert_eq!(descendant_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(unrelated_calls.load(Ordering::SeqCst), 0);
+
+        let runtime = server.runtime();
+        for id in [&root.id, &workflow.id, &child.id] {
+            assert_eq!(
+                runtime.execution_state(id),
+                Some(ExecutionState::Cancelled)
+            );
+        }
+        assert_eq!(
+            runtime.execution_state(&unrelated.id),
+            Some(ExecutionState::Running)
+        );
+    }
+
+    #[test]
+    fn cancel_only_session_type_satisfies_backend_session_contract() {
+        let session: Arc<dyn BackendSession> = Arc::new(CancelOnlySession {
+            calls: Arc::new(AtomicUsize::new(0)),
+        });
+        let _ = BackendSessionRequest {
+            model: model_target(),
+            tools: phenix_backend::ToolProvision::default()
+                .prepare(&phenix_backend::BackendCapabilities {
+                    tool_presentations: BTreeSet::new(),
+                    images: false,
+                    persistent_sessions: false,
+                })
+                .unwrap(),
+        };
+        assert!(Arc::strong_count(&session) >= 1);
+    }
+}
