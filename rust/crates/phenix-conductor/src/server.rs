@@ -290,10 +290,10 @@ impl ConductorServer {
             Command::Submit { .. } => unreachable!("submit handled before dispatch"),
         };
 
-        self.respond(output, id, reply)?;
         if persist {
             self.persist()?;
         }
+        self.respond(output, id, reply)?;
         Ok(())
     }
 
@@ -313,6 +313,7 @@ impl ConductorServer {
             }
         };
         let execution_id = execution.id.clone();
+        self.persist()?;
         self.respond(
             output,
             request_id,
@@ -320,7 +321,6 @@ impl ConductorServer {
                 execution: execution.clone(),
             }),
         )?;
-        self.persist()?;
 
         let resolved = {
             let mut runtime = self.lock_runtime()?;
