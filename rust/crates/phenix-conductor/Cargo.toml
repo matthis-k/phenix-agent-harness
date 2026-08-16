@@ -10,4 +10,5 @@ phenix-backend = { path = "../phenix-backend" }
 phenix-backend-acp = { path = "../phenix-backend-acp" }
 phenix-core = { path = "../phenix-core" }
 phenix-protocol = { path = "../phenix-protocol" }
+serde.workspace = true
 serde_json.workspace = true
