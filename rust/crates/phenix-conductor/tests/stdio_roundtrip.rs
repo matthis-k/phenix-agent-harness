@@ -1,5 +1,8 @@
 #[test]
-fn purge_keeps_a_constructible_runtime_spine() {
+fn runtime_starts_with_an_empty_reconstructible_snapshot() {
     let runtime = phenix_conductor::ConductorRuntime::new();
-    assert_eq!(format!("{:?}", runtime.health()), "Starting");
+    let snapshot = runtime.snapshot();
+    assert!(snapshot.sessions.is_empty());
+    assert!(snapshot.executions.is_empty());
+    assert_eq!(snapshot.last_event_sequence, 0);
 }
