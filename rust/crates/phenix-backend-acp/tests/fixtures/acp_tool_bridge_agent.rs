@@ -111,74 +111,90 @@ async fn run() -> Result<(), agent_client_protocol::Error> {
                                 .data("fixture prompt has no ACP MCP server")
                         })?;
 
-                    let connected = connection
-                        .send_request(ConnectMcpRequest::new(server_id))
-                        .block_task()
-                        .await?;
-                    let connection_id = connected.connection_id;
-                    let initialized = connection
-                        .send_request(
-                            MessageMcpRequest::new(connection_id.clone(), "initialize").params(
-                                params(json!({
-                                    "protocolVersion": "2025-06-18",
-                                    "capabilities": {},
-                                    "clientInfo": {"name": "phenix-fixture", "version": "0.1.0"}
-                                })),
-                            ),
-                        )
-                        .block_task()
-                        .await?;
-                    let initialized = response_value(initialized);
-                    if initialized["serverInfo"]["name"] != "phenix-conductor" {
-                        return Err(agent_client_protocol::Error::internal_error()
-                            .data("unexpected Phenix MCP server info"));
-                    }
-                    connection.send_notification(MessageMcpNotification::new(
-                        connection_id.clone(),
-                        "notifications/initialized",
-                    ))?;
+                    // A real agent's model/tool loop is independent work while the ACP transport
+                    // remains available to dispatch the nested client requests. Model that here by
+                    // returning from the Prompt handler immediately and completing its responder
+                    // from a worker thread.
+                    thread::spawn(move || {
+                        let result = block_on(async {
+                            let connected = connection
+                                .send_request(ConnectMcpRequest::new(server_id))
+                                .block_task()
+                                .await?;
+                            let connection_id = connected.connection_id;
+                            let initialized = connection
+                                .send_request(
+                                    MessageMcpRequest::new(connection_id.clone(), "initialize")
+                                        .params(params(json!({
+                                            "protocolVersion": "2025-06-18",
+                                            "capabilities": {},
+                                            "clientInfo": {"name": "phenix-fixture", "version": "0.1.0"}
+                                        }))),
+                                )
+                                .block_task()
+                                .await?;
+                            let initialized = response_value(initialized);
+                            if initialized["serverInfo"]["name"] != "phenix-conductor" {
+                                return Err(agent_client_protocol::Error::internal_error()
+                                    .data("unexpected Phenix MCP server info"));
+                            }
+                            connection.send_notification(MessageMcpNotification::new(
+                                connection_id.clone(),
+                                "notifications/initialized",
+                            ))?;
 
-                    let listed = connection
-                        .send_request(MessageMcpRequest::new(connection_id.clone(), "tools/list"))
-                        .block_task()
-                        .await?;
-                    let listed = response_value(listed);
-                    if listed["tools"][0]["name"] != "phenix.echo"
-                        || listed["tools"][0]["inputSchema"]["type"] != "object"
-                    {
-                        return Err(agent_client_protocol::Error::internal_error()
-                            .data("provisioned callable metadata did not reach fixture"));
-                    }
+                            let listed = connection
+                                .send_request(MessageMcpRequest::new(
+                                    connection_id.clone(),
+                                    "tools/list",
+                                ))
+                                .block_task()
+                                .await?;
+                            let listed = response_value(listed);
+                            if listed["tools"][0]["name"] != "phenix.echo"
+                                || listed["tools"][0]["inputSchema"]["type"] != "object"
+                            {
+                                return Err(agent_client_protocol::Error::internal_error()
+                                    .data("provisioned callable metadata did not reach fixture"));
+                            }
 
-                    let called = connection
-                        .send_request(
-                            MessageMcpRequest::new(connection_id.clone(), "tools/call").params(
-                                params(json!({
-                                    "name": "phenix.echo",
-                                    "arguments": {"value": "from-acp"}
-                                })),
-                            ),
-                        )
-                        .block_task()
-                        .await?;
-                    let called = response_value(called);
-                    if called["isError"] != false || called["content"][0]["text"] != "echo:from-acp"
-                    {
-                        return Err(agent_client_protocol::Error::internal_error()
-                            .data("unexpected conductor tool result"));
-                    }
+                            let called = connection
+                                .send_request(
+                                    MessageMcpRequest::new(connection_id.clone(), "tools/call")
+                                        .params(params(json!({
+                                            "name": "phenix.echo",
+                                            "arguments": {"value": "from-acp"}
+                                        }))),
+                                )
+                                .block_task()
+                                .await?;
+                            let called = response_value(called);
+                            if called["isError"] != false
+                                || called["content"][0]["text"] != "echo:from-acp"
+                            {
+                                return Err(agent_client_protocol::Error::internal_error()
+                                    .data("unexpected conductor tool result"));
+                            }
 
-                    connection
-                        .send_request(DisconnectMcpRequest::new(connection_id))
-                        .block_task()
-                        .await?;
-                    connection.send_notification(SessionNotification::new(
-                        request.session_id,
-                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-                            TextContent::new("continued:echo:from-acp"),
-                        ))),
-                    ))?;
-                    responder.respond(PromptResponse::new(StopReason::EndTurn))
+                            connection
+                                .send_request(DisconnectMcpRequest::new(connection_id))
+                                .block_task()
+                                .await?;
+                            connection.send_notification(SessionNotification::new(
+                                request.session_id,
+                                SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                    ContentBlock::Text(TextContent::new(
+                                        "continued:echo:from-acp",
+                                    )),
+                                )),
+                            ))?;
+                            responder.respond(PromptResponse::new(StopReason::EndTurn))
+                        });
+                        if let Err(error) = result {
+                            eprintln!("ACP tool bridge fixture prompt failed: {error}");
+                        }
+                    });
+                    Ok(())
                 }
             },
             agent_client_protocol::on_receive_request!(),
