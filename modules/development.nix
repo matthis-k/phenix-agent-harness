@@ -78,6 +78,12 @@
           label = "conductor / fixed_target_continuity";
         }
         {
+          id = "conductor-routed-context-continuity";
+          package = "phenix-conductor";
+          test = "routed_context_continuity";
+          label = "conductor / routed_context_continuity";
+        }
+        {
           id = "conductor-stdio-roundtrip";
           package = "phenix-conductor";
           test = "stdio_roundtrip";
