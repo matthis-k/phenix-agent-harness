@@ -204,6 +204,7 @@ mod tests {
         let surface = ToolProvision::default().prepare(&capabilities([])).unwrap();
         assert_eq!(surface.presentation(), None);
         assert!(surface.is_empty());
+        assert!(surface.callables().is_empty());
     }
 
     #[test]
