@@ -6,6 +6,3 @@ publish = false
 
 [dependencies]
 phenix-core = { path = "../phenix-core" }
-
-[dev-dependencies]
-serde_json.workspace = true
