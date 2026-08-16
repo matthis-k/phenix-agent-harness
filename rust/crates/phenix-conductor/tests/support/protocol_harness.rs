@@ -4,7 +4,7 @@ use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
     BackendSession, BackendSessionRequest, ToolInvocation, ToolPresentation, ToolResult,
 };
-use phenix_conductor::{ConductorRuntime, ConductorServer};
+use phenix_conductor::{ConductorRuntime, ConductorServer, RuntimeJournal};
 use phenix_core::{
     AuthenticationState, BackendCatalog, BackendId, CallableId, ExecutionEvent, ExecutionId,
     ExecutionState, ExecutionTarget, InferenceOptions, ModelDescriptor, ModelId, ModelTarget,
@@ -504,6 +504,7 @@ impl ProtocolHarness {
 pub struct ProtocolRun {
     pub messages: Vec<ServerMessage>,
     pub snapshot: RuntimeSnapshot,
+    pub journal: RuntimeJournal,
     pub backend: Arc<MockBackendState>,
 }
 
@@ -591,7 +592,10 @@ fn run_protocol(
         .unwrap();
     feeder.join().unwrap();
 
-    let snapshot = server.runtime().snapshot();
+    let runtime = server.runtime();
+    let snapshot = runtime.snapshot();
+    let journal = runtime.journal().clone();
+    drop(runtime);
     let messages = String::from_utf8(captured.lock().unwrap().clone())
         .unwrap()
         .lines()
@@ -600,6 +604,7 @@ fn run_protocol(
     ProtocolRun {
         messages,
         snapshot,
+        journal,
         backend: state,
     }
 }
