@@ -195,6 +195,7 @@ Required semantics:
 - A child under a fixed root MUST NOT silently re-enter routing.
 - `Routed` means the conductor resolves each execution node according to the selected profile and callable context.
 - Routing resolution MUST finish before invoking a backend adapter.
+- The result of routing for one model step MUST be captured in an immutable resolved invocation and MUST NOT be recomputed by downstream execution layers.
 - Backend adapters MUST receive a concrete `ModelTarget`, never a routing profile.
 - Tool calls do not independently select models.
 
@@ -314,6 +315,8 @@ enum ExecutionState {
 
 Impossible combinations SHOULD be unrepresentable. For example, a completed execution MUST NOT simultaneously contain active tool calls in mutable runtime state.
 
+Process-local execution resources such as materialized backend sessions, cancellation handles, and future ephemeral bridges MUST be owned by a live execution scope. Destroying/abandoning that scope MUST deterministically release its resources; those resources MUST NOT be persisted as durable Phenix state.
+
 The conductor MUST be event-driven. Busy polling loops are prohibited unless imposed by an external protocol and bounded/backed off. An idle conductor MUST consume negligible CPU.
 
 ## 11. Backend interface
@@ -344,33 +347,57 @@ trait BackendSession {
 }
 ```
 
-`BackendSessionRequest` MUST contain a concrete model and the conductor-selected tool provision. Backend/provider session identifiers remain private to the adapter.
+`BackendSessionRequest` MUST contain a concrete model and a conductor-prepared tool surface. A backend MUST NOT receive a routing profile or be asked to choose Phenix routing/tool-presentation policy. Backend/provider session identifiers remain private to the adapter.
 
 The conductor MAY cache/reuse backend sessions where supported, keyed by conductor-owned binding state. Reuse MUST NOT change externally visible Phenix semantics.
 
 ## 12. Backend capabilities
 
-Backends MUST advertise capabilities explicitly. At minimum:
+Backends MUST advertise capabilities explicitly. Tool hosting MUST be represented as the set of concrete presentations the backend can materialize, for example:
 
-```text
-native tool hosting
-MCP stdio tool hosting
-ACP-extension tool hosting
-unsupported tool hosting
-image support
-persistent/resumable backend sessions
-steering support, if introduced
+```rust
+enum ToolPresentation {
+    Native,
+    McpStdio,
+    AcpExtension,
+}
+
+struct BackendCapabilities {
+    tool_presentations: Set<ToolPresentation>,
+    images: bool,
+    persistent_sessions: bool,
+}
 ```
+
+An empty `tool_presentations` set means the backend cannot host conductor-provisioned tools. A backend MAY advertise multiple presentations. The conductor MUST choose one deterministic presentation before opening the backend session; adapters MUST NOT independently re-negotiate it.
+
+Additional capabilities such as steering support MAY be added when introduced.
 
 The conductor MUST validate required capabilities before beginning an execution. It MUST fail with a structured pre-execution error instead of partially starting a run that cannot satisfy its tool/capability requirements.
 
 ## 13. Tool provisioning and invocation
 
-The conductor owns tool semantics end to end.
+The conductor owns tool semantics end to end. Tool semantics and tool presentation are distinct concepts.
 
-At backend-session creation the conductor supplies a `ToolProvision` containing only callables visible to that execution/session under the current policy/configuration revision.
+Before backend-session creation, the conductor constructs a semantic `ToolProvision` containing only callables visible to that execution/session under the pinned policy/configuration revision. It then negotiates that provision against `BackendCapabilities` and produces a `PreparedToolSurface` containing the selected presentation plus the provisioned callables.
 
-Adapters MAY materialize the provision using native tool APIs, MCP, ACP extensions, or another transport. The chosen mechanism is adapter-local.
+Conceptually:
+
+```text
+CallableRegistry
+      |
+      v
+ToolProvision                    semantic callable set
+      |
+      | negotiate against BackendCapabilities
+      v
+PreparedToolSurface              selected presentation + callables
+      |
+      v
+BackendSessionRequest
+```
+
+Adapters MAY materialize a prepared surface using native tool APIs, MCP, ACP extensions, or another explicitly advertised transport. They MUST materialize the conductor-selected presentation and MUST NOT change callable semantics or select a different presentation on their own.
 
 When a model requests a tool, the backend session MUST synchronously/asynchronously re-enter a conductor-owned host interface equivalent to:
 
@@ -410,6 +437,8 @@ A routing profile MUST resolve from typed context such as:
 - explicit policy constraints.
 
 It MUST return a concrete `ModelTarget` or a typed failure.
+
+For each model execution, routing output MUST be captured once as part of a resolved invocation containing at least the execution identity, pinned configuration revision, routing origin/requested target, and concrete `ModelTarget`. Capability preparation and backend dispatch MUST consume that resolved value rather than call routing again.
 
 The router MUST NOT execute backend protocol operations. The backend adapter MUST NOT know which routing profile selected it.
 
@@ -490,7 +519,7 @@ At minimum persist:
 - canonical execution events;
 - metadata required to resume/reconstruct a frontend snapshot.
 
-Backend process/session handles MUST NOT be persisted as if they were Phenix identities.
+Backend process/session handles and live execution scopes MUST NOT be persisted as if they were Phenix identities.
 
 After conductor restart:
 
@@ -523,7 +552,8 @@ Rules:
 - cancelling a child does not imply cancelling unrelated siblings unless workflow policy requires it;
 - tool invocations observe execution cancellation;
 - adapters receive explicit cancellation for active backend execution where supported;
-- late backend events after terminal cancellation/completion MUST be rejected or safely ignored according to sequence/lifecycle rules.
+- late backend events after terminal cancellation/completion MUST be rejected or safely ignored according to sequence/lifecycle rules;
+- process-local resources bound to a live execution MUST be released when that execution scope is abandoned, including error/unwind paths.
 
 Concurrency SHOULD be explicit in workflow definitions rather than accidental task spawning.
 
@@ -557,7 +587,7 @@ Required layers:
 1. pure domain tests for target inheritance, lifecycle, IDs, callable visibility, and workflow planning;
 2. reducer/event-order tests;
 3. mock-backend integration tests proving `submit -> backend -> content/reasoning/tool -> conductor event stream`;
-4. backend capability rejection tests;
+4. backend capability rejection and tool-presentation negotiation tests;
 5. tool-host tests proving the adapter cannot bypass conductor invocation/policy;
 6. frontend-protocol black-box tests against the real conductor server transport;
 7. persistence/reconnect tests;
@@ -665,6 +695,19 @@ Normalize backend model discovery and auth flows through conductor state/protoco
 ### R9 — persistent frontend server lifecycle
 
 Provide local IPC/persistent conductor mode. Retain stdio only as a test/development transport if useful.
+
+### R10 — prepared invocation and tool presentation
+
+Make resolution/preparation explicit:
+
+- capture each model step as an immutable resolved invocation after routing;
+- carry the resolved invocation through dispatch without re-routing;
+- separate semantic `ToolProvision` from negotiated `PreparedToolSurface`;
+- let backends advertise one or more supported tool presentations;
+- select the concrete presentation before `Backend::open_session`;
+- bind materialized backend sessions to deterministic process-local live execution scopes.
+
+Acceptance: routed callable-specific targets are resolved once, unsupported tool surfaces fail before backend session creation, backend tests observe the selected presentation, and live scope teardown is deterministic on worker error paths.
 
 ## 26. Definition of architectural completion
 
