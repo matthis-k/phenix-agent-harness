@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{
-    AuthenticationMethodId, BackendCatalog, BackendId, CallableId, ExecutionEvent, ExecutionId,
-    ExecutionSummary, ExecutionTarget, SessionId, SessionSummary,
+    AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor, CallableId,
+    ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, SessionId, SessionSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,7 @@ pub enum Command {
         after_sequence: Option<u64>,
     },
     GetSnapshot,
+    GetCallableCatalog,
     CreateSession {
         parent_session: Option<SessionId>,
         name: Option<String>,
@@ -75,6 +76,9 @@ pub enum Reply {
     Snapshot {
         snapshot: RuntimeSnapshot,
         backends: Vec<BackendCatalog>,
+    },
+    CallableCatalog {
+        callables: Vec<CallableDescriptor>,
     },
     Session {
         session: SessionSummary,
@@ -178,6 +182,17 @@ mod tests {
         assert_eq!(value["command"]["objective"], "implement change");
         assert!(value["command"].get("backend").is_none());
         assert!(value["command"].get("provider").is_none());
+    }
+
+    #[test]
+    fn callable_catalog_wire_shape_is_conductor_owned() {
+        let message = ClientMessage {
+            id: 10,
+            command: Command::GetCallableCatalog,
+        };
+        let value = serde_json::to_value(message).expect("serialize callable catalog request");
+        assert_eq!(value["command"]["type"], "get_callable_catalog");
+        assert_eq!(value["command"].as_object().unwrap().len(), 1);
     }
 
     #[test]
