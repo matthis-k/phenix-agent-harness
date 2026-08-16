@@ -31,9 +31,7 @@ fn agent(id: &str) -> CallableDescriptor {
 fn frontend_layer_can_start_a_registered_top_level_callable_without_a_wrapper_execution() {
     let mut runtime = ConductorRuntime::new();
     runtime.register_agent(agent("scout")).unwrap();
-    let session = runtime
-        .create_session(None, None, fixed_target())
-        .unwrap();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
 
     let execution = runtime
         .start_session_callable(
