@@ -100,10 +100,6 @@ impl ToolProvision {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendSessionRequest {
-    /// Stable Phenix conversation identity. Backends that advertise
-    /// `persistent_sessions` may use this identity to reopen/reuse their native
-    /// conversation instead of creating an unrelated conversation per turn.
-    pub session_id: SessionId,
     pub model: ModelTarget,
     pub tools: PreparedToolSurface,
 }
@@ -165,10 +161,30 @@ pub trait Backend: Send {
         ))
     }
 
+    /// Materialize an execution-local backend session. Backends without native
+    /// conversation persistence may create a fresh session for every call.
     fn open_session(
         &mut self,
         request: BackendSessionRequest,
     ) -> Result<Arc<dyn BackendSession>, BackendError>;
+
+    /// Open or reuse the native conversation associated with one stable Phenix
+    /// session. The conductor calls this only for a fixed target when the
+    /// backend advertises `persistent_sessions`.
+    ///
+    /// A backend must not advertise that capability without implementing this
+    /// method: silently falling back to `open_session` would turn a multi-turn
+    /// conversation into unrelated backend turns while claiming continuity.
+    fn open_persistent_session(
+        &mut self,
+        _session_id: &SessionId,
+        _request: BackendSessionRequest,
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
+        Err(BackendError::Unsupported(
+            "backend advertises persistent sessions but does not implement stable session opening"
+                .to_owned(),
+        ))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
