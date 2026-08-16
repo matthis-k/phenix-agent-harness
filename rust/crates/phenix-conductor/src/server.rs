@@ -254,6 +254,11 @@ impl ConductorServer {
                     executions,
                 );
             }
+            Command::GetCallableCatalog => {
+                let callables = self.lock_runtime()?.callable_descriptors();
+                self.respond(output, id, Ok(Reply::CallableCatalog { callables }))?;
+                return Ok(());
+            }
             _ => {}
         }
         let persist = matches!(
@@ -325,6 +330,9 @@ impl ConductorServer {
             Command::Submit { .. } => unreachable!("submit handled before dispatch"),
             Command::StartCallable { .. } => {
                 unreachable!("callable start handled before dispatch")
+            }
+            Command::GetCallableCatalog => {
+                unreachable!("callable catalog handled before dispatch")
             }
         };
 
@@ -601,18 +609,7 @@ fn execute_execution(
         match runtime_guard.execution_state(execution_id) {
             Some(ExecutionState::Pending) => runtime_guard.execution_provider_kind(execution_id),
             Some(state) if is_terminal_state(&state) => return Ok(()),
-            Some(_) => {
-                return fail_shared_execution(
-                    runtime,
-                    execution_id,
-                    protocol_error(
-                        ErrorCode::InvalidRequest,
-                        format!("execution is not pending: {execution_id}"),
-                    ),
-                    store,
-                    persist_lock,
-                );
-            }
+            Some(ExecutionState::Running) => return Ok(()),
             None => return Ok(()),
         }
     };
