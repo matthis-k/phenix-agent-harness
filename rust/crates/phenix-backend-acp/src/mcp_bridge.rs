@@ -4,15 +4,17 @@ use agent_client_protocol::schema::v1::{
     McpConnectionId, McpServer, McpServerAcp, MessageMcpNotification, MessageMcpRequest,
     MessageMcpResponse,
 };
-use phenix_backend::{BackendError, PreparedToolSurface, ToolInvocation, ToolResult};
-use phenix_core::{CallableDescriptor, CallableId};
-use serde_json::{json, value::RawValue, Value};
+use phenix_backend::{
+    BackendError, PreparedToolSurface, ToolInvocation, ToolPresentation, ToolResult,
+};
+use phenix_core::CallableDescriptor;
+use serde_json::{json, value::RawValue, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{mpsc, Arc, Mutex};
 
 const SERVER_ID: &str = "phenix-tools";
 const SERVER_NAME: &str = "Phenix tools";
-const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
+const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[derive(Clone, Default)]
 pub(super) struct ToolBridge {
@@ -37,6 +39,11 @@ impl ToolBridge {
         tools: &PreparedToolSurface,
         worker: mpsc::Sender<WorkerMessage>,
     ) -> Result<(), BackendError> {
+        if !tools.is_empty() && tools.presentation() != Some(ToolPresentation::AcpExtension) {
+            return Err(BackendError::Unsupported(
+                "ACP tool bridge requires the negotiated ACP extension presentation".to_owned(),
+            ));
+        }
         let mut state = self
             .state
             .lock()
@@ -62,7 +69,7 @@ impl ToolBridge {
         &self,
         request: ConnectMcpRequest,
     ) -> Result<ConnectMcpResponse, agent_client_protocol::Error> {
-        if request.server_id.as_ref() != SERVER_ID {
+        if request.server_id.0.as_ref() != SERVER_ID {
             return Err(agent_client_protocol::Error::invalid_params()
                 .data(format!("unknown Phenix MCP server {}", request.server_id)));
         }
@@ -82,7 +89,7 @@ impl ToolBridge {
         let mut state = self.state.lock().map_err(|_| {
             agent_client_protocol::Error::internal_error().data("ACP tool bridge lock poisoned")
         })?;
-        state.connections.remove(request.connection_id.as_ref());
+        state.connections.remove(request.connection_id.0.as_ref());
         Ok(DisconnectMcpResponse::new())
     }
 
@@ -91,7 +98,7 @@ impl ToolBridge {
         request: MessageMcpRequest,
     ) -> Result<MessageMcpResponse, agent_client_protocol::Error> {
         self.require_connection(&request.connection_id)?;
-        let result = match request.method.as_ref() {
+        let result = match request.method.as_str() {
             "initialize" => json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": { "tools": {} },
@@ -99,7 +106,7 @@ impl ToolBridge {
             }),
             "ping" => json!({}),
             "tools/list" => self.list_tools()?,
-            "tools/call" => self.call_tool(request.params.as_deref())?,
+            "tools/call" => self.call_tool(request.params.as_ref())?,
             method => {
                 return Err(agent_client_protocol::Error::method_not_found()
                     .data(format!("unsupported Phenix MCP method {method}")));
@@ -113,7 +120,7 @@ impl ToolBridge {
         notification: MessageMcpNotification,
     ) -> Result<(), agent_client_protocol::Error> {
         self.require_connection(&notification.connection_id)?;
-        match notification.method.as_ref() {
+        match notification.method.as_str() {
             "notifications/initialized" | "notifications/cancelled" => Ok(()),
             method => Err(agent_client_protocol::Error::method_not_found()
                 .data(format!("unsupported Phenix MCP notification {method}"))),
@@ -127,7 +134,7 @@ impl ToolBridge {
         let state = self.state.lock().map_err(|_| {
             agent_client_protocol::Error::internal_error().data("ACP tool bridge lock poisoned")
         })?;
-        if state.connections.contains(connection_id.as_ref()) {
+        if state.connections.contains(connection_id.0.as_ref()) {
             Ok(())
         } else {
             Err(agent_client_protocol::Error::invalid_params()
@@ -155,13 +162,9 @@ impl ToolBridge {
 
     fn call_tool(
         &self,
-        params: Option<&RawValue>,
+        params: Option<&Map<String, Value>>,
     ) -> Result<Value, agent_client_protocol::Error> {
-        let params: Value = params
-            .map(|params| serde_json::from_str(params.get()))
-            .transpose()
-            .map_err(agent_client_protocol::Error::into_internal_error)?
-            .unwrap_or_else(|| json!({}));
+        let params = params.cloned().unwrap_or_default();
         let name = params.get("name").and_then(Value::as_str).ok_or_else(|| {
             agent_client_protocol::Error::invalid_params().data("tools/call is missing name")
         })?;
@@ -231,7 +234,8 @@ fn raw_value(value: Value) -> Result<Arc<RawValue>, agent_client_protocol::Error
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{CallableKind, CallablePolicy, CapabilitySet};
+    use phenix_backend::{BackendCapabilities, ToolProvision};
+    use phenix_core::{CallableId, CallableKind, CallablePolicy, CapabilitySet};
 
     fn callable() -> CallableDescriptor {
         CallableDescriptor {
@@ -249,6 +253,18 @@ mod tests {
         }
     }
 
+    fn surface() -> PreparedToolSurface {
+        ToolProvision {
+            callables: vec![callable()],
+        }
+        .prepare(&BackendCapabilities {
+            tool_presentations: BTreeSet::from([ToolPresentation::AcpExtension]),
+            images: false,
+            persistent_sessions: false,
+        })
+        .unwrap()
+    }
+
     #[test]
     fn server_declaration_uses_native_acp_transport() {
         assert!(matches!(ToolBridge::default().server(), McpServer::Acp(_)));
@@ -258,11 +274,7 @@ mod tests {
     fn list_tools_preserves_callable_schema() {
         let bridge = ToolBridge::default();
         let (worker, _rx) = mpsc::channel();
-        let surface = PreparedToolSurface::for_test(
-            phenix_backend::ToolPresentation::AcpExtension,
-            vec![callable()],
-        );
-        bridge.bind(&surface, worker).unwrap();
+        bridge.bind(&surface(), worker).unwrap();
         let listed = bridge.list_tools().unwrap();
         assert_eq!(listed["tools"][0]["name"], "phenix.echo");
         assert_eq!(listed["tools"][0]["inputSchema"]["type"], "object");
