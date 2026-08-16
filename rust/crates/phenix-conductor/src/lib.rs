@@ -1,17 +1,20 @@
 #![forbid(unsafe_code)]
 
-mod tooling;
+mod callables;
+mod routing;
 
-pub use tooling::{ToolRegistry, ToolRegistryError};
+pub use callables::{CallableRegistry, CallableRegistryError};
+pub use routing::{RoutingRegistry, RoutingRegistryError};
 
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
     BackendSessionRequest, ToolHostingCapability, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_core::{
-    CallableDescriptor, CallableId, ConfigRevisionId, ExecutionEvent, ExecutionEventKind,
-    ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget,
-    SessionId, SessionSummary, ToolCallId,
+    CallableDescriptor, CallableId, CallableKind, ConfigRevisionId, ExecutionEvent,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
+    ExecutionTarget, ModelTarget, RoutingProfile, SessionId, SessionSummary, ToolCallId,
+    WorkflowDefinition,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -24,10 +27,11 @@ pub enum ConductorError {
     UnknownSession(SessionId),
     UnknownExecution(ExecutionId),
     EmptyInput,
-    InvalidChildKind,
     InvalidLifecycle(ExecutionId),
-    RoutingUnavailable,
-    ToolRegistry(ToolRegistryError),
+    NonModelExecution(ExecutionId),
+    PermissionRequired(CallableId),
+    CallableRegistry(CallableRegistryError),
+    Routing(RoutingRegistryError),
     Backend(BackendError),
 }
 
@@ -37,23 +41,38 @@ impl Display for ConductorError {
             Self::UnknownSession(id) => write!(f, "unknown session: {id}"),
             Self::UnknownExecution(id) => write!(f, "unknown execution: {id}"),
             Self::EmptyInput => f.write_str("input must not be empty"),
-            Self::InvalidChildKind => f.write_str("root is not a valid child execution kind"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
-            Self::RoutingUnavailable => f.write_str("routing is not implemented until R5"),
-            Self::ToolRegistry(error) => Display::fmt(error, f),
+            Self::NonModelExecution(id) => {
+                write!(
+                    f,
+                    "execution is conductor-owned and has no backend session: {id}"
+                )
+            }
+            Self::PermissionRequired(id) => write!(f, "permission required for callable: {id}"),
+            Self::CallableRegistry(error) => Display::fmt(error, f),
+            Self::Routing(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
         }
     }
 }
+
 impl Error for ConductorError {}
+
 impl From<BackendError> for ConductorError {
     fn from(value: BackendError) -> Self {
         Self::Backend(value)
     }
 }
-impl From<ToolRegistryError> for ConductorError {
-    fn from(value: ToolRegistryError) -> Self {
-        Self::ToolRegistry(value)
+
+impl From<CallableRegistryError> for ConductorError {
+    fn from(value: CallableRegistryError) -> Self {
+        Self::CallableRegistry(value)
+    }
+}
+
+impl From<RoutingRegistryError> for ConductorError {
+    fn from(value: RoutingRegistryError) -> Self {
+        Self::Routing(value)
     }
 }
 
@@ -63,9 +82,15 @@ struct SessionRecord {
 }
 
 #[derive(Clone, Debug)]
+enum ExecutionPayload {
+    Model { prompt: String },
+    Workflow { objective: String, next_step: usize },
+}
+
+#[derive(Clone, Debug)]
 struct ExecutionRecord {
     summary: ExecutionSummary,
-    prompt: String,
+    payload: ExecutionPayload,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,15 +100,16 @@ pub struct ExecutionPlan {
     pub tools: ToolProvision,
 }
 
-/// In-memory reference runtime used to prove conductor-owned runtime semantics
-/// before any real backend adapter or persistence layer is introduced.
+/// In-memory reference runtime proving conductor-owned semantics before
+/// persistence and concrete backend adapters are introduced.
 #[derive(Debug)]
 pub struct ConductorRuntime {
     config_revision: ConfigRevisionId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
     events: Vec<ExecutionEvent>,
-    tools: ToolRegistry,
+    callables: CallableRegistry,
+    routing: RoutingRegistry,
     next_session: u64,
     next_execution: u64,
     next_event: u64,
@@ -104,7 +130,8 @@ impl ConductorRuntime {
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
             events: Vec::new(),
-            tools: ToolRegistry::default(),
+            callables: CallableRegistry::default(),
+            routing: RoutingRegistry::default(),
             next_session: 0,
             next_execution: 0,
             next_event: 0,
@@ -120,13 +147,39 @@ impl ConductorRuntime {
     where
         F: Fn(&str) -> Result<String, String> + Send + Sync + 'static,
     {
-        self.tools.register(descriptor, handler)?;
+        self.callables.register_tool(descriptor, handler)?;
+        Ok(())
+    }
+
+    pub fn register_agent(&mut self, descriptor: CallableDescriptor) -> Result<(), ConductorError> {
+        self.callables.register_agent(descriptor)?;
+        Ok(())
+    }
+
+    pub fn register_workflow(
+        &mut self,
+        definition: WorkflowDefinition,
+    ) -> Result<(), ConductorError> {
+        self.callables.register_workflow(definition)?;
+        Ok(())
+    }
+
+    pub fn register_routing_profile(
+        &mut self,
+        profile: RoutingProfile,
+    ) -> Result<(), ConductorError> {
+        self.routing.register(profile)?;
         Ok(())
     }
 
     #[must_use]
+    pub fn callable_descriptors(&self) -> Vec<CallableDescriptor> {
+        self.callables.descriptors()
+    }
+
+    #[must_use]
     pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
-        self.tools.descriptors()
+        self.callables.tool_descriptors()
     }
 
     pub fn create_session(
@@ -200,7 +253,9 @@ impl ConductorRuntime {
             summary.id.clone(),
             ExecutionRecord {
                 summary: summary.clone(),
-                prompt: text.clone(),
+                payload: ExecutionPayload::Model {
+                    prompt: text.clone(),
+                },
             },
         );
         self.push_event(&summary.id, ExecutionEventKind::UserInput { text })?;
@@ -213,48 +268,108 @@ impl ConductorRuntime {
         Ok(summary)
     }
 
-    /// Creates a computation child without introducing callable semantics yet.
-    /// R5 will make agent/workflow callables the public source of child nodes.
-    pub fn start_child(
+    pub fn start_agent(
+        &mut self,
+        parent_id: &ExecutionId,
+        callable: &CallableId,
+        objective: impl Into<String>,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        let descriptor = self.callables.descriptor(callable)?.clone();
+        if descriptor.kind != CallableKind::Agent {
+            return Err(CallableRegistryError::WrongKind {
+                callable: callable.clone(),
+                expected: CallableKind::Agent,
+                actual: descriptor.kind,
+            }
+            .into());
+        }
+        if descriptor.policy.requires_permission {
+            return Err(ConductorError::PermissionRequired(callable.clone()));
+        }
+        self.create_child(
+            parent_id,
+            ExecutionKind::Agent,
+            callable.clone(),
+            ExecutionPayload::Model {
+                prompt: objective.into(),
+            },
+        )
+    }
+
+    pub fn start_workflow(
+        &mut self,
+        parent_id: &ExecutionId,
+        callable: &CallableId,
+        objective: impl Into<String>,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        let definition = self.callables.workflow(callable)?.clone();
+        if definition.descriptor.policy.requires_permission {
+            return Err(ConductorError::PermissionRequired(callable.clone()));
+        }
+        for step in &definition.steps {
+            let descriptor = self.callables.descriptor(&step.callable)?;
+            if descriptor.policy.requires_permission {
+                return Err(ConductorError::PermissionRequired(step.callable.clone()));
+            }
+        }
+        let summary = self.create_child(
+            parent_id,
+            ExecutionKind::Workflow,
+            callable.clone(),
+            ExecutionPayload::Workflow {
+                objective: objective.into(),
+                next_step: 0,
+            },
+        )?;
+        self.set_state(&summary.id, ExecutionState::Running)?;
+        self.advance_workflow(&summary.id)?;
+        Ok(self
+            .executions
+            .get(&summary.id)
+            .expect("workflow exists after creation")
+            .summary
+            .clone())
+    }
+
+    fn create_child(
         &mut self,
         parent_id: &ExecutionId,
         kind: ExecutionKind,
-        requested_target: Option<ExecutionTarget>,
-        objective: impl Into<String>,
+        callable: CallableId,
+        payload: ExecutionPayload,
     ) -> Result<ExecutionSummary, ConductorError> {
-        if kind == ExecutionKind::Root {
-            return Err(ConductorError::InvalidChildKind);
-        }
         let parent = self
             .executions
             .get(parent_id)
             .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?
             .summary
             .clone();
-        let target = match &parent.target {
-            ExecutionTarget::Fixed(_) => parent.target.clone(),
-            ExecutionTarget::Routed(_) => requested_target.unwrap_or_else(|| parent.target.clone()),
-        };
         let child = ExecutionSummary {
             id: self.new_execution_id(),
             session_id: parent.session_id,
             parent_execution: Some(parent.id.clone()),
             kind,
-            callable: None,
-            target,
+            callable: Some(callable),
+            target: parent.target,
             state: ExecutionState::Pending,
         };
         self.executions.insert(
             child.id.clone(),
             ExecutionRecord {
                 summary: child.clone(),
-                prompt: objective.into(),
+                payload,
             },
         );
         self.push_event(
             parent_id,
             ExecutionEventKind::ChildExecutionStarted {
                 child: child.id.clone(),
+            },
+        )?;
+        self.push_event(
+            &child.id,
+            ExecutionEventKind::ExecutionStateChanged {
+                state: ExecutionState::Pending,
             },
         )?;
         Ok(child)
@@ -268,16 +383,22 @@ impl ConductorRuntime {
             .executions
             .get(execution_id)
             .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-        match &execution.summary.target {
-            ExecutionTarget::Fixed(model) => Ok(ExecutionPlan {
-                execution_id: execution_id.clone(),
-                model: model.clone(),
-                tools: ToolProvision {
-                    callables: self.tools.descriptors(),
-                },
-            }),
-            ExecutionTarget::Routed(_) => Err(ConductorError::RoutingUnavailable),
+        if execution.summary.kind == ExecutionKind::Workflow {
+            return Err(ConductorError::NonModelExecution(execution_id.clone()));
         }
+        let model = match &execution.summary.target {
+            ExecutionTarget::Fixed(model) => model.clone(),
+            ExecutionTarget::Routed(profile) => self
+                .routing
+                .resolve(profile, execution.summary.callable.as_ref())?,
+        };
+        Ok(ExecutionPlan {
+            execution_id: execution_id.clone(),
+            model,
+            tools: ToolProvision {
+                callables: self.callables.tool_descriptors(),
+            },
+        })
     }
 
     pub fn drive_execution(
@@ -293,6 +414,9 @@ impl ConductorRuntime {
         if record.summary.state != ExecutionState::Pending {
             return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
         }
+        let ExecutionPayload::Model { prompt } = &record.payload else {
+            return Err(ConductorError::NonModelExecution(execution_id.clone()));
+        };
         if !plan.tools.callables.is_empty()
             && matches!(
                 backend.capabilities().tool_hosting,
@@ -303,7 +427,7 @@ impl ConductorRuntime {
                 "backend cannot host conductor-provisioned tools".to_owned(),
             )));
         }
-        let prompt = record.prompt.clone();
+        let prompt = prompt.clone();
         let allowed_tools = plan
             .tools
             .callables
@@ -408,13 +532,16 @@ impl ConductorRuntime {
         execution_id: &ExecutionId,
         state: ExecutionState,
     ) -> Result<(), ConductorError> {
-        let current = self
-            .executions
-            .get(execution_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?
-            .summary
-            .state
-            .clone();
+        let (current, parent) = {
+            let execution = self
+                .executions
+                .get(execution_id)
+                .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+            (
+                execution.summary.state.clone(),
+                execution.summary.parent_execution.clone(),
+            )
+        };
         if is_terminal(&current) {
             return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
         }
@@ -425,7 +552,103 @@ impl ConductorRuntime {
             .state = state.clone();
         self.push_event(
             execution_id,
-            ExecutionEventKind::ExecutionStateChanged { state },
+            ExecutionEventKind::ExecutionStateChanged {
+                state: state.clone(),
+            },
+        )?;
+        if is_terminal(&state) {
+            if let Some(parent) = parent {
+                self.push_event(
+                    &parent,
+                    ExecutionEventKind::ChildExecutionFinished {
+                        child: execution_id.clone(),
+                        state,
+                    },
+                )?;
+                self.refresh_workflow(&parent)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn refresh_workflow(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
+        let Some(workflow) = self.executions.get(execution_id) else {
+            return Err(ConductorError::UnknownExecution(execution_id.clone()));
+        };
+        if workflow.summary.kind != ExecutionKind::Workflow || is_terminal(&workflow.summary.state)
+        {
+            return Ok(());
+        }
+        let states: Vec<ExecutionState> = self
+            .executions
+            .values()
+            .filter(|record| record.summary.parent_execution.as_ref() == Some(execution_id))
+            .map(|record| record.summary.state.clone())
+            .collect();
+        if states.contains(&ExecutionState::Failed) {
+            self.set_state(execution_id, ExecutionState::Failed)?;
+            return Ok(());
+        }
+        if states.contains(&ExecutionState::Cancelled) {
+            self.set_state(execution_id, ExecutionState::Cancelled)?;
+            return Ok(());
+        }
+        if states.contains(&ExecutionState::Interrupted) {
+            self.set_state(execution_id, ExecutionState::Interrupted)?;
+            return Ok(());
+        }
+        if states.iter().any(|state| !is_terminal(state)) {
+            return Ok(());
+        }
+        self.advance_workflow(execution_id)
+    }
+
+    fn advance_workflow(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
+        let (callable, objective, next_step, state) = {
+            let execution = self
+                .executions
+                .get(execution_id)
+                .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+            let ExecutionPayload::Workflow {
+                objective,
+                next_step,
+            } = &execution.payload
+            else {
+                return Err(ConductorError::NonModelExecution(execution_id.clone()));
+            };
+            (
+                execution
+                    .summary
+                    .callable
+                    .clone()
+                    .expect("workflow execution has callable"),
+                objective.clone(),
+                *next_step,
+                execution.summary.state.clone(),
+            )
+        };
+        if state != ExecutionState::Running {
+            return Ok(());
+        }
+        let definition = self.callables.workflow(&callable)?.clone();
+        if next_step >= definition.steps.len() {
+            self.set_state(execution_id, ExecutionState::Completed)?;
+            return Ok(());
+        }
+        let step = definition.steps[next_step].clone();
+        let ExecutionPayload::Workflow { next_step, .. } = &mut self
+            .executions
+            .get_mut(execution_id)
+            .expect("workflow exists")
+            .payload
+        else {
+            unreachable!("workflow execution payload")
+        };
+        *next_step += 1;
+        self.start_agent(
+            execution_id,
+            &step.callable,
+            step.objective.unwrap_or(objective),
         )?;
         Ok(())
     }
@@ -463,7 +686,7 @@ impl ConductorRuntime {
         invocation: ToolInvocation,
     ) -> Result<ToolResult, BackendError> {
         if !allowed_tools.contains(&invocation.callable)
-            || !self.tools.contains(&invocation.callable)
+            || !self.callables.contains(&invocation.callable)
         {
             return Err(BackendError::Protocol(format!(
                 "backend invoked unprovisioned tool {}",
@@ -490,8 +713,8 @@ impl ConductorRuntime {
 
         let result = match serde_json::from_str::<Value>(&invocation.arguments_json) {
             Ok(_) => self
-                .tools
-                .invoke(&invocation.callable, &invocation.arguments_json)
+                .callables
+                .invoke_tool(&invocation.callable, &invocation.arguments_json)
                 .map_err(|error| BackendError::Protocol(error.to_string()))?,
             Err(error) => ToolResult {
                 output: format!("invalid JSON tool arguments: {error}"),
@@ -514,10 +737,12 @@ impl ConductorRuntime {
         self.next_session += 1;
         SessionId::parse(format!("session-{}", self.next_session)).expect("generated id")
     }
+
     fn new_execution_id(&mut self) -> ExecutionId {
         self.next_execution += 1;
         ExecutionId::parse(format!("execution-{}", self.next_execution)).expect("generated id")
     }
+
     fn new_tool_call_id(&mut self) -> ToolCallId {
         self.next_tool_call += 1;
         ToolCallId::parse(format!("tool-call-{}", self.next_tool_call)).expect("generated id")
@@ -565,7 +790,10 @@ impl BackendHost for RuntimeHost<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{BackendId, InferenceOptions, ModelId, ProviderId, RoutingProfileId};
+    use phenix_core::{
+        BackendId, CallablePolicy, CapabilitySet, InferenceOptions, ModelId, ProviderId,
+    };
+    use serde_json::json;
 
     fn fixed(name: &str) -> ExecutionTarget {
         ExecutionTarget::Fixed(ModelTarget {
@@ -574,6 +802,18 @@ mod tests {
             model: ModelId::parse(name).unwrap(),
             inference: InferenceOptions::default(),
         })
+    }
+
+    fn agent(id: &str) -> CallableDescriptor {
+        CallableDescriptor {
+            id: CallableId::parse(id).unwrap(),
+            kind: CallableKind::Agent,
+            description: "test agent".to_owned(),
+            input_schema: json!({"type": "object"}),
+            output_schema: json!({"type": "object"}),
+            capabilities: CapabilitySet::default(),
+            policy: CallablePolicy::default(),
+        }
     }
 
     #[test]
@@ -587,19 +827,13 @@ mod tests {
     }
 
     #[test]
-    fn fixed_parent_forces_child_target() {
+    fn fixed_parent_forces_callable_child_target() {
         let mut runtime = ConductorRuntime::new();
+        runtime.register_agent(agent("scout")).unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let root = runtime.submit(&session.id, "work").unwrap();
         let child = runtime
-            .start_child(
-                &root.id,
-                ExecutionKind::Agent,
-                Some(ExecutionTarget::Routed(
-                    RoutingProfileId::parse("ignored").unwrap(),
-                )),
-                "child",
-            )
+            .start_agent(&root.id, &CallableId::parse("scout").unwrap(), "child")
             .unwrap();
         assert_eq!(child.target, fixed("fixed"));
     }
@@ -607,17 +841,18 @@ mod tests {
     #[test]
     fn cancellation_cascades_to_descendants() {
         let mut runtime = ConductorRuntime::new();
+        runtime.register_agent(agent("scout")).unwrap();
         let session = runtime.create_session(None, None, fixed("a")).unwrap();
         let root = runtime.submit(&session.id, "work").unwrap();
         let child = runtime
-            .start_child(&root.id, ExecutionKind::Agent, None, "child")
+            .start_agent(&root.id, &CallableId::parse("scout").unwrap(), "child")
             .unwrap();
         runtime.cancel_execution(&root.id).unwrap();
         let snapshot = runtime.snapshot();
         assert!(snapshot
             .executions
             .iter()
-            .filter(|e| e.id == root.id || e.id == child.id)
-            .all(|e| e.state == ExecutionState::Cancelled));
+            .filter(|execution| execution.id == root.id || execution.id == child.id)
+            .all(|execution| execution.state == ExecutionState::Cancelled));
     }
 }

@@ -5,10 +5,12 @@ use phenix_backend::{
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{
     BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
-    RoutingProfileId,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
+    ModelTarget, ProviderId, RoutingProfile, RoutingProfileId, WorkflowDefinition,
+    WorkflowExecutionPolicy, WorkflowStep,
 };
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -16,6 +18,7 @@ use std::sync::{
 
 struct MockBackend {
     opened: Arc<AtomicBool>,
+    expected_model: Option<String>,
 }
 struct MockSession;
 
@@ -27,10 +30,14 @@ impl Backend for MockBackend {
             persistent_sessions: false,
         }
     }
+
     fn open_session(
         &mut self,
-        _request: BackendSessionRequest,
+        request: BackendSessionRequest,
     ) -> Result<Box<dyn BackendSession>, BackendError> {
+        if let Some(expected) = self.expected_model.as_deref() {
+            assert_eq!(request.model.model.as_str(), expected);
+        }
         self.opened.store(true, Ordering::SeqCst);
         Ok(Box::new(MockSession))
     }
@@ -46,6 +53,7 @@ impl BackendSession for MockSession {
         host.emit(BackendEvent::ContentDelta("answer".to_owned()))?;
         Ok(())
     }
+
     fn cancel(&mut self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
         Ok(())
     }
@@ -121,20 +129,24 @@ impl Backend for UnsupportedBackend {
     }
 }
 
-fn fixed() -> ExecutionTarget {
-    ExecutionTarget::Fixed(ModelTarget {
+fn model(name: &str) -> ModelTarget {
+    ModelTarget {
         backend: BackendId::parse("mock").unwrap(),
         provider: ProviderId::parse("mock").unwrap(),
-        model: ModelId::parse("model").unwrap(),
+        model: ModelId::parse(name).unwrap(),
         inference: InferenceOptions::default(),
-    })
+    }
 }
 
-fn echo_descriptor() -> CallableDescriptor {
+fn fixed() -> ExecutionTarget {
+    ExecutionTarget::Fixed(model("model"))
+}
+
+fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
     CallableDescriptor {
-        id: CallableId::parse("echo").unwrap(),
-        kind: CallableKind::Tool,
-        description: "echo JSON arguments".to_owned(),
+        id: CallableId::parse(id).unwrap(),
+        kind,
+        description: "test callable".to_owned(),
         input_schema: json!({"type": "object"}),
         output_schema: json!({"type": "object"}),
         capabilities: CapabilitySet::default(),
@@ -142,11 +154,16 @@ fn echo_descriptor() -> CallableDescriptor {
     }
 }
 
+fn echo_descriptor() -> CallableDescriptor {
+    descriptor("echo", CallableKind::Tool)
+}
+
 #[test]
 fn mock_backend_preserves_mixed_event_order() {
     let opened = Arc::new(AtomicBool::new(false));
     let mut backend = MockBackend {
         opened: opened.clone(),
+        expected_model: None,
     };
     let mut runtime = ConductorRuntime::new();
     let session = runtime.create_session(None, None, fixed()).unwrap();
@@ -159,11 +176,11 @@ fn mock_backend_preserves_mixed_event_order() {
     let events = runtime.events_since(0);
     let reasoning = events
         .iter()
-        .position(|e| matches!(e.kind, ExecutionEventKind::ReasoningDelta { .. }))
+        .position(|event| matches!(event.kind, ExecutionEventKind::ReasoningDelta { .. }))
         .unwrap();
     let content = events
         .iter()
-        .position(|e| matches!(e.kind, ExecutionEventKind::AssistantContentDelta { .. }))
+        .position(|event| matches!(event.kind, ExecutionEventKind::AssistantContentDelta { .. }))
         .unwrap();
     assert!(reasoning < content);
     assert!(events
@@ -172,26 +189,159 @@ fn mock_backend_preserves_mixed_event_order() {
 }
 
 #[test]
-fn routed_execution_fails_before_backend_open() {
+fn routed_execution_resolves_before_backend_open() {
     let opened = Arc::new(AtomicBool::new(false));
     let mut backend = MockBackend {
         opened: opened.clone(),
+        expected_model: Some("routed-root".to_owned()),
     };
     let mut runtime = ConductorRuntime::new();
+    let profile = RoutingProfileId::parse("default").unwrap();
+    runtime
+        .register_routing_profile(RoutingProfile {
+            id: profile.clone(),
+            default_target: model("routed-root"),
+            callable_targets: BTreeMap::new(),
+        })
+        .unwrap();
     let session = runtime
-        .create_session(
-            None,
-            None,
-            ExecutionTarget::Routed(RoutingProfileId::parse("default").unwrap()),
-        )
+        .create_session(None, None, ExecutionTarget::Routed(profile))
         .unwrap();
     let execution = runtime.submit(&session.id, "hello").unwrap();
 
+    runtime
+        .drive_execution(&execution.id, &mut backend)
+        .unwrap();
+    assert!(opened.load(Ordering::SeqCst));
+}
+
+#[test]
+fn routed_agent_uses_callable_specific_model() {
+    let mut runtime = ConductorRuntime::new();
+    let scout = CallableId::parse("agent.scout").unwrap();
+    runtime
+        .register_agent(descriptor("agent.scout", CallableKind::Agent))
+        .unwrap();
+    let profile = RoutingProfileId::parse("default").unwrap();
+    runtime
+        .register_routing_profile(RoutingProfile {
+            id: profile.clone(),
+            default_target: model("root"),
+            callable_targets: BTreeMap::from([(scout.clone(), model("scout"))]),
+        })
+        .unwrap();
+    let session = runtime
+        .create_session(None, None, ExecutionTarget::Routed(profile))
+        .unwrap();
+    let root = runtime.submit(&session.id, "work").unwrap();
+    let child = runtime.start_agent(&root.id, &scout, "inspect").unwrap();
+
     assert_eq!(
-        runtime.drive_execution(&execution.id, &mut backend),
-        Err(ConductorError::RoutingUnavailable)
+        runtime.plan_execution(&root.id).unwrap().model,
+        model("root")
     );
-    assert!(!opened.load(Ordering::SeqCst));
+    assert_eq!(
+        runtime.plan_execution(&child.id).unwrap().model,
+        model("scout")
+    );
+}
+
+#[test]
+fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
+    let mut runtime = ConductorRuntime::new();
+    let scout = CallableId::parse("agent.scout").unwrap();
+    let worker = CallableId::parse("agent.worker").unwrap();
+    runtime
+        .register_agent(descriptor("agent.scout", CallableKind::Agent))
+        .unwrap();
+    runtime
+        .register_agent(descriptor("agent.worker", CallableKind::Agent))
+        .unwrap();
+    runtime
+        .register_workflow(WorkflowDefinition {
+            descriptor: descriptor("workflow.implement", CallableKind::Workflow),
+            policy: WorkflowExecutionPolicy::Sequential,
+            steps: vec![
+                WorkflowStep {
+                    callable: scout,
+                    objective: Some("inspect".to_owned()),
+                },
+                WorkflowStep {
+                    callable: worker,
+                    objective: None,
+                },
+            ],
+        })
+        .unwrap();
+    let session = runtime.create_session(None, None, fixed()).unwrap();
+    let root = runtime.submit(&session.id, "root").unwrap();
+    let workflow_id = CallableId::parse("workflow.implement").unwrap();
+    let workflow = runtime
+        .start_workflow(&root.id, &workflow_id, "implement")
+        .unwrap();
+
+    assert_eq!(workflow.state, ExecutionState::Running);
+    assert!(matches!(
+        runtime.plan_execution(&workflow.id),
+        Err(ConductorError::NonModelExecution(_))
+    ));
+
+    let snapshot = runtime.snapshot();
+    let first = snapshot
+        .executions
+        .iter()
+        .find(|execution| {
+            execution.parent_execution.as_ref() == Some(&workflow.id)
+                && execution.kind == ExecutionKind::Agent
+        })
+        .unwrap()
+        .clone();
+    assert_eq!(
+        snapshot
+            .executions
+            .iter()
+            .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .count(),
+        1
+    );
+
+    let mut backend = MockBackend {
+        opened: Arc::new(AtomicBool::new(false)),
+        expected_model: None,
+    };
+    runtime.drive_execution(&first.id, &mut backend).unwrap();
+
+    let snapshot = runtime.snapshot();
+    let second = snapshot
+        .executions
+        .iter()
+        .find(|execution| {
+            execution.parent_execution.as_ref() == Some(&workflow.id)
+                && execution.id != first.id
+                && execution.state == ExecutionState::Pending
+        })
+        .unwrap()
+        .clone();
+    assert_eq!(
+        snapshot
+            .executions
+            .iter()
+            .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .count(),
+        2
+    );
+
+    runtime.drive_execution(&second.id, &mut backend).unwrap();
+    let snapshot = runtime.snapshot();
+    assert_eq!(
+        snapshot
+            .executions
+            .iter()
+            .find(|execution| execution.id == workflow.id)
+            .unwrap()
+            .state,
+        ExecutionState::Completed
+    );
 }
 
 #[test]
