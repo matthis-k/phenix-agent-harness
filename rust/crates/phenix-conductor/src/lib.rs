@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 mod callables;
+mod persistence;
 mod routing;
 
 pub use callables::{CallableRegistry, CallableRegistryError};
+pub use persistence::{JsonFileStore, PersistenceError, RuntimeCheckpoint};
 pub use routing::{RoutingRegistry, RoutingRegistryError};
 
 use phenix_backend::{
