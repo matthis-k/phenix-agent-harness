@@ -1,8 +1,8 @@
 use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
 use phenix_core::{
     ConfigRevisionId, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, SessionId, SessionSummary,
-    ToolCallId,
+    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, SessionId, SessionState,
+    SessionSummary, ToolCallId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -70,6 +70,9 @@ pub enum DomainEvent {
     SessionTargetChanged {
         session_id: SessionId,
         target: ExecutionTarget,
+    },
+    SessionClosed {
+        session_id: SessionId,
     },
     ExecutionCreated {
         execution: ExecutionSummary,
@@ -277,6 +280,12 @@ pub(crate) fn apply_domain_event(
                     session.id, session.config_revision, state.config_revision
                 )));
             }
+            if session.state != SessionState::Active {
+                return Err(JournalError::InvalidEvent(format!(
+                    "new session {} must start active",
+                    session.id
+                )));
+            }
             let expected_id = SessionId::parse(format!("session-{}", *state.next_session + 1))
                 .expect("generated session id");
             if session.id != expected_id {
@@ -314,6 +323,11 @@ pub(crate) fn apply_domain_event(
                     "rename references unknown session {session_id}"
                 ))
             })?;
+            if session.summary.state == SessionState::Closed {
+                return Err(JournalError::InvalidEvent(format!(
+                    "closed session {session_id} cannot be renamed"
+                )));
+            }
             session.summary.name = Some(name.clone());
         }
         DomainEvent::SessionTargetChanged { session_id, target } => {
@@ -322,12 +336,44 @@ pub(crate) fn apply_domain_event(
                     "target change references unknown session {session_id}"
                 ))
             })?;
+            if session.summary.state == SessionState::Closed {
+                return Err(JournalError::InvalidEvent(format!(
+                    "closed session {session_id} cannot change target"
+                )));
+            }
             session.summary.default_target = target.clone();
         }
-        DomainEvent::ExecutionCreated { execution, payload } => {
-            if !state.sessions.contains_key(&execution.session_id) {
+        DomainEvent::SessionClosed { session_id } => {
+            let session = state.sessions.get_mut(session_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "close references unknown session {session_id}"
+                ))
+            })?;
+            if session.summary.state == SessionState::Closed {
                 return Err(JournalError::InvalidEvent(format!(
+                    "session {session_id} was closed more than once"
+                )));
+            }
+            if state.executions.values().any(|execution| {
+                execution.summary.session_id == *session_id
+                    && !is_terminal(&execution.summary.state)
+            }) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "session {session_id} cannot close with active executions"
+                )));
+            }
+            session.summary.state = SessionState::Closed;
+        }
+        DomainEvent::ExecutionCreated { execution, payload } => {
+            let session = state.sessions.get(&execution.session_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
                     "execution {} references unknown session {}",
+                    execution.id, execution.session_id
+                ))
+            })?;
+            if session.summary.state == SessionState::Closed {
+                return Err(JournalError::InvalidEvent(format!(
+                    "execution {} references closed session {}",
                     execution.id, execution.session_id
                 )));
             }
