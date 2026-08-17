@@ -1,5 +1,6 @@
 use clap::Parser;
 use phenix_backend_acp::{AcpBackend, AcpBackendConfig};
+use phenix_backend_native::{PhenixBackend, BACKEND_ID as PHENIX_BACKEND_ID};
 use phenix_conductor::{ConductorRuntime, ConductorServer, JsonFileStore};
 use phenix_core::{BackendId, ProviderId};
 use std::error::Error;
@@ -28,7 +29,7 @@ struct Arguments {
     #[arg(long, value_name = "FILE")]
     socket: Option<PathBuf>,
 
-    /// ACP backend command used by the minimal R9 process wiring.
+    /// Optional external ACP backend command. The built-in Phenix backend is always registered.
     #[arg(long, value_name = "PROGRAM")]
     acp_command: Option<PathBuf>,
 
@@ -58,6 +59,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(path) => ConductorServer::load_or_new(JsonFileStore::new(path))?,
         None => ConductorServer::new(ConductorRuntime::new()),
     };
+
+    // Product invariant: a bare conductor is immediately usable. External ACP
+    // registrations extend this backend set; they never supply the default.
+    let phenix_backend_id = BackendId::parse(PHENIX_BACKEND_ID)?;
+    server.register_backend(
+        phenix_backend_id,
+        Box::new(PhenixBackend::from_environment()?),
+    )?;
 
     if let Some(command) = arguments.acp_command {
         let backend_id = BackendId::parse(arguments.acp_backend)?;

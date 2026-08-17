@@ -16,15 +16,21 @@ _: {
           "--bin"
           "phenix-conductor"
         ];
-        nativeBuildInputs = [ pkgs.cmake ];
+        nativeBuildInputs = [
+          pkgs.cmake
+          pkgs.makeWrapper
+        ];
         doCheck = false;
 
         installPhase = ''
           runHook preInstall
-          mkdir -p "$out/bin"
+          mkdir -p "$out/bin" "$out/libexec"
           conductor_binary="$(find target -path '*/release/phenix-conductor' -type f -print -quit)"
           test -n "$conductor_binary"
-          cp "$conductor_binary" "$out/bin/phenix-conductor"
+          cp "$conductor_binary" "$out/libexec/phenix-conductor"
+          makeWrapper "$out/libexec/phenix-conductor" "$out/bin/phenix-conductor" \
+            --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
+            --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           runHook postInstall
         '';
       };
@@ -56,10 +62,42 @@ _: {
       phenixProductSmoke =
         pkgs.runCommand "phenix-product-smoke"
           {
-            nativeBuildInputs = [ phenixAcpSmoke ];
+            nativeBuildInputs = [
+              phenixAcpSmoke
+              pkgs.gnugrep
+              pkgs.jq
+            ];
           }
           ''
             phenix-acp-smoke
+
+            conductor="${phenixConductor}/bin/phenix-conductor"
+            "$conductor" --help > "$TMPDIR/conductor-help.txt"
+            grep -F -- '--acp-command' "$TMPDIR/conductor-help.txt" >/dev/null
+
+            export PHENIX_CREDENTIAL_FILE="$TMPDIR/credentials.json"
+            export PHENIX_MODEL="openai-codex/product-smoke-model"
+            response="$TMPDIR/initialize.jsonl"
+            printf '%s\n' '{"id":1,"command":{"type":"initialize","after_sequence":null}}' |
+              "$conductor" > "$response"
+
+            jq -e '
+              .type == "response"
+              and .id == 1
+              and .status == "ok"
+              and .result.type == "initialized"
+              and ([
+                .result.backends[]
+                | select(.backend == "phenix")
+                | .models[]
+                | select(
+                    .target.backend == "phenix"
+                    and .target.provider == "openai-codex"
+                    and .target.model == "product-smoke-model"
+                  )
+              ] | length == 1)
+            ' "$response" >/dev/null
+
             touch "$out"
           '';
     in
