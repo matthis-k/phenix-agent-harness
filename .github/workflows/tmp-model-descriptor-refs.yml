@@ -28,6 +28,13 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add rust
+          git add \
+            rust/crates/phenix-core/src/lib.rs \
+            rust/crates/phenix-backend-native/src/lib.rs \
+            rust/crates/phenix-backend-acp/src/lib.rs \
+            rust/crates/phenix-conductor/tests/support/protocol_harness.rs \
+            rust/crates/phenix-conductor/tests/support/server_cancellation.rs \
+            rust/crates/phenix-conductor/tests/support/protocol_public_journeys.rs \
+            rust/crates/phenix-conductor/tests/stdio_roundtrip.rs
           git commit -m 'feat: mark models selectable by provider auth'
           git push origin HEAD:agent/filter-models-by-auth
