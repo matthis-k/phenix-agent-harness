@@ -77,23 +77,45 @@ _: {
 
             export PHENIX_CREDENTIAL_FILE="$TMPDIR/credentials.json"
             export PHENIX_MODEL="openai-codex/product-smoke-model"
-            response="$TMPDIR/initialize.jsonl"
-            printf '%s\n' '{"id":1,"command":{"type":"initialize","after_sequence":null}}' |
-              "$conductor" > "$response"
+            response="$TMPDIR/conductor.jsonl"
+            {
+              printf '%s\n' '{"id":1,"command":{"type":"initialize","after_sequence":null}}'
+              printf '%s\n' '{"id":2,"command":{"type":"create_session","parent_session":null,"name":"product smoke","target":{"kind":"fixed","value":{"backend":"phenix","provider":"openai-codex","model":"product-smoke-model","inference":{}}}}}'
+            } | "$conductor" > "$response"
 
-            jq -e '
-              .type == "response"
-              and .id == 1
-              and .status == "ok"
-              and .result.type == "initialized"
-              and ([
-                .result.backends[]
+            jq -s -e '
+              ([
+                .[]
+                | select(
+                    .type == "response"
+                    and .id == 1
+                    and .status == "ok"
+                    and .result.type == "initialized"
+                  )
+                | .result.backends[]
                 | select(.backend == "phenix")
                 | .models[]
                 | select(
                     .target.backend == "phenix"
                     and .target.provider == "openai-codex"
                     and .target.model == "product-smoke-model"
+                  )
+              ] | length == 1)
+              and ([
+                .[]
+                | select(
+                    .type == "response"
+                    and .id == 2
+                    and .status == "ok"
+                    and .result.type == "session"
+                  )
+                | .result.session
+                | select(
+                    .default_target.kind == "fixed"
+                    and .default_target.value.backend == "phenix"
+                    and .default_target.value.provider == "openai-codex"
+                    and .default_target.value.model == "product-smoke-model"
+                    and .default_target.value.inference.effort == null
                   )
               ] | length == 1)
             ' "$response" >/dev/null
