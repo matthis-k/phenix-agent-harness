@@ -368,7 +368,7 @@ impl PhenixSession {
                 .with_capture_content(true)
                 .with_capture_reasoning_content(true)
                 .with_capture_tool_calls(true);
-            if let Some(effort) = reasoning_effort {
+            if let Some(effort) = reasoning_effort.clone() {
                 options = options.with_reasoning_effort(effort);
             }
             let mut stream = provider
