@@ -1,0 +1,224 @@
+name: tmp-filter-models-by-auth
+
+on:
+  push:
+    branches:
+      - agent/filter-models-by-auth
+    paths:
+      - .github/workflows/tmp-filter-models-by-auth.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/filter-models-by-auth
+      - name: Patch native catalog
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('rust/crates/phenix-backend-native/src/lib.rs')
+          source = path.read_text()
+
+          source = source.replace(
+              'use credentials::CredentialStore;',
+              'use credentials::{CredentialStore, StoredCredential};',
+              1,
+          )
+
+          old = '''        let models = self
+            .models
+            .iter()
+            .map(|selection| {
+                Ok(ModelDescriptor {
+                    target: selection.target()?,
+                    name: selection.wire_value(),
+                })
+            })
+            .collect::<Result<Vec<_>, BackendError>>()?;
+        let auth_providers = self
+            .models
+            .iter()
+            .filter_map(|selection| providers::canonical_auth_provider(&selection.provider))
+            .collect::<BTreeSet<_>>();
+        let codex_authenticated = if auth_providers.contains(oauth::PROVIDER) {
+            self.credentials
+                .resolve(oauth::PROVIDER)
+                .map_err(BackendError::Protocol)?
+                .is_some()
+        } else {
+            false
+        };
+'''
+          new = '''        let auth_providers = self
+            .models
+            .iter()
+            .filter_map(|selection| providers::canonical_auth_provider(&selection.provider))
+            .collect::<BTreeSet<_>>();
+        let models = selectable_models(&self.credentials, &self.models)?
+            .into_iter()
+            .map(|selection| {
+                Ok(ModelDescriptor {
+                    target: selection.target()?,
+                    name: selection.wire_value(),
+                })
+            })
+            .collect::<Result<Vec<_>, BackendError>>()?;
+'''
+          if old not in source:
+              raise SystemExit('catalog model block not found')
+          source = source.replace(old, new, 1)
+
+          old = '''        let mut any_authenticated = codex_authenticated;
+        for provider in &auth_providers {
+            if *provider == oauth::PROVIDER {
+                continue;
+            }
+            if self
+                .credentials
+                .api_key(provider)
+                .map_err(BackendError::Protocol)?
+                .is_some()
+                || providers::environment_authenticated(provider)
+            {
+                any_authenticated = true;
+                break;
+            }
+        }
+'''
+          new = '''        let mut any_authenticated = false;
+        for provider in &auth_providers {
+            if provider_has_valid_auth(&self.credentials, provider)? {
+                any_authenticated = true;
+                break;
+            }
+        }
+'''
+          if old not in source:
+              raise SystemExit('authentication state block not found')
+          source = source.replace(old, new, 1)
+
+          marker = '''fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {
+'''
+          helper = '''fn provider_has_valid_auth(
+    credentials: &CredentialStore,
+    provider: &str,
+) -> Result<bool, BackendError> {
+    let Some(provider) = providers::canonical_auth_provider(provider) else {
+        // Supported providers without an auth adapter, such as local Ollama,
+        // do not require credentials and remain selectable.
+        return Ok(true);
+    };
+    let stored = credentials.resolve(provider).map_err(BackendError::Protocol)?;
+    if provider == oauth::PROVIDER {
+        return Ok(matches!(stored, Some(StoredCredential::OAuth { .. })));
+    }
+    if providers::is_api_key_auth_provider(provider) {
+        let stored_key = matches!(
+            stored,
+            Some(StoredCredential::ApiKey { ref secret }) if !secret.trim().is_empty()
+        );
+        return Ok(stored_key || providers::environment_authenticated(provider));
+    }
+    Ok(false)
+}
+
+fn selectable_models<'a>(
+    credentials: &CredentialStore,
+    models: &'a [ModelSelection],
+) -> Result<Vec<&'a ModelSelection>, BackendError> {
+    let mut selectable = Vec::new();
+    for selection in models {
+        if provider_has_valid_auth(credentials, &selection.provider)? {
+            selectable.push(selection);
+        }
+    }
+    Ok(selectable)
+}
+
+'''
+          if marker not in source:
+              raise SystemExit('configured_models marker not found')
+          source = source.replace(marker, helper + marker, 1)
+
+          marker = '''    #[test]
+    fn model_identity_preserves_provider_and_model() {
+'''
+          test = '''    #[test]
+    fn model_catalog_only_exposes_authenticated_providers() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "phenix-model-auth-test-{}-{unique}",
+            std::process::id()
+        ));
+        let credentials = CredentialStore {
+            path: root.join("credentials.json"),
+        };
+        let models = vec![
+            ModelSelection::parse("openai-codex/gpt-test").unwrap(),
+            ModelSelection::parse("ollama/local-test").unwrap(),
+        ];
+
+        let visible = selectable_models(&credentials, &models).unwrap();
+        assert_eq!(
+            visible
+                .iter()
+                .map(|selection| selection.wire_value())
+                .collect::<Vec<_>>(),
+            vec!["ollama/local-test"]
+        );
+
+        credentials
+            .save_oauth(
+                oauth::PROVIDER,
+                StoredCredential::OAuth {
+                    access_token: "access".to_owned(),
+                    refresh_token: "refresh".to_owned(),
+                    id_token: "id".to_owned(),
+                    account_id: "account".to_owned(),
+                    expires_at: u64::MAX,
+                },
+            )
+            .unwrap();
+        let visible = selectable_models(&credentials, &models).unwrap();
+        assert_eq!(
+            visible
+                .iter()
+                .map(|selection| selection.wire_value())
+                .collect::<Vec<_>>(),
+            vec!["openai-codex/gpt-test", "ollama/local-test"]
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+'''
+          if marker not in source:
+              raise SystemExit('test marker not found')
+          source = source.replace(marker, test + marker, 1)
+
+          path.write_text(source)
+          PY
+      - name: Format
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+      - name: Test native backend
+        run: cargo test --manifest-path rust/Cargo.toml -p phenix-backend-native
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/crates/phenix-backend-native/src/lib.rs
+          git commit -m 'feat: filter models by provider authentication'
+          git push origin HEAD:agent/filter-models-by-auth
