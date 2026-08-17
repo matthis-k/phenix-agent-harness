@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{
-    AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor, CallableId,
-    ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, SessionId, SessionSummary,
+    AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor,
+    CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, SessionId,
+    SessionSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +60,8 @@ pub enum Command {
     SelectAuthentication {
         backend_id: BackendId,
         method_id: AuthenticationMethodId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<AuthenticationInput>,
     },
 }
 
@@ -196,6 +199,24 @@ mod tests {
         let value = serde_json::to_value(message).expect("serialize callable catalog request");
         assert_eq!(value["command"]["type"], "get_callable_catalog");
         assert_eq!(value["command"].as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn api_key_auth_input_is_typed_and_debug_redacted() {
+        let message = ClientMessage {
+            id: 11,
+            command: Command::SelectAuthentication {
+                backend_id: BackendId::parse("phenix").unwrap(),
+                method_id: AuthenticationMethodId::parse("openai-api").unwrap(),
+                input: Some(AuthenticationInput::ApiKey {
+                    secret: "super-secret".to_owned(),
+                }),
+            },
+        };
+        let value = serde_json::to_value(&message).expect("serialize auth request");
+        assert_eq!(value["command"]["input"]["type"], "api_key");
+        assert_eq!(value["command"]["input"]["secret"], "super-secret");
+        assert!(!format!("{message:?}").contains("super-secret"));
     }
 
     #[test]

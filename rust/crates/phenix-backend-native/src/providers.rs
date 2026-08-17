@@ -1,3 +1,4 @@
+use crate::credentials::CredentialStore;
 use genai::adapter::AdapterKind;
 use genai::resolver::{AuthData, Endpoint};
 use genai::{ModelIden, ServiceTarget};
@@ -36,6 +37,7 @@ const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
 const OPENCODE_API_KEY_ENV: &str = "OPENCODE_API_KEY";
 const OPENCODE_GO_API_KEY_ENV: &str = "OPENCODE_GO_API_KEY";
 const OPEN_ROUTER_API_KEY_ENV: &str = "OPEN_ROUTER_API_KEY";
+const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
 
 pub(crate) fn is_gateway_provider(provider: &str) -> bool {
     matches!(
@@ -49,21 +51,34 @@ pub(crate) fn validate_gateway_model(provider: &str, model: &str) -> Result<(), 
 }
 
 pub(crate) fn gateway_target(
+    credentials: &CredentialStore,
     provider: &str,
     model: &str,
 ) -> Result<Option<ServiceTarget>, BackendError> {
-    let (endpoint, auth_names) = match provider {
-        "opencode" | OPENCODE_ZEN_PROVIDER => (OPENCODE_ZEN_ENDPOINT, &[OPENCODE_API_KEY_ENV][..]),
+    let (credential_provider, endpoint, auth_names) = match provider {
+        "opencode" | OPENCODE_ZEN_PROVIDER => (
+            OPENCODE_ZEN_PROVIDER,
+            OPENCODE_ZEN_ENDPOINT,
+            &[OPENCODE_API_KEY_ENV][..],
+        ),
         OPENCODE_GO_PROVIDER => (
+            OPENCODE_GO_PROVIDER,
             OPENCODE_GO_ENDPOINT,
             &[OPENCODE_API_KEY_ENV, OPENCODE_GO_API_KEY_ENV][..],
         ),
         _ => return Ok(None),
     };
     let adapter_kind = gateway_adapter(provider, model)?;
+    let auth = match credentials
+        .api_key(credential_provider)
+        .map_err(BackendError::Protocol)?
+    {
+        Some(secret) => AuthData::from_single(secret),
+        None => auth_from_environment(auth_names),
+    };
     Ok(Some(ServiceTarget {
         endpoint: Endpoint::from_static(endpoint),
-        auth: auth_from_environment(auth_names),
+        auth,
         model: ModelIden::new(adapter_kind, model),
     }))
 }
@@ -79,26 +94,50 @@ pub(crate) fn canonical_auth_provider(provider: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn environment_authenticated(provider: &str) -> bool {
-    match provider {
-        OPENAI_API_PROVIDER => has_environment_secret(&[OPENAI_API_KEY_ENV]),
-        OPENCODE_ZEN_PROVIDER => has_environment_secret(&[OPENCODE_API_KEY_ENV]),
-        OPENCODE_GO_PROVIDER => {
-            has_environment_secret(&[OPENCODE_API_KEY_ENV, OPENCODE_GO_API_KEY_ENV])
-        }
-        OPEN_ROUTER_PROVIDER => has_environment_secret(&[OPEN_ROUTER_API_KEY_ENV]),
-        _ => false,
+pub(crate) fn is_api_key_auth_provider(provider: &str) -> bool {
+    matches!(
+        provider,
+        OPENAI_API_PROVIDER | OPENCODE_ZEN_PROVIDER | OPENCODE_GO_PROVIDER | OPEN_ROUTER_PROVIDER
+    )
+}
+
+pub(crate) fn auth_provider_for_adapter(adapter: &str) -> Option<&'static str> {
+    match adapter {
+        "openai" | "openai_resp" => Some(OPENAI_API_PROVIDER),
+        "open_router" => Some(OPEN_ROUTER_PROVIDER),
+        _ => None,
     }
+}
+
+pub(crate) fn environment_api_key(provider: &str) -> Option<String> {
+    let names: &[&str] = match provider {
+        OPENAI_API_PROVIDER => &[OPENAI_API_KEY_ENV],
+        OPENCODE_ZEN_PROVIDER => &[OPENCODE_API_KEY_ENV],
+        OPENCODE_GO_PROVIDER => &[OPENCODE_API_KEY_ENV, OPENCODE_GO_API_KEY_ENV],
+        OPEN_ROUTER_PROVIDER => &[OPEN_ROUTER_API_KEY_ENV, OPENROUTER_API_KEY_ENV],
+        _ => return None,
+    };
+    names.iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    })
+}
+
+pub(crate) fn environment_authenticated(provider: &str) -> bool {
+    environment_api_key(provider).is_some()
 }
 
 pub(crate) fn environment_description(provider: &str) -> Option<&'static str> {
     match provider {
-        OPENAI_API_PROVIDER => Some("OpenAI API key from OPENAI_API_KEY"),
-        OPENCODE_ZEN_PROVIDER => Some("OpenCode Zen API key from OPENCODE_API_KEY"),
-        OPENCODE_GO_PROVIDER => {
-            Some("OpenCode Go API key from OPENCODE_API_KEY or OPENCODE_GO_API_KEY")
-        }
-        OPEN_ROUTER_PROVIDER => Some("OpenRouter API key from OPEN_ROUTER_API_KEY"),
+        OPENAI_API_PROVIDER => Some("Enter an OpenAI API key; OPENAI_API_KEY is also supported"),
+        OPENCODE_ZEN_PROVIDER => Some("Enter an OpenCode Zen API key; OPENCODE_API_KEY is also supported"),
+        OPENCODE_GO_PROVIDER => Some(
+            "Enter an OpenCode Go API key; OPENCODE_API_KEY or OPENCODE_GO_API_KEY is also supported",
+        ),
+        OPEN_ROUTER_PROVIDER => Some(
+            "Enter an OpenRouter API key; OPEN_ROUTER_API_KEY or OPENROUTER_API_KEY is also supported",
+        ),
         _ => None,
     }
 }
@@ -157,14 +196,6 @@ fn auth_from_environment(names: &[&'static str]) -> AuthData {
         }
     }
     AuthData::from_env(names[0])
-}
-
-fn has_environment_secret(names: &[&str]) -> bool {
-    names.iter().any(|name| {
-        std::env::var(name)
-            .ok()
-            .is_some_and(|value| !value.trim().is_empty())
-    })
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+use crate::providers;
 use genai::resolver::AuthData;
 use genai::ModelIden;
 use serde::{Deserialize, Serialize};
@@ -72,22 +73,46 @@ impl CredentialStore {
         self.write(&credentials)
     }
 
+    pub(crate) fn save_api_key(&self, provider: &str, secret: &str) -> Result<(), String> {
+        if secret.trim().is_empty() {
+            return Err("API key must not be empty".to_owned());
+        }
+        let mut credentials = self.read()?;
+        credentials.providers.insert(
+            provider.to_owned(),
+            StoredCredential::ApiKey {
+                secret: secret.to_owned(),
+            },
+        );
+        self.write(&credentials)
+    }
+
+    pub(crate) fn api_key(&self, provider: &str) -> Result<Option<String>, String> {
+        match self.resolve(provider)? {
+            Some(StoredCredential::ApiKey { secret }) => Ok(Some(secret)),
+            Some(StoredCredential::OAuth { .. }) => Err(format!(
+                "provider {provider:?} has an OAuth credential, not an API key"
+            )),
+            None => Ok(None),
+        }
+    }
+
     pub(crate) fn auth_for_model(
         &self,
         model: ModelIden,
     ) -> Result<Option<AuthData>, genai::resolver::Error> {
-        let provider = model.adapter_kind.as_lower_str();
-        self.resolve(provider)
-            .and_then(|credential| match credential {
-                Some(StoredCredential::ApiKey { secret }) => {
-                    Ok(Some(AuthData::from_single(secret)))
-                }
-                Some(StoredCredential::OAuth { .. }) => Err(format!(
-                    "provider {provider:?} requires its dedicated OAuth adapter"
-                )),
-                None => Ok(None),
-            })
-            .map_err(genai::resolver::Error::Custom)
+        let adapter = model.adapter_kind.as_lower_str();
+        let provider = providers::auth_provider_for_adapter(adapter).unwrap_or(adapter);
+        if let Some(secret) = self
+            .api_key(provider)
+            .map_err(genai::resolver::Error::Custom)?
+        {
+            return Ok(Some(AuthData::from_single(secret)));
+        }
+        if let Some(secret) = providers::environment_api_key(provider) {
+            return Ok(Some(AuthData::from_single(secret)));
+        }
+        Ok(None)
     }
 
     fn read(&self) -> Result<StoredCredentials, String> {
@@ -165,3 +190,30 @@ fn secure_file(_path: &Path) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn secure_file_options(_options: &mut OpenOptions) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn api_key_round_trips_through_secure_store() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "phenix-credential-test-{}-{unique}",
+            std::process::id()
+        ));
+        let store = CredentialStore {
+            path: root.join("credentials.json"),
+        };
+        store.save_api_key("openai-api", "test-secret").unwrap();
+        assert_eq!(
+            store.api_key("openai-api").unwrap().as_deref(),
+            Some("test-secret")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+}
