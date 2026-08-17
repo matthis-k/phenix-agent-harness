@@ -60,6 +60,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         None => ConductorServer::new(ConductorRuntime::new()),
     };
 
+    // Product invariant: a bare conductor is immediately usable. External ACP
+    // registrations extend this backend set; they never supply the default.
     let phenix_backend_id = BackendId::parse(PHENIX_BACKEND_ID)?;
     server.register_backend(
         phenix_backend_id,
