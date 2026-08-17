@@ -115,7 +115,7 @@ _: {
                     and .default_target.value.backend == "phenix"
                     and .default_target.value.provider == "openai-codex"
                     and .default_target.value.model == "product-smoke-model"
-                    and .default_target.value.inference == {}
+                    and .default_target.value.inference.effort == null
                   )
               ] | length == 1)
             ' "$response" >/dev/null
