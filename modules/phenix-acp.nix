@@ -24,17 +24,14 @@ _: {
 
         installPhase = ''
           runHook preInstall
-          mkdir -p "$out/bin"
+          mkdir -p "$out/bin" "$out/libexec"
           conductor_binary="$(find target -path '*/release/phenix-conductor' -type f -print -quit)"
           test -n "$conductor_binary"
-          cp "$conductor_binary" "$out/bin/phenix-conductor"
-          runHook postInstall
-        '';
-
-        postFixup = ''
-          wrapProgram "$out/bin/phenix-conductor" \
+          cp "$conductor_binary" "$out/libexec/phenix-conductor"
+          makeWrapper "$out/libexec/phenix-conductor" "$out/bin/phenix-conductor" \
             --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
             --set-default NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+          runHook postInstall
         '';
       };
 
