@@ -244,20 +244,15 @@ impl Backend for PhenixBackend {
                 selectable: true,
             });
         }
-        for provider in [
-            providers::OPENAI_API_PROVIDER,
-            providers::OPENCODE_ZEN_PROVIDER,
-            providers::OPENCODE_GO_PROVIDER,
-            providers::OPEN_ROUTER_PROVIDER,
-        ] {
-            if !auth_providers.contains(provider) {
+        for provider in &auth_providers {
+            if *provider == oauth::PROVIDER || !providers::is_api_key_auth_provider(provider) {
                 continue;
             }
             authentication_methods.push(AuthenticationMethodDescriptor {
-                id: AuthenticationMethodId::parse(provider)
+                id: AuthenticationMethodId::parse(*provider)
                     .map_err(|error| BackendError::Protocol(error.to_string()))?,
                 backend: backend.clone(),
-                provider: ProviderId::parse(provider)
+                provider: ProviderId::parse(*provider)
                     .map_err(|error| BackendError::Protocol(error.to_string()))?,
                 kind: AuthenticationMethodKind::ApiKey,
                 name: providers::environment_name(provider)
