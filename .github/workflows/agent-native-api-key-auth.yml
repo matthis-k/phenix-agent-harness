@@ -1,0 +1,196 @@
+name: "Agent native API-key auth adapters"
+
+on:
+  push:
+    branches:
+      - "agent/native-api-key-auth"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Apply auth adapter patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def patch(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          # Core: typed, redaction-safe authentication input and explicit API-key kind.
+          patch(
+              "rust/crates/phenix-core/src/lib.rs",
+              '''pub enum AuthenticationMethodKind {\n    Agent,\n    Environment,\n    Terminal,\n}\n\n#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]\npub struct AuthenticationMethodDescriptor {''',
+              '''pub enum AuthenticationMethodKind {\n    Agent,\n    ApiKey,\n    Environment,\n    Terminal,\n}\n\n#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]\n#[serde(tag = "type", rename_all = "snake_case")]\npub enum AuthenticationInput {\n    ApiKey { secret: String },\n}\n\nimpl fmt::Debug for AuthenticationInput {\n    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {\n        match self {\n            Self::ApiKey { .. } => f\n                .debug_struct("ApiKey")\n                .field("secret", &"<redacted>")\n                .finish(),\n        }\n    }\n}\n\n#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]\npub struct AuthenticationMethodDescriptor {'''
+          )
+
+          # Protocol: carry optional structured auth input without changing OAuth wire shape.
+          patch(
+              "rust/crates/phenix-protocol/src/lib.rs",
+              '''    AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor, CallableId,\n    ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, SessionId, SessionSummary,\n};''',
+              '''    AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor,\n    CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, SessionId,\n    SessionSummary,\n};'''
+          )
+          patch(
+              "rust/crates/phenix-protocol/src/lib.rs",
+              '''    SelectAuthentication {\n        backend_id: BackendId,\n        method_id: AuthenticationMethodId,\n    },''',
+              '''    SelectAuthentication {\n        backend_id: BackendId,\n        method_id: AuthenticationMethodId,\n        #[serde(default, skip_serializing_if = "Option::is_none")]\n        input: Option<AuthenticationInput>,\n    },'''
+          )
+          patch(
+              "rust/crates/phenix-protocol/src/lib.rs",
+              '''    #[test]\n    fn close_session_is_an_explicit_terminal_operation() {''',
+              '''    #[test]\n    fn api_key_auth_input_is_typed_and_debug_redacted() {\n        let message = ClientMessage {\n            id: 11,\n            command: Command::SelectAuthentication {\n                backend_id: BackendId::parse("phenix").unwrap(),\n                method_id: AuthenticationMethodId::parse("openai-api").unwrap(),\n                input: Some(AuthenticationInput::ApiKey {\n                    secret: "super-secret".to_owned(),\n                }),\n            },\n        };\n        let value = serde_json::to_value(&message).expect("serialize auth request");\n        assert_eq!(value["command"]["input"]["type"], "api_key");\n        assert_eq!(value["command"]["input"]["secret"], "super-secret");\n        assert!(!format!("{message:?}").contains("super-secret"));\n    }\n\n    #[test]\n    fn close_session_is_an_explicit_terminal_operation() {'''
+          )
+
+          # Backend contract: additive typed-input hook keeps existing backend implementations valid.
+          patch(
+              "rust/crates/phenix-backend/src/lib.rs",
+              '''use phenix_core::{\n    AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId, ExecutionId,\n    ModelTarget, SessionId,\n};''',
+              '''use phenix_core::{\n    AuthenticationInput, AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId,\n    ExecutionId, ModelTarget, SessionId,\n};'''
+          )
+          patch(
+              "rust/crates/phenix-backend/src/lib.rs",
+              '''    fn authenticate(&mut self, _method: &AuthenticationMethodId) -> Result<(), BackendError> {\n        Err(BackendError::Unsupported(\n            "backend does not provide authentication actions".to_owned(),\n        ))\n    }\n\n    /// Materialize an execution-local backend session.''',
+              '''    fn authenticate(&mut self, _method: &AuthenticationMethodId) -> Result<(), BackendError> {\n        Err(BackendError::Unsupported(\n            "backend does not provide authentication actions".to_owned(),\n        ))\n    }\n\n    fn authenticate_with_input(\n        &mut self,\n        method: &AuthenticationMethodId,\n        input: Option<&AuthenticationInput>,\n    ) -> Result<(), BackendError> {\n        if input.is_some() {\n            return Err(BackendError::Unsupported(\n                "backend authentication method does not accept structured input".to_owned(),\n            ));\n        }\n        self.authenticate(method)\n    }\n\n    /// Materialize an execution-local backend session.'''
+          )
+
+          # Credential store: persist API keys with the same secure file semantics as OAuth.
+          patch(
+              "rust/crates/phenix-backend-native/src/credentials.rs",
+              '''use genai::resolver::AuthData;''',
+              '''use crate::providers;\nuse genai::resolver::AuthData;'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/credentials.rs",
+              '''    pub(crate) fn auth_for_model(\n        &self,\n        model: ModelIden,\n    ) -> Result<Option<AuthData>, genai::resolver::Error> {\n        let provider = model.adapter_kind.as_lower_str();\n        self.resolve(provider)\n            .and_then(|credential| match credential {\n                Some(StoredCredential::ApiKey { secret }) => {\n                    Ok(Some(AuthData::from_single(secret)))\n                }\n                Some(StoredCredential::OAuth { .. }) => Err(format!(\n                    "provider {provider:?} requires its dedicated OAuth adapter"\n                )),\n                None => Ok(None),\n            })\n            .map_err(genai::resolver::Error::Custom)\n    }''',
+              '''    pub(crate) fn save_api_key(&self, provider: &str, secret: &str) -> Result<(), String> {\n        if secret.trim().is_empty() {\n            return Err("API key must not be empty".to_owned());\n        }\n        let mut credentials = self.read()?;\n        credentials.providers.insert(\n            provider.to_owned(),\n            StoredCredential::ApiKey {\n                secret: secret.to_owned(),\n            },\n        );\n        self.write(&credentials)\n    }\n\n    pub(crate) fn api_key(&self, provider: &str) -> Result<Option<String>, String> {\n        match self.resolve(provider)? {\n            Some(StoredCredential::ApiKey { secret }) => Ok(Some(secret)),\n            Some(StoredCredential::OAuth { .. }) => Err(format!(\n                "provider {provider:?} has an OAuth credential, not an API key"\n            )),\n            None => Ok(None),\n        }\n    }\n\n    pub(crate) fn auth_for_model(\n        &self,\n        model: ModelIden,\n    ) -> Result<Option<AuthData>, genai::resolver::Error> {\n        let adapter = model.adapter_kind.as_lower_str();\n        let provider = providers::auth_provider_for_adapter(adapter).unwrap_or(adapter);\n        if let Some(secret) = self.api_key(provider).map_err(genai::resolver::Error::Custom)? {\n            return Ok(Some(AuthData::from_single(secret)));\n        }\n        if let Some(secret) = providers::environment_api_key(provider) {\n            return Ok(Some(AuthData::from_single(secret)));\n        }\n        Ok(None)\n    }'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/credentials.rs",
+              '''#[cfg(not(unix))]\nfn secure_file(_path: &Path) -> Result<(), String> {\n    Ok(())\n}\n\n#[cfg(not(unix))]\nfn secure_file_options(_options: &mut OpenOptions) {}''',
+              '''#[cfg(not(unix))]\nfn secure_file(_path: &Path) -> Result<(), String> {\n    Ok(())\n}\n\n#[cfg(not(unix))]\nfn secure_file_options(_options: &mut OpenOptions) {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use std::time::{SystemTime, UNIX_EPOCH};\n\n    #[test]\n    fn api_key_round_trips_through_secure_store() {\n        let unique = SystemTime::now()\n            .duration_since(UNIX_EPOCH)\n            .unwrap()\n            .as_nanos();\n        let root = std::env::temp_dir().join(format!(\n            "phenix-credential-test-{}-{unique}",\n            std::process::id()\n        ));\n        let store = CredentialStore {\n            path: root.join("credentials.json"),\n        };\n        store.save_api_key("openai-api", "test-secret").unwrap();\n        assert_eq!(\n            store.api_key("openai-api").unwrap().as_deref(),\n            Some("test-secret")\n        );\n        let _ = fs::remove_dir_all(root);\n    }\n}'''
+          )
+
+          # Provider auth sources: secure store first, environment fallback second.
+          patch(
+              "rust/crates/phenix-backend-native/src/providers.rs",
+              '''use genai::adapter::AdapterKind;''',
+              '''use crate::credentials::CredentialStore;\nuse genai::adapter::AdapterKind;'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/providers.rs",
+              '''const OPEN_ROUTER_API_KEY_ENV: &str = "OPEN_ROUTER_API_KEY";''',
+              '''const OPEN_ROUTER_API_KEY_ENV: &str = "OPEN_ROUTER_API_KEY";\nconst OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/providers.rs",
+              '''pub(crate) fn gateway_target(\n    provider: &str,\n    model: &str,\n) -> Result<Option<ServiceTarget>, BackendError> {\n    let (endpoint, auth_names) = match provider {\n        "opencode" | OPENCODE_ZEN_PROVIDER => (OPENCODE_ZEN_ENDPOINT, &[OPENCODE_API_KEY_ENV][..]),\n        OPENCODE_GO_PROVIDER => (\n            OPENCODE_GO_ENDPOINT,\n            &[OPENCODE_API_KEY_ENV, OPENCODE_GO_API_KEY_ENV][..],\n        ),\n        _ => return Ok(None),\n    };\n    let adapter_kind = gateway_adapter(provider, model)?;\n    Ok(Some(ServiceTarget {\n        endpoint: Endpoint::from_static(endpoint),\n        auth: auth_from_environment(auth_names),\n        model: ModelIden::new(adapter_kind, model),\n    }))\n}''',
+              '''pub(crate) fn gateway_target(\n    credentials: &CredentialStore,\n    provider: &str,\n    model: &str,\n) -> Result<Option<ServiceTarget>, BackendError> {\n    let (credential_provider, endpoint, auth_names) = match provider {\n        "opencode" | OPENCODE_ZEN_PROVIDER => (\n            OPENCODE_ZEN_PROVIDER,\n            OPENCODE_ZEN_ENDPOINT,\n            &[OPENCODE_API_KEY_ENV][..],\n        ),\n        OPENCODE_GO_PROVIDER => (\n            OPENCODE_GO_PROVIDER,\n            OPENCODE_GO_ENDPOINT,\n            &[OPENCODE_API_KEY_ENV, OPENCODE_GO_API_KEY_ENV][..],\n        ),\n        _ => return Ok(None),\n    };\n    let adapter_kind = gateway_adapter(provider, model)?;\n    let auth = match credentials\n        .api_key(credential_provider)\n        .map_err(BackendError::Protocol)?\n    {\n        Some(secret) => AuthData::from_single(secret),\n        None => auth_from_environment(auth_names),\n    };\n    Ok(Some(ServiceTarget {\n        endpoint: Endpoint::from_static(endpoint),\n        auth,\n        model: ModelIden::new(adapter_kind, model),\n    }))\n}'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/providers.rs",
+              '''pub(crate) fn environment_authenticated(provider: &str) -> bool {\n    match provider {\n        OPENAI_API_PROVIDER => has_environment_secret(&[OPENAI_API_KEY_ENV]),\n        OPENCODE_ZEN_PROVIDER => has_environment_secret(&[OPENCODE_API_KEY_ENV]),\n        OPENCODE_GO_PROVIDER => {\n            has_environment_secret(&[OPENCODE_API_KEY_ENV, OPENCODE_GO_API_KEY_ENV])\n        }\n        OPEN_ROUTER_PROVIDER => has_environment_secret(&[OPEN_ROUTER_API_KEY_ENV]),\n        _ => false,\n    }\n}\n\npub(crate) fn environment_description(provider: &str) -> Option<&'static str> {\n    match provider {\n        OPENAI_API_PROVIDER => Some("OpenAI API key from OPENAI_API_KEY"),\n        OPENCODE_ZEN_PROVIDER => Some("OpenCode Zen API key from OPENCODE_API_KEY"),\n        OPENCODE_GO_PROVIDER => {\n            Some("OpenCode Go API key from OPENCODE_API_KEY or OPENCODE_GO_API_KEY")\n        }\n        OPEN_ROUTER_PROVIDER => Some("OpenRouter API key from OPEN_ROUTER_API_KEY"),\n        _ => None,\n    }\n}''',
+              '''pub(crate) fn is_api_key_auth_provider(provider: &str) -> bool {\n    matches!(\n        provider,\n        OPENAI_API_PROVIDER | OPENCODE_ZEN_PROVIDER | OPENCODE_GO_PROVIDER | OPEN_ROUTER_PROVIDER\n    )\n}\n\npub(crate) fn auth_provider_for_adapter(adapter: &str) -> Option<&'static str> {\n    match adapter {\n        "openai" | "openai_resp" => Some(OPENAI_API_PROVIDER),\n        "open_router" => Some(OPEN_ROUTER_PROVIDER),\n        _ => None,\n    }\n}\n\npub(crate) fn environment_api_key(provider: &str) -> Option<String> {\n    let names: &[&str] = match provider {\n        OPENAI_API_PROVIDER => &[OPENAI_API_KEY_ENV],\n        OPENCODE_ZEN_PROVIDER => &[OPENCODE_API_KEY_ENV],\n        OPENCODE_GO_PROVIDER => &[OPENCODE_API_KEY_ENV, OPENCODE_GO_API_KEY_ENV],\n        OPEN_ROUTER_PROVIDER => &[OPEN_ROUTER_API_KEY_ENV, OPENROUTER_API_KEY_ENV],\n        _ => return None,\n    };\n    names.iter().find_map(|name| {\n        std::env::var(name)\n            .ok()\n            .filter(|value| !value.trim().is_empty())\n    })\n}\n\npub(crate) fn environment_authenticated(provider: &str) -> bool {\n    environment_api_key(provider).is_some()\n}\n\npub(crate) fn environment_description(provider: &str) -> Option<&'static str> {\n    match provider {\n        OPENAI_API_PROVIDER => Some("Enter an OpenAI API key; OPENAI_API_KEY is also supported"),\n        OPENCODE_ZEN_PROVIDER => Some("Enter an OpenCode Zen API key; OPENCODE_API_KEY is also supported"),\n        OPENCODE_GO_PROVIDER => Some(\n            "Enter an OpenCode Go API key; OPENCODE_API_KEY or OPENCODE_GO_API_KEY is also supported",\n        ),\n        OPEN_ROUTER_PROVIDER => Some(\n            "Enter an OpenRouter API key; OPEN_ROUTER_API_KEY or OPENROUTER_API_KEY is also supported",\n        ),\n        _ => None,\n    }\n}'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/providers.rs",
+              '''fn has_environment_secret(names: &[&str]) -> bool {\n    names.iter().any(|name| {\n        std::env::var(name)\n            .ok()\n            .is_some_and(|value| !value.trim().is_empty())\n    })\n}\n\n#[cfg(test)]''',
+              '''#[cfg(test)]'''
+          )
+
+          # Native backend: selectable API-key methods, typed login handling, stored-key routing.
+          patch(
+              "rust/crates/phenix-backend-native/src/lib.rs",
+              '''    AuthenticationMethodDescriptor, AuthenticationMethodId, AuthenticationMethodKind,\n    AuthenticationState, BackendCatalog, BackendId, InferenceOptions, ModelDescriptor, ModelId,\n    ModelTarget, ProviderId, SessionId,\n};''',
+              '''    AuthenticationInput, AuthenticationMethodDescriptor, AuthenticationMethodId,\n    AuthenticationMethodKind, AuthenticationState, BackendCatalog, BackendId, InferenceOptions,\n    ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,\n};'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/lib.rs",
+              '''            codex_provider: Arc::clone(&self.codex_provider),\n            model: Mutex::new(request.model),''',
+              '''            codex_provider: Arc::clone(&self.codex_provider),\n            credentials: self.credentials.clone(),\n            model: Mutex::new(request.model),'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/lib.rs",
+              '''                kind: AuthenticationMethodKind::Environment,\n                name: providers::environment_name(provider)\n                    .expect("known API-key provider has a name")\n                    .to_owned(),\n                description: providers::environment_description(provider).map(str::to_owned),\n                selectable: false,''',
+              '''                kind: AuthenticationMethodKind::ApiKey,\n                name: providers::environment_name(provider)\n                    .expect("known API-key provider has a name")\n                    .to_owned(),\n                description: providers::environment_description(provider).map(str::to_owned),\n                selectable: true,'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/lib.rs",
+              '''        let any_authenticated = codex_authenticated\n            || auth_providers\n                .iter()\n                .any(|provider| providers::environment_authenticated(provider));''',
+              '''        let mut any_authenticated = codex_authenticated;\n        for provider in &auth_providers {\n            if *provider == oauth::PROVIDER {\n                continue;\n            }\n            if self\n                .credentials\n                .api_key(provider)\n                .map_err(BackendError::Protocol)?\n                .is_some()\n                || providers::environment_authenticated(provider)\n            {\n                any_authenticated = true;\n                break;\n            }\n        }'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/lib.rs",
+              '''    fn authenticate(&mut self, method: &AuthenticationMethodId) -> Result<(), BackendError> {\n        if method.as_str() != oauth::PROVIDER {\n            return Err(BackendError::Unsupported(format!(\n                "Phenix backend authentication method {method} is configured through its environment variable"\n            )));\n        }\n        self.runtime\n            .block_on(oauth::login(&self.credentials))\n            .map_err(BackendError::Transport)\n    }\n\n    fn open_session(''',
+              '''    fn authenticate(&mut self, method: &AuthenticationMethodId) -> Result<(), BackendError> {\n        if method.as_str() != oauth::PROVIDER {\n            return Err(BackendError::Unsupported(format!(\n                "Phenix backend authentication method {method} requires typed authentication input"\n            )));\n        }\n        self.runtime\n            .block_on(oauth::login(&self.credentials))\n            .map_err(BackendError::Transport)\n    }\n\n    fn authenticate_with_input(\n        &mut self,\n        method: &AuthenticationMethodId,\n        input: Option<&AuthenticationInput>,\n    ) -> Result<(), BackendError> {\n        if method.as_str() == oauth::PROVIDER {\n            if input.is_some() {\n                return Err(BackendError::Protocol(\n                    "OpenAI Codex OAuth does not accept an API-key payload".to_owned(),\n                ));\n            }\n            return self.authenticate(method);\n        }\n        if !providers::is_api_key_auth_provider(method.as_str()) {\n            return Err(BackendError::Unsupported(format!(\n                "Phenix backend does not expose authentication method {method}"\n            )));\n        }\n        let Some(AuthenticationInput::ApiKey { secret }) = input else {\n            return Err(BackendError::Protocol(format!(\n                "Phenix authentication method {method} requires an API key"\n            )));\n        };\n        self.credentials\n            .save_api_key(method.as_str(), secret)\n            .map_err(BackendError::Protocol)\n    }\n\n    fn open_session('''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/lib.rs",
+              '''    codex_provider: Arc<ProviderClient>,\n    model: Mutex<ModelTarget>,''',
+              '''    codex_provider: Arc<ProviderClient>,\n    credentials: CredentialStore,\n    model: Mutex<ModelTarget>,'''
+          )
+          patch(
+              "rust/crates/phenix-backend-native/src/lib.rs",
+              '''        let provider_target =\n            match providers::gateway_target(&selection.provider, &selection.model)? {''',
+              '''        let provider_target = match providers::gateway_target(\n            &self.credentials,\n            &selection.provider,\n            &selection.model,\n        )? {'''
+          )
+
+          # Server: carry the structured input to the backend and refresh catalog afterwards.
+          patch(
+              "rust/crates/phenix-conductor/src/server.rs",
+              '''use phenix_core::{\n    AuthenticationMethodId, BackendCatalog, BackendId, CallableId, ExecutionEventKind, ExecutionId,\n    ExecutionKind, ExecutionState, ExecutionTarget, SessionId, SessionState,\n};''',
+              '''use phenix_core::{\n    AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,\n    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget, SessionId,\n    SessionState,\n};'''
+          )
+          patch(
+              "rust/crates/phenix-conductor/src/server.rs",
+              '''            Command::SelectAuthentication {\n                backend_id,\n                method_id,\n            } => self\n                .authenticate(&backend_id, &method_id)\n                .map(|catalog| Reply::BackendCatalog { catalog })\n                .map_err(map_backend_error),''',
+              '''            Command::SelectAuthentication {\n                backend_id,\n                method_id,\n                input,\n            } => self\n                .authenticate(&backend_id, &method_id, input.as_ref())\n                .map(|catalog| Reply::BackendCatalog { catalog })\n                .map_err(map_backend_error),'''
+          )
+          patch(
+              "rust/crates/phenix-conductor/src/server.rs",
+              '''    fn authenticate(\n        &mut self,\n        backend_id: &BackendId,\n        method_id: &AuthenticationMethodId,\n    ) -> Result<BackendCatalog, BackendError> {''',
+              '''    fn authenticate(\n        &mut self,\n        backend_id: &BackendId,\n        method_id: &AuthenticationMethodId,\n        input: Option<&AuthenticationInput>,\n    ) -> Result<BackendCatalog, BackendError> {'''
+          )
+          patch(
+              "rust/crates/phenix-conductor/src/server.rs",
+              '''            .map_err(|_| BackendError::Transport("backend lock poisoned".to_owned()))?\n            .authenticate(method_id)?;\n        self.refresh_backend(backend_id)''',
+              '''            .map_err(|_| BackendError::Transport("backend lock poisoned".to_owned()))?\n            .authenticate_with_input(method_id, input)?;\n        self.refresh_backend(backend_id)'''
+          )
+
+          # Existing explicit construction in tests must state that OAuth has no structured input.
+          for path in Path("rust").rglob("*.rs"):
+              text = path.read_text()
+              old = '''Command::SelectAuthentication {\n                backend_id: BackendId::parse("mock").unwrap(),\n                method_id: AuthenticationMethodId::parse("mock-auth").unwrap(),\n            }'''
+              if old in text:
+                  path.write_text(text.replace(old, old[:-2] + ',\n                input: None,\n            }', 1))
+          PY
+
+      - name: Format Rust
+        run: cargo fmt --all --manifest-path rust/Cargo.toml
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "feat: add native API-key auth adapters"
+          git push
