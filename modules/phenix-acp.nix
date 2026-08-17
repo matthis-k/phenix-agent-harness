@@ -29,8 +29,8 @@ _: {
           test -n "$conductor_binary"
           cp "$conductor_binary" "$out/libexec/phenix-conductor"
           makeWrapper "$out/libexec/phenix-conductor" "$out/bin/phenix-conductor" \
-            --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
-            --set-default NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+            --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
+            --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           runHook postInstall
         '';
       };
