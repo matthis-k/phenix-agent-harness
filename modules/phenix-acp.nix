@@ -16,7 +16,10 @@ _: {
           "--bin"
           "phenix-conductor"
         ];
-        nativeBuildInputs = [ pkgs.cmake ];
+        nativeBuildInputs = [
+          pkgs.cmake
+          pkgs.makeWrapper
+        ];
         doCheck = false;
 
         installPhase = ''
@@ -26,6 +29,12 @@ _: {
           test -n "$conductor_binary"
           cp "$conductor_binary" "$out/bin/phenix-conductor"
           runHook postInstall
+        '';
+
+        postFixup = ''
+          wrapProgram "$out/bin/phenix-conductor" \
+            --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
+            --set-default NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         '';
       };
 
