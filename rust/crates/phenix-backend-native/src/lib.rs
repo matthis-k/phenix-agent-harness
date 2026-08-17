@@ -16,9 +16,9 @@ use phenix_backend::{
     BackendSession, BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolPresentation,
 };
 use phenix_core::{
-    AuthenticationMethodDescriptor, AuthenticationMethodId, AuthenticationMethodKind,
-    AuthenticationState, BackendCatalog, BackendId, InferenceOptions, ModelDescriptor, ModelId,
-    ModelTarget, ProviderId, SessionId,
+    AuthenticationInput, AuthenticationMethodDescriptor, AuthenticationMethodId,
+    AuthenticationMethodKind, AuthenticationState, BackendCatalog, BackendId, InferenceOptions,
+    ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -185,6 +185,7 @@ impl PhenixBackend {
             runtime: Arc::clone(&self.runtime),
             provider: Arc::clone(&self.provider),
             codex_provider: Arc::clone(&self.codex_provider),
+            credentials: self.credentials.clone(),
             model: Mutex::new(request.model),
             tools: Mutex::new(request.tools),
             history: Mutex::new(Vec::new()),
@@ -243,33 +244,40 @@ impl Backend for PhenixBackend {
                 selectable: true,
             });
         }
-        for provider in [
-            providers::OPENAI_API_PROVIDER,
-            providers::OPENCODE_ZEN_PROVIDER,
-            providers::OPENCODE_GO_PROVIDER,
-            providers::OPEN_ROUTER_PROVIDER,
-        ] {
-            if !auth_providers.contains(provider) {
+        for provider in &auth_providers {
+            if *provider == oauth::PROVIDER || !providers::is_api_key_auth_provider(provider) {
                 continue;
             }
             authentication_methods.push(AuthenticationMethodDescriptor {
-                id: AuthenticationMethodId::parse(provider)
+                id: AuthenticationMethodId::parse(*provider)
                     .map_err(|error| BackendError::Protocol(error.to_string()))?,
                 backend: backend.clone(),
-                provider: ProviderId::parse(provider)
+                provider: ProviderId::parse(*provider)
                     .map_err(|error| BackendError::Protocol(error.to_string()))?,
-                kind: AuthenticationMethodKind::Environment,
+                kind: AuthenticationMethodKind::ApiKey,
                 name: providers::environment_name(provider)
                     .expect("known API-key provider has a name")
                     .to_owned(),
                 description: providers::environment_description(provider).map(str::to_owned),
-                selectable: false,
+                selectable: true,
             });
         }
-        let any_authenticated = codex_authenticated
-            || auth_providers
-                .iter()
-                .any(|provider| providers::environment_authenticated(provider));
+        let mut any_authenticated = codex_authenticated;
+        for provider in &auth_providers {
+            if *provider == oauth::PROVIDER {
+                continue;
+            }
+            if self
+                .credentials
+                .api_key(provider)
+                .map_err(BackendError::Protocol)?
+                .is_some()
+                || providers::environment_authenticated(provider)
+            {
+                any_authenticated = true;
+                break;
+            }
+        }
         let authentication_state = if auth_providers.is_empty() {
             AuthenticationState::NotRequired
         } else if any_authenticated {
@@ -291,12 +299,40 @@ impl Backend for PhenixBackend {
     fn authenticate(&mut self, method: &AuthenticationMethodId) -> Result<(), BackendError> {
         if method.as_str() != oauth::PROVIDER {
             return Err(BackendError::Unsupported(format!(
-                "Phenix backend authentication method {method} is configured through its environment variable"
+                "Phenix backend authentication method {method} requires typed authentication input"
             )));
         }
         self.runtime
             .block_on(oauth::login(&self.credentials))
             .map_err(BackendError::Transport)
+    }
+
+    fn authenticate_with_input(
+        &mut self,
+        method: &AuthenticationMethodId,
+        input: Option<&AuthenticationInput>,
+    ) -> Result<(), BackendError> {
+        if method.as_str() == oauth::PROVIDER {
+            if input.is_some() {
+                return Err(BackendError::Protocol(
+                    "OpenAI Codex OAuth does not accept an API-key payload".to_owned(),
+                ));
+            }
+            return self.authenticate(method);
+        }
+        if !providers::is_api_key_auth_provider(method.as_str()) {
+            return Err(BackendError::Unsupported(format!(
+                "Phenix backend does not expose authentication method {method}"
+            )));
+        }
+        let Some(AuthenticationInput::ApiKey { secret }) = input else {
+            return Err(BackendError::Protocol(format!(
+                "Phenix authentication method {method} requires an API key"
+            )));
+        };
+        self.credentials
+            .save_api_key(method.as_str(), secret)
+            .map_err(BackendError::Protocol)
     }
 
     fn open_session(
@@ -333,6 +369,7 @@ struct PhenixSession {
     runtime: Arc<tokio::runtime::Runtime>,
     provider: Arc<ProviderClient>,
     codex_provider: Arc<ProviderClient>,
+    credentials: CredentialStore,
     model: Mutex<ModelTarget>,
     tools: Mutex<PreparedToolSurface>,
     history: Mutex<Vec<ChatMessage>>,
@@ -388,22 +425,25 @@ impl PhenixSession {
         } else {
             &self.provider
         };
-        let provider_target =
-            match providers::gateway_target(&selection.provider, &selection.model)? {
-                Some(target) => target,
-                None => {
-                    let provider_model = selection.genai_model()?;
-                    provider
-                        .resolve_service_target(provider_model)
-                        .await
-                        .map_err(|error| {
-                            BackendError::Transport(format!(
-                                "cannot resolve provider target for {}: {error}",
-                                selection.wire_value()
-                            ))
-                        })?
-                }
-            };
+        let provider_target = match providers::gateway_target(
+            &self.credentials,
+            &selection.provider,
+            &selection.model,
+        )? {
+            Some(target) => target,
+            None => {
+                let provider_model = selection.genai_model()?;
+                provider
+                    .resolve_service_target(provider_model)
+                    .await
+                    .map_err(|error| {
+                        BackendError::Transport(format!(
+                            "cannot resolve provider target for {}: {error}",
+                            selection.wire_value()
+                        ))
+                    })?
+            }
+        };
         let tool_definitions = tools
             .callables()
             .iter()

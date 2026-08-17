@@ -76,8 +76,26 @@ pub struct ModelDescriptor {
 #[serde(rename_all = "snake_case")]
 pub enum AuthenticationMethodKind {
     Agent,
+    ApiKey,
     Environment,
     Terminal,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AuthenticationInput {
+    ApiKey { secret: String },
+}
+
+impl fmt::Debug for AuthenticationInput {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ApiKey { .. } => f
+                .debug_struct("ApiKey")
+                .field("secret", &"<redacted>")
+                .finish(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

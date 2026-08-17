@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{
-    AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId, ExecutionId,
-    ModelTarget, SessionId,
+    AuthenticationInput, AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId,
+    ExecutionId, ModelTarget, SessionId,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -159,6 +159,19 @@ pub trait Backend: Send {
         Err(BackendError::Unsupported(
             "backend does not provide authentication actions".to_owned(),
         ))
+    }
+
+    fn authenticate_with_input(
+        &mut self,
+        method: &AuthenticationMethodId,
+        input: Option<&AuthenticationInput>,
+    ) -> Result<(), BackendError> {
+        if input.is_some() {
+            return Err(BackendError::Unsupported(
+                "backend authentication method does not accept structured input".to_owned(),
+            ));
+        }
+        self.authenticate(method)
     }
 
     /// Materialize an execution-local backend session. Backends without native

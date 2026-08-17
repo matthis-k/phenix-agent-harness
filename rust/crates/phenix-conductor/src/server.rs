@@ -7,8 +7,9 @@ use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
 };
 use phenix_core::{
-    AuthenticationMethodId, BackendCatalog, BackendId, CallableId, ExecutionEventKind, ExecutionId,
-    ExecutionKind, ExecutionState, ExecutionTarget, SessionId, SessionState,
+    AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget, SessionId,
+    SessionState,
 };
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
@@ -325,8 +326,9 @@ impl ConductorServer {
             Command::SelectAuthentication {
                 backend_id,
                 method_id,
+                input,
             } => self
-                .authenticate(&backend_id, &method_id)
+                .authenticate(&backend_id, &method_id, input.as_ref())
                 .map(|catalog| Reply::BackendCatalog { catalog })
                 .map_err(map_backend_error),
             Command::Submit { .. } => unreachable!("submit handled before dispatch"),
@@ -556,6 +558,7 @@ impl ConductorServer {
         &mut self,
         backend_id: &BackendId,
         method_id: &AuthenticationMethodId,
+        input: Option<&AuthenticationInput>,
     ) -> Result<BackendCatalog, BackendError> {
         let backend = self.backends.get(backend_id).ok_or_else(|| {
             BackendError::Unsupported(format!("backend is not registered: {backend_id}"))
@@ -563,7 +566,7 @@ impl ConductorServer {
         backend
             .lock()
             .map_err(|_| BackendError::Transport("backend lock poisoned".to_owned()))?
-            .authenticate(method_id)?;
+            .authenticate_with_input(method_id, input)?;
         self.refresh_backend(backend_id)
     }
 
