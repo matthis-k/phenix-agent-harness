@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod provider;
+
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId,
     ExecutionId, ModelTarget, SessionId,
