@@ -212,14 +212,10 @@ impl Backend for PhenixBackend {
             .iter()
             .filter_map(|selection| providers::canonical_auth_provider(&selection.provider))
             .collect::<BTreeSet<_>>();
-        let models = selectable_models(&self.credentials, &self.models)?
-            .into_iter()
-            .map(|selection| {
-                Ok(ModelDescriptor {
-                    target: selection.target()?,
-                    name: selection.wire_value(),
-                })
-            })
+        let models = self
+            .models
+            .iter()
+            .map(|selection| model_descriptor(&self.credentials, selection))
             .collect::<Result<Vec<_>, BackendError>>()?;
         let mut authentication_methods = Vec::new();
         if auth_providers.contains(oauth::PROVIDER) {
@@ -584,17 +580,15 @@ fn provider_has_valid_auth(
     Ok(false)
 }
 
-fn selectable_models<'a>(
+fn model_descriptor(
     credentials: &CredentialStore,
-    models: &'a [ModelSelection],
-) -> Result<Vec<&'a ModelSelection>, BackendError> {
-    let mut selectable = Vec::new();
-    for selection in models {
-        if provider_has_valid_auth(credentials, &selection.provider)? {
-            selectable.push(selection);
-        }
-    }
-    Ok(selectable)
+    selection: &ModelSelection,
+) -> Result<ModelDescriptor, BackendError> {
+    Ok(ModelDescriptor {
+        target: selection.target()?,
+        name: selection.wire_value(),
+        selectable: provider_has_valid_auth(credentials, &selection.provider)?,
+    })
 }
 
 fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {
@@ -647,7 +641,7 @@ mod tests {
     use phenix_backend::ToolProvision;
 
     #[test]
-    fn model_catalog_only_exposes_authenticated_providers() {
+    fn model_catalog_marks_provider_auth_selectability() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -662,19 +656,11 @@ mod tests {
         let credentials = CredentialStore {
             path: root.join("credentials.json"),
         };
-        let models = vec![
-            ModelSelection::parse("openai-codex/gpt-test").unwrap(),
-            ModelSelection::parse("ollama/local-test").unwrap(),
-        ];
+        let codex = ModelSelection::parse("openai-codex/gpt-test").unwrap();
+        let local = ModelSelection::parse("ollama/local-test").unwrap();
 
-        let visible = selectable_models(&credentials, &models).unwrap();
-        assert_eq!(
-            visible
-                .iter()
-                .map(|selection| selection.wire_value())
-                .collect::<Vec<_>>(),
-            vec!["ollama/local-test"]
-        );
+        assert!(!model_descriptor(&credentials, &codex).unwrap().selectable);
+        assert!(model_descriptor(&credentials, &local).unwrap().selectable);
 
         credentials
             .save_oauth(
@@ -688,14 +674,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let visible = selectable_models(&credentials, &models).unwrap();
-        assert_eq!(
-            visible
-                .iter()
-                .map(|selection| selection.wire_value())
-                .collect::<Vec<_>>(),
-            vec!["openai-codex/gpt-test", "ollama/local-test"]
-        );
+        assert!(model_descriptor(&credentials, &codex).unwrap().selectable);
         let _ = fs::remove_dir_all(root);
     }
 
