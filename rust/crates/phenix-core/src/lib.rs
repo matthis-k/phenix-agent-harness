@@ -70,6 +70,7 @@ pub struct ModelTarget {
 pub struct ModelDescriptor {
     pub target: ModelTarget,
     pub name: String,
+    pub selectable: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

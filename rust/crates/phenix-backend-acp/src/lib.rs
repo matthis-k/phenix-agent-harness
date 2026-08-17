@@ -985,6 +985,7 @@ fn model_descriptors(
                     inference: InferenceOptions::default(),
                 },
                 name,
+                selectable: true,
             })
         })
         .collect()

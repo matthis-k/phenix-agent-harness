@@ -35,6 +35,7 @@ impl Backend for MockBackend {
             models: vec![ModelDescriptor {
                 target: fixed_model(),
                 name: "Mock Model".to_owned(),
+                selectable: true,
             }],
             authentication_state: AuthenticationState::NotRequired,
             authentication_methods: Vec::new(),

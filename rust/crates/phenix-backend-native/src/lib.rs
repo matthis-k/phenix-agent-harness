@@ -4,7 +4,7 @@ mod credentials;
 mod oauth;
 mod providers;
 
-use credentials::CredentialStore;
+use credentials::{CredentialStore, StoredCredential};
 use futures::StreamExt;
 use genai::chat::{
     ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ReasoningEffort, Tool, ToolResponse,
@@ -207,29 +207,16 @@ impl Backend for PhenixBackend {
     fn catalog(&mut self) -> Result<BackendCatalog, BackendError> {
         let backend = BackendId::parse(BACKEND_ID)
             .map_err(|error| BackendError::Protocol(error.to_string()))?;
-        let models = self
-            .models
-            .iter()
-            .map(|selection| {
-                Ok(ModelDescriptor {
-                    target: selection.target()?,
-                    name: selection.wire_value(),
-                })
-            })
-            .collect::<Result<Vec<_>, BackendError>>()?;
         let auth_providers = self
             .models
             .iter()
             .filter_map(|selection| providers::canonical_auth_provider(&selection.provider))
             .collect::<BTreeSet<_>>();
-        let codex_authenticated = if auth_providers.contains(oauth::PROVIDER) {
-            self.credentials
-                .resolve(oauth::PROVIDER)
-                .map_err(BackendError::Protocol)?
-                .is_some()
-        } else {
-            false
-        };
+        let models = self
+            .models
+            .iter()
+            .map(|selection| model_descriptor(&self.credentials, selection))
+            .collect::<Result<Vec<_>, BackendError>>()?;
         let mut authentication_methods = Vec::new();
         if auth_providers.contains(oauth::PROVIDER) {
             authentication_methods.push(AuthenticationMethodDescriptor {
@@ -262,18 +249,9 @@ impl Backend for PhenixBackend {
                 selectable: true,
             });
         }
-        let mut any_authenticated = codex_authenticated;
+        let mut any_authenticated = false;
         for provider in &auth_providers {
-            if *provider == oauth::PROVIDER {
-                continue;
-            }
-            if self
-                .credentials
-                .api_key(provider)
-                .map_err(BackendError::Protocol)?
-                .is_some()
-                || providers::environment_authenticated(provider)
-            {
+            if provider_has_valid_auth(&self.credentials, provider)? {
                 any_authenticated = true;
                 break;
             }
@@ -577,6 +555,42 @@ impl BackendSession for PhenixSession {
     }
 }
 
+fn provider_has_valid_auth(
+    credentials: &CredentialStore,
+    provider: &str,
+) -> Result<bool, BackendError> {
+    let Some(provider) = providers::canonical_auth_provider(provider) else {
+        // Supported providers without an auth adapter, such as local Ollama,
+        // do not require credentials and remain selectable.
+        return Ok(true);
+    };
+    let stored = credentials
+        .resolve(provider)
+        .map_err(BackendError::Protocol)?;
+    if provider == oauth::PROVIDER {
+        return Ok(matches!(stored, Some(StoredCredential::OAuth { .. })));
+    }
+    if providers::is_api_key_auth_provider(provider) {
+        let stored_key = matches!(
+            stored,
+            Some(StoredCredential::ApiKey { ref secret }) if !secret.trim().is_empty()
+        );
+        return Ok(stored_key || providers::environment_authenticated(provider));
+    }
+    Ok(false)
+}
+
+fn model_descriptor(
+    credentials: &CredentialStore,
+    selection: &ModelSelection,
+) -> Result<ModelDescriptor, BackendError> {
+    Ok(ModelDescriptor {
+        target: selection.target()?,
+        name: selection.wire_value(),
+        selectable: provider_has_valid_auth(credentials, &selection.provider)?,
+    })
+}
+
 fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {
     let source = std::env::var("PHENIX_MODELS")
         .ok()
@@ -625,6 +639,44 @@ fn parse_reasoning_effort(value: Option<&str>) -> Result<Option<ReasoningEffort>
 mod tests {
     use super::*;
     use phenix_backend::ToolProvision;
+
+    #[test]
+    fn model_catalog_marks_provider_auth_selectability() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "phenix-model-auth-test-{}-{unique}",
+            std::process::id()
+        ));
+        let credentials = CredentialStore {
+            path: root.join("credentials.json"),
+        };
+        let codex = ModelSelection::parse("openai-codex/gpt-test").unwrap();
+        let local = ModelSelection::parse("ollama/local-test").unwrap();
+
+        assert!(!model_descriptor(&credentials, &codex).unwrap().selectable);
+        assert!(model_descriptor(&credentials, &local).unwrap().selectable);
+
+        credentials
+            .save_oauth(
+                oauth::PROVIDER,
+                StoredCredential::OAuth {
+                    access_token: "access".to_owned(),
+                    refresh_token: "refresh".to_owned(),
+                    id_token: "id".to_owned(),
+                    account_id: "account".to_owned(),
+                    expires_at: u64::MAX,
+                },
+            )
+            .unwrap();
+        assert!(model_descriptor(&credentials, &codex).unwrap().selectable);
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn model_identity_preserves_provider_and_model() {

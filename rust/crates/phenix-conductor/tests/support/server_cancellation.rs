@@ -58,6 +58,7 @@ impl Backend for BlockingBackend {
             models: vec![ModelDescriptor {
                 target: target(),
                 name: "Fixture Model".to_owned(),
+                selectable: true,
             }],
             authentication_state: AuthenticationState::NotRequired,
             authentication_methods: Vec::new(),
