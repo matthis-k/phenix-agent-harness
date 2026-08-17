@@ -115,7 +115,10 @@ impl PhenixBackend {
             move |_model| -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<Option<genai::resolver::AuthData>, genai::resolver::Error>,
+                            Output = Result<
+                                Option<genai::resolver::AuthData>,
+                                genai::resolver::Error,
+                            >,
                         > + Send,
                 >,
             > {
@@ -371,15 +374,17 @@ impl PhenixSession {
             let mut stream = provider
                 .exec_chat_stream(&provider_model, request, Some(&options))
                 .await
-                .map_err(|error| BackendError::Transport(format!("provider request failed: {error}")))?;
+                .map_err(|error| {
+                    BackendError::Transport(format!("provider request failed: {error}"))
+                })?;
             let mut captured = None;
             while let Some(event) = stream.stream.next().await {
                 if self.cancelled.load(Ordering::Acquire) {
                     return Ok(history);
                 }
-                match event
-                    .map_err(|error| BackendError::Transport(format!("provider stream failed: {error}")))?
-                {
+                match event.map_err(|error| {
+                    BackendError::Transport(format!("provider stream failed: {error}"))
+                })? {
                     ChatStreamEvent::Chunk(chunk) => {
                         host.emit(BackendEvent::ContentDelta(chunk.content))?;
                     }
