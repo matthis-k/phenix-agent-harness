@@ -64,18 +64,22 @@ _: {
           {
             nativeBuildInputs = [
               phenixAcpSmoke
-              phenixConductor
+              pkgs.gnugrep
               pkgs.jq
             ];
           }
           ''
             phenix-acp-smoke
 
+            conductor="${phenixConductor}/bin/phenix-conductor"
+            "$conductor" --help > "$TMPDIR/conductor-help.txt"
+            grep -F -- '--acp-command' "$TMPDIR/conductor-help.txt" >/dev/null
+
             export PHENIX_CREDENTIAL_FILE="$TMPDIR/credentials.json"
             export PHENIX_MODEL="openai-codex/product-smoke-model"
             response="$TMPDIR/initialize.jsonl"
             printf '%s\n' '{"id":1,"command":{"type":"initialize","after_sequence":null}}' |
-              phenix-conductor > "$response"
+              "$conductor" > "$response"
 
             jq -e '
               .type == "response"
