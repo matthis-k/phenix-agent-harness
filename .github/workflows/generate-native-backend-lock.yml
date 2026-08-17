@@ -1,0 +1,29 @@
+name: Generate native backend lock
+
+on:
+  push:
+    branches:
+      - agent/restore-default-phenix-backend
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Cargo.lock
+        run: |
+          rustup toolchain install stable --profile minimal
+          cd rust
+          cargo generate-lockfile
+      - name: Commit Cargo.lock
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/Cargo.lock
+          git diff --cached --quiet && exit 0
+          git commit -m 'chore: refresh Cargo.lock'
+          git push
