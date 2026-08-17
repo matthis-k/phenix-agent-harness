@@ -239,6 +239,7 @@ fn catalog_authentication_and_model_retarget_form_one_serialized_journey() {
             command: Command::SelectAuthentication {
                 backend_id: auth_backend_id(),
                 method_id: AuthenticationMethodId::parse("login").unwrap(),
+                input: None,
             },
         }),
         encode(ClientMessage {
@@ -340,6 +341,7 @@ fn invalid_authentication_method_returns_backend_protocol_error_and_does_not_aut
             command: Command::SelectAuthentication {
                 backend_id: auth_backend_id(),
                 method_id: AuthenticationMethodId::parse("missing").unwrap(),
+                input: None,
             },
         }),
     ]
