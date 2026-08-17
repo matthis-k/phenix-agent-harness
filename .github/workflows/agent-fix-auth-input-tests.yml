@@ -1,0 +1,45 @@
+name: "Agent fix auth input tests"
+
+on:
+  push:
+    branches:
+      - "agent/native-api-key-auth"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Patch auth command constructors
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("rust/crates/phenix-conductor/tests/support/protocol_public_journeys.rs")
+          text = p.read_text()
+          for method in ("login", "missing"):
+              old = f'''            command: Command::SelectAuthentication {{\n                backend_id: auth_backend_id(),\n                method_id: AuthenticationMethodId::parse("{method}").unwrap(),\n            }},'''
+              new = f'''            command: Command::SelectAuthentication {{\n                backend_id: auth_backend_id(),\n                method_id: AuthenticationMethodId::parse("{method}").unwrap(),\n                input: None,\n            }},'''
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one {method} constructor, found {count}")
+              text = text.replace(old, new, 1)
+          p.write_text(text)
+          PY
+          cargo fmt --all --manifest-path rust/Cargo.toml
+
+      - name: Commit fix
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/crates/phenix-conductor/tests/support/protocol_public_journeys.rs
+          git commit -m "test: provide empty authentication input"
+          git push
