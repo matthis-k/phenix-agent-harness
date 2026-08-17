@@ -2,6 +2,7 @@
 
 mod credentials;
 mod oauth;
+mod providers;
 
 use credentials::CredentialStore;
 use futures::StreamExt;
@@ -25,7 +26,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub const BACKEND_ID: &str = "phenix";
-const DEFAULT_MODEL: &str = "openai-codex/gpt-5.6";
 const MAX_TOOL_ROUNDS: usize = 32;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,15 +56,22 @@ impl ModelSelection {
         format!("{}/{}", self.provider, self.model)
     }
 
+    fn validate_provider(&self) -> Result<(), BackendError> {
+        if providers::is_gateway_provider(&self.provider) {
+            providers::validate_gateway_model(&self.provider, &self.model)
+        } else {
+            self.genai_model().map(|_| ())
+        }
+    }
+
     fn genai_model(&self) -> Result<String, BackendError> {
         let namespace = match self.provider.as_str() {
             "openai" => "openai",
-            "openai-codex" | "openai-responses" => "openai_resp",
+            "openai-api" | "openai-responses" | "openai-codex" => "openai_resp",
             "anthropic" => "anthropic",
             "gemini" | "google" => "gemini",
-            "opencode" | "opencode-go" => "opencode_go",
             "github-copilot" => "github_copilot",
-            "open-router" => "open_router",
+            "open-router" | "openrouter" => "open_router",
             "ollama" => "ollama",
             "ollama-cloud" => "ollama_cloud",
             "deepseek" => "deepseek",
@@ -161,7 +168,7 @@ impl PhenixBackend {
             provider: request.model.provider.as_str().to_owned(),
             model: request.model.model.as_str().to_owned(),
         }
-        .genai_model()?;
+        .validate_provider()?;
         if !request.tools.is_empty()
             && request.tools.presentation() != Some(ToolPresentation::Native)
         {
@@ -209,40 +216,74 @@ impl Backend for PhenixBackend {
                 })
             })
             .collect::<Result<Vec<_>, BackendError>>()?;
-        let uses_codex = self
+        let auth_providers = self
             .models
             .iter()
-            .any(|selection| selection.provider == oauth::PROVIDER);
-        let codex_authenticated = self
-            .credentials
-            .resolve(oauth::PROVIDER)
-            .map_err(BackendError::Protocol)?
-            .is_some();
-        let authentication_methods = if uses_codex {
-            vec![AuthenticationMethodDescriptor {
+            .filter_map(|selection| providers::canonical_auth_provider(&selection.provider))
+            .collect::<BTreeSet<_>>();
+        let codex_authenticated = if auth_providers.contains(oauth::PROVIDER) {
+            self.credentials
+                .resolve(oauth::PROVIDER)
+                .map_err(BackendError::Protocol)?
+                .is_some()
+        } else {
+            false
+        };
+        let mut authentication_methods = Vec::new();
+        if auth_providers.contains(oauth::PROVIDER) {
+            authentication_methods.push(AuthenticationMethodDescriptor {
                 id: AuthenticationMethodId::parse(oauth::PROVIDER)
                     .map_err(|error| BackendError::Protocol(error.to_string()))?,
                 backend: backend.clone(),
                 provider: ProviderId::parse(oauth::PROVIDER)
                     .map_err(|error| BackendError::Protocol(error.to_string()))?,
                 kind: AuthenticationMethodKind::Agent,
-                name: "OpenAI Codex (ChatGPT)".to_owned(),
+                name: "OpenAI Codex (ChatGPT OAuth)".to_owned(),
                 description: Some("Browser OAuth for ChatGPT subscription access".to_owned()),
                 selectable: true,
-            }]
+            });
+        }
+        for provider in [
+            providers::OPENAI_API_PROVIDER,
+            providers::OPENCODE_ZEN_PROVIDER,
+            providers::OPENCODE_GO_PROVIDER,
+            providers::OPEN_ROUTER_PROVIDER,
+        ] {
+            if !auth_providers.contains(provider) {
+                continue;
+            }
+            authentication_methods.push(AuthenticationMethodDescriptor {
+                id: AuthenticationMethodId::parse(provider)
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                backend: backend.clone(),
+                provider: ProviderId::parse(provider)
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                kind: AuthenticationMethodKind::Environment,
+                name: providers::environment_name(provider)
+                    .expect("known API-key provider has a name")
+                    .to_owned(),
+                description: providers::environment_description(provider).map(str::to_owned),
+                selectable: false,
+            });
+        }
+        let any_authenticated = codex_authenticated
+            || auth_providers
+                .iter()
+                .any(|provider| providers::environment_authenticated(provider));
+        let authentication_state = if auth_providers.is_empty() {
+            AuthenticationState::NotRequired
+        } else if any_authenticated {
+            // Authentication is provider-specific while the ACP catalog exposes one
+            // backend-wide state. Treat the backend as usable once any configured route
+            // has credentials, and let the selected provider report its own missing key.
+            AuthenticationState::Authenticated
         } else {
-            Vec::new()
+            AuthenticationState::Required
         };
         Ok(BackendCatalog {
             backend,
             models,
-            authentication_state: if uses_codex && !codex_authenticated {
-                AuthenticationState::Required
-            } else if authentication_methods.is_empty() {
-                AuthenticationState::NotRequired
-            } else {
-                AuthenticationState::Authenticated
-            },
+            authentication_state,
             authentication_methods,
         })
     }
@@ -250,7 +291,7 @@ impl Backend for PhenixBackend {
     fn authenticate(&mut self, method: &AuthenticationMethodId) -> Result<(), BackendError> {
         if method.as_str() != oauth::PROVIDER {
             return Err(BackendError::Unsupported(format!(
-                "Phenix backend does not expose authentication method {method}"
+                "Phenix backend authentication method {method} is configured through its environment variable"
             )));
         }
         self.runtime
@@ -342,11 +383,25 @@ impl PhenixSession {
             provider: model.provider.as_str().to_owned(),
             model: model.model.as_str().to_owned(),
         };
-        let provider_model = selection.genai_model()?;
         let provider = if selection.provider == oauth::PROVIDER {
             &self.codex_provider
         } else {
             &self.provider
+        };
+        let provider_target = match providers::gateway_target(&selection.provider, &selection.model)? {
+            Some(target) => target,
+            None => {
+                let provider_model = selection.genai_model()?;
+                provider
+                    .resolve_service_target(provider_model)
+                    .await
+                    .map_err(|error| {
+                        BackendError::Transport(format!(
+                            "cannot resolve provider target for {}: {error}",
+                            selection.wire_value()
+                        ))
+                    })?
+            }
         };
         let tool_definitions = tools
             .callables()
@@ -372,7 +427,7 @@ impl PhenixSession {
                 options = options.with_reasoning_effort(effort);
             }
             let mut stream = provider
-                .exec_chat_stream(&provider_model, request, Some(&options))
+                .exec_chat_stream(provider_target.clone(), request, Some(&options))
                 .await
                 .map_err(|error| {
                     BackendError::Transport(format!("provider request failed: {error}"))
@@ -486,7 +541,7 @@ fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .or_else(|| std::env::var("PHENIX_MODEL").ok())
-        .unwrap_or_else(|| DEFAULT_MODEL.to_owned());
+        .unwrap_or_else(|| providers::DEFAULT_MODELS.join(","));
     let mut seen = BTreeSet::new();
     let mut models = Vec::new();
     for value in source
@@ -495,6 +550,7 @@ fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {
         .filter(|value| !value.is_empty())
     {
         let selection = ModelSelection::parse(value)?;
+        selection.validate_provider()?;
         if seen.insert(selection.wire_value()) {
             models.push(selection);
         }
@@ -537,6 +593,15 @@ mod tests {
         assert_eq!(target.provider.as_str(), "openai-codex");
         assert_eq!(target.model.as_str(), "gpt-5.6-sol");
         assert_eq!(selection.genai_model().unwrap(), "openai_resp::gpt-5.6-sol");
+    }
+
+    #[test]
+    fn openai_api_uses_responses_adapter() {
+        let selection = ModelSelection::parse("openai-api/gpt-5.6-terra").unwrap();
+        assert_eq!(
+            selection.genai_model().unwrap(),
+            "openai_resp::gpt-5.6-terra"
+        );
     }
 
     #[test]
