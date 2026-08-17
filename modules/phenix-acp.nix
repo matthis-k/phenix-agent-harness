@@ -56,10 +56,38 @@ _: {
       phenixProductSmoke =
         pkgs.runCommand "phenix-product-smoke"
           {
-            nativeBuildInputs = [ phenixAcpSmoke ];
+            nativeBuildInputs = [
+              phenixAcpSmoke
+              phenixConductor
+              pkgs.jq
+            ];
           }
           ''
             phenix-acp-smoke
+
+            export PHENIX_CREDENTIAL_FILE="$TMPDIR/credentials.json"
+            export PHENIX_MODEL="openai-codex/product-smoke-model"
+            response="$TMPDIR/initialize.jsonl"
+            printf '%s\n' '{"id":1,"command":{"type":"initialize","after_sequence":null}}' |
+              phenix-conductor > "$response"
+
+            jq -e '
+              .type == "response"
+              and .id == 1
+              and .status == "ok"
+              and .result.type == "initialized"
+              and ([
+                .result.backends[]
+                | select(.backend == "phenix")
+                | .models[]
+                | select(
+                    .target.backend == "phenix"
+                    and .target.provider == "openai-codex"
+                    and .target.model == "product-smoke-model"
+                  )
+              ] | length == 1)
+            ' "$response" >/dev/null
+
             touch "$out"
           '';
     in
