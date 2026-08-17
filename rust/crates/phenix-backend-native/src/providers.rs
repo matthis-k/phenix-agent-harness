@@ -38,7 +38,10 @@ const OPENCODE_GO_API_KEY_ENV: &str = "OPENCODE_GO_API_KEY";
 const OPEN_ROUTER_API_KEY_ENV: &str = "OPEN_ROUTER_API_KEY";
 
 pub(crate) fn is_gateway_provider(provider: &str) -> bool {
-    matches!(provider, "opencode" | OPENCODE_ZEN_PROVIDER | OPENCODE_GO_PROVIDER)
+    matches!(
+        provider,
+        "opencode" | OPENCODE_ZEN_PROVIDER | OPENCODE_GO_PROVIDER
+    )
 }
 
 pub(crate) fn validate_gateway_model(provider: &str, model: &str) -> Result<(), BackendError> {
@@ -50,9 +53,7 @@ pub(crate) fn gateway_target(
     model: &str,
 ) -> Result<Option<ServiceTarget>, BackendError> {
     let (endpoint, auth_names) = match provider {
-        "opencode" | OPENCODE_ZEN_PROVIDER => {
-            (OPENCODE_ZEN_ENDPOINT, &[OPENCODE_API_KEY_ENV][..])
-        }
+        "opencode" | OPENCODE_ZEN_PROVIDER => (OPENCODE_ZEN_ENDPOINT, &[OPENCODE_API_KEY_ENV][..]),
         OPENCODE_GO_PROVIDER => (
             OPENCODE_GO_ENDPOINT,
             &[OPENCODE_API_KEY_ENV, OPENCODE_GO_API_KEY_ENV][..],
@@ -199,10 +200,19 @@ mod tests {
 
     #[test]
     fn opencode_zen_uses_each_current_wire_protocol() {
-        assert_eq!(zen_adapter("gpt-5.6-terra").unwrap(), AdapterKind::OpenAIResp);
-        assert_eq!(zen_adapter("claude-sonnet-5").unwrap(), AdapterKind::Anthropic);
+        assert_eq!(
+            zen_adapter("gpt-5.6-terra").unwrap(),
+            AdapterKind::OpenAIResp
+        );
+        assert_eq!(
+            zen_adapter("claude-sonnet-5").unwrap(),
+            AdapterKind::Anthropic
+        );
         assert_eq!(zen_adapter("qwen3.7-plus").unwrap(), AdapterKind::Anthropic);
-        assert_eq!(zen_adapter("deepseek-v4-flash").unwrap(), AdapterKind::OpenAI);
+        assert_eq!(
+            zen_adapter("deepseek-v4-flash").unwrap(),
+            AdapterKind::OpenAI
+        );
         assert!(matches!(
             zen_adapter("gemini-3.6-flash"),
             Err(BackendError::Unsupported(_))

@@ -388,21 +388,22 @@ impl PhenixSession {
         } else {
             &self.provider
         };
-        let provider_target = match providers::gateway_target(&selection.provider, &selection.model)? {
-            Some(target) => target,
-            None => {
-                let provider_model = selection.genai_model()?;
-                provider
-                    .resolve_service_target(provider_model)
-                    .await
-                    .map_err(|error| {
-                        BackendError::Transport(format!(
-                            "cannot resolve provider target for {}: {error}",
-                            selection.wire_value()
-                        ))
-                    })?
-            }
-        };
+        let provider_target =
+            match providers::gateway_target(&selection.provider, &selection.model)? {
+                Some(target) => target,
+                None => {
+                    let provider_model = selection.genai_model()?;
+                    provider
+                        .resolve_service_target(provider_model)
+                        .await
+                        .map_err(|error| {
+                            BackendError::Transport(format!(
+                                "cannot resolve provider target for {}: {error}",
+                                selection.wire_value()
+                            ))
+                        })?
+                }
+            };
         let tool_definitions = tools
             .callables()
             .iter()
