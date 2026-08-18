@@ -1,4 +1,4 @@
-use crate::{ConductorError, ConductorRuntime};
+use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{CallableDescriptor, RoutingProfile, WorkflowDefinition};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -97,8 +97,9 @@ impl From<ConductorError> for ConfigurationError {
 mod tests {
     use super::*;
     use phenix_core::{
-        BackendId, CallableId, CallableKind, CallablePolicy, CapabilitySet, InferenceOptions,
-        ModelId, ModelTarget, ProviderId, RoutingProfileId, WorkflowExecutionPolicy, WorkflowStep,
+        BackendId, CallableId, CallableKind, CallablePolicy, CapabilitySet, ExecutionTarget,
+        InferenceOptions, ModelId, ModelTarget, ProviderId, RoutingProfileId,
+        WorkflowExecutionPolicy, WorkflowStep,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -152,13 +153,23 @@ mod tests {
 
         assert_eq!(runtime.callable_descriptors().len(), 2);
         assert_eq!(
-            runtime.callable_descriptors().into_iter().map(|item| item.id).collect::<Vec<_>>(),
+            runtime
+                .callable_descriptors()
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
             vec![agent.id, CallableId::parse("workflow.fixture").unwrap()]
         );
-        assert_eq!(
-            runtime.routing_profiles(),
-            vec![RoutingProfileId::parse("router.fixture").unwrap()]
-        );
+
+        let session = runtime
+            .create_session(
+                None,
+                None,
+                ExecutionTarget::Routed(RoutingProfileId::parse("router.fixture").unwrap()),
+            )
+            .unwrap();
+        let execution = runtime.submit(&session.id, "route me").unwrap();
+        assert_eq!(runtime.resolve_invocation(&execution.id).unwrap().model, target("fallback"));
     }
 
     #[test]
