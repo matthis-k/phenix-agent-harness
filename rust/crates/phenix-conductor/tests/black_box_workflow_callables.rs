@@ -5,21 +5,25 @@ use phenix_backend::{
 use phenix_conductor::{ConductorRuntime, ConductorServer};
 use phenix_core::{
     BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionState, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
-    RoutingProfile, RoutingProfileId, WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
+    ModelTarget, ProviderId, RoutingProfile, RoutingProfileId, WorkflowDefinition,
+    WorkflowExecutionPolicy, WorkflowStep,
 };
 use phenix_protocol::{ClientMessage, Command, Reply, ResponsePayload, ServerMessage};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufReader, Cursor};
 use std::sync::{Arc, Mutex};
+
+const WORKFLOW_ID: &str = "workflow.inspect-and-verify";
+const WORKFLOW_OBJECTIVE: &str = "check the requested change";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ObservedTurn {
     model: String,
     prompt: String,
     tools: Vec<String>,
-    tool_output: String,
+    tool_outputs: Vec<String>,
 }
 
 #[derive(Clone, Default)]
@@ -70,11 +74,55 @@ impl BackendSession for WorkflowSession {
         request: BackendExecutionRequest,
         host: &mut dyn BackendHost,
     ) -> Result<(), BackendError> {
-        let result = host.invoke_tool(ToolInvocation {
-            callable: CallableId::parse("probe").unwrap(),
-            arguments_json: json!({ "model": self.model }).to_string(),
-        })?;
-        assert!(result.success);
+        let tool_outputs = if self.model == "root" {
+            assert_eq!(
+                self.tools,
+                vec![
+                    "probe",
+                    "phenix_workflow_list",
+                    "phenix_workflow_start",
+                ]
+            );
+
+            let listed = host.invoke_tool(ToolInvocation {
+                callable: CallableId::parse("phenix_workflow_list").unwrap(),
+                arguments_json: "{}".to_owned(),
+            })?;
+            assert!(listed.success);
+            let listed_json: Value = serde_json::from_str(&listed.output).unwrap();
+            let workflow_ids = listed_json["workflows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|workflow| workflow["id"].as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(workflow_ids, vec![WORKFLOW_ID]);
+
+            let started = host.invoke_tool(ToolInvocation {
+                callable: CallableId::parse("phenix_workflow_start").unwrap(),
+                arguments_json: json!({
+                    "workflow": WORKFLOW_ID,
+                    "objective": WORKFLOW_OBJECTIVE,
+                })
+                .to_string(),
+            })?;
+            assert!(started.success);
+            let started_json: Value = serde_json::from_str(&started.output).unwrap();
+            assert_eq!(started_json["callable"], WORKFLOW_ID);
+            assert_eq!(started_json["kind"], "workflow");
+            assert_eq!(started_json["state"], "running");
+
+            vec![listed.output, started.output]
+        } else {
+            assert_eq!(self.tools, vec!["probe"]);
+            let result = host.invoke_tool(ToolInvocation {
+                callable: CallableId::parse("probe").unwrap(),
+                arguments_json: json!({ "model": self.model }).to_string(),
+            })?;
+            assert!(result.success);
+            vec![result.output]
+        };
+
         host.emit(BackendEvent::ContentDelta(format!(
             "{} completed",
             self.model
@@ -83,7 +131,7 @@ impl BackendSession for WorkflowSession {
             model: self.model.clone(),
             prompt: request.prompt,
             tools: self.tools.clone(),
-            tool_output: result.output,
+            tool_outputs,
         });
         Ok(())
     }
@@ -124,7 +172,7 @@ fn request_lines(messages: &[ClientMessage]) -> Vec<u8> {
 }
 
 #[test]
-fn workflow_catalog_and_execution_use_the_real_server_and_agent_tool_path() {
+fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
     let recorder = WorkflowRecorder::default();
     let mut runtime = ConductorRuntime::new();
     runtime
@@ -142,7 +190,7 @@ fn workflow_catalog_and_execution_use_the_real_server_and_agent_tool_path() {
         .register_agent(descriptor(verifier.as_str(), CallableKind::Agent))
         .unwrap();
 
-    let workflow = CallableId::parse("workflow.inspect-and-verify").unwrap();
+    let workflow = CallableId::parse(WORKFLOW_ID).unwrap();
     runtime
         .register_workflow(WorkflowDefinition {
             descriptor: descriptor(workflow.as_str(), CallableKind::Workflow),
@@ -185,10 +233,6 @@ fn workflow_catalog_and_execution_use_the_real_server_and_agent_tool_path() {
     let input = request_lines(&[
         ClientMessage {
             id: 1,
-            command: Command::GetCallableCatalog,
-        },
-        ClientMessage {
-            id: 2,
             command: Command::CreateSession {
                 parent_session: None,
                 name: Some("workflow-test".to_owned()),
@@ -196,11 +240,11 @@ fn workflow_catalog_and_execution_use_the_real_server_and_agent_tool_path() {
             },
         },
         ClientMessage {
-            id: 3,
-            command: Command::StartCallable {
+            id: 2,
+            command: Command::Submit {
                 session_id: phenix_core::SessionId::parse("session-1").unwrap(),
-                callable: workflow.clone(),
-                objective: "check the requested change".to_owned(),
+                text: "What can I call? Use the appropriate workflow to check the requested change."
+                    .to_owned(),
             },
         },
     ]);
@@ -214,85 +258,81 @@ fn workflow_catalog_and_execution_use_the_real_server_and_agent_tool_path() {
         .lines()
         .map(|line| serde_json::from_str::<ServerMessage>(line).unwrap())
         .collect::<Vec<_>>();
-
-    let catalog = messages
-        .iter()
-        .find_map(|message| match message {
-            ServerMessage::Response {
-                id: 1,
-                response:
-                    ResponsePayload::Ok {
-                        result: Reply::CallableCatalog { callables },
-                    },
-            } => Some(callables),
-            _ => None,
-        })
-        .expect("callable catalog response");
-    let callable_kinds = catalog
-        .iter()
-        .map(|descriptor| (descriptor.id.as_str(), descriptor.kind.clone()))
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(callable_kinds.get("probe"), Some(&CallableKind::Tool));
-    assert_eq!(
-        callable_kinds.get("agent.scout"),
-        Some(&CallableKind::Agent)
-    );
-    assert_eq!(
-        callable_kinds.get("agent.verifier"),
-        Some(&CallableKind::Agent)
-    );
-    assert_eq!(
-        callable_kinds.get("workflow.inspect-and-verify"),
-        Some(&CallableKind::Workflow)
-    );
-
     assert!(messages.iter().any(|message| {
         matches!(
             message,
             ServerMessage::Response {
-                id: 3,
+                id: 2,
                 response: ResponsePayload::Ok {
                     result: Reply::Execution { execution },
                 },
-            } if execution.callable.as_ref() == Some(&workflow)
-                && execution.kind == phenix_core::ExecutionKind::Workflow
+            } if execution.kind == ExecutionKind::Root && execution.callable.is_none()
         )
     }));
 
     let turns = recorder.turns.lock().unwrap().clone();
-    assert_eq!(turns.len(), 2);
-    assert_eq!(turns[0].model, "scout");
-    assert!(turns[0].prompt.contains("inspect the repository"));
-    assert!(turns[0].prompt.contains("check the requested change"));
-    assert_eq!(turns[0].tools, vec!["probe"]);
-    assert_eq!(turns[0].tool_output, r#"{"model":"scout"}"#);
+    assert_eq!(turns.len(), 3);
+    assert_eq!(turns[0].model, "root");
+    assert!(turns[0].prompt.contains("What can I call?"));
+    assert_eq!(turns[0].tool_outputs.len(), 2);
 
-    assert_eq!(turns[1].model, "verifier");
-    assert!(turns[1].prompt.contains("verify the change"));
-    assert!(turns[1].prompt.contains("check the requested change"));
+    assert_eq!(turns[1].model, "scout");
+    assert!(turns[1].prompt.contains("inspect the repository"));
+    assert!(turns[1].prompt.contains(WORKFLOW_OBJECTIVE));
     assert_eq!(turns[1].tools, vec!["probe"]);
-    assert_eq!(turns[1].tool_output, r#"{"model":"verifier"}"#);
+    assert_eq!(turns[1].tool_outputs, vec![r#"{"model":"scout"}"#]);
 
-    let snapshot = server.runtime().snapshot();
+    assert_eq!(turns[2].model, "verifier");
+    assert!(turns[2].prompt.contains("verify the change"));
+    assert!(turns[2].prompt.contains(WORKFLOW_OBJECTIVE));
+    assert_eq!(turns[2].tools, vec!["probe"]);
+    assert_eq!(
+        turns[2].tool_outputs,
+        vec![r#"{"model":"verifier"}"#]
+    );
+
+    let runtime = server.runtime();
+    let snapshot = runtime.snapshot();
+    let root = snapshot
+        .executions
+        .iter()
+        .find(|execution| execution.kind == ExecutionKind::Root)
+        .expect("root execution exists");
+    assert_eq!(root.state, ExecutionState::Completed);
+
     let workflow_execution = snapshot
         .executions
         .iter()
         .find(|execution| execution.callable.as_ref() == Some(&workflow))
         .expect("workflow execution exists");
+    assert_eq!(workflow_execution.parent_execution.as_ref(), Some(&root.id));
     assert_eq!(workflow_execution.state, ExecutionState::Completed);
-    assert_eq!(
-        snapshot
-            .executions
-            .iter()
-            .filter(|execution| {
-                execution.parent_execution.as_ref() == Some(&workflow_execution.id)
-            })
-            .count(),
-        2
-    );
-    assert!(snapshot
+
+    let children = snapshot
         .executions
         .iter()
-        .filter(|execution| { execution.parent_execution.as_ref() == Some(&workflow_execution.id) })
+        .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow_execution.id))
+        .collect::<Vec<_>>();
+    assert_eq!(children.len(), 2);
+    assert!(children
+        .iter()
         .all(|execution| execution.state == ExecutionState::Completed));
+
+    let tool_calls = runtime
+        .events_since(0)
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            ExecutionEventKind::ToolCallStarted { callable, .. } => Some(callable.to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tool_calls,
+        vec![
+            "phenix_workflow_list",
+            "phenix_workflow_start",
+            "probe",
+            "probe",
+        ]
+    );
 }
