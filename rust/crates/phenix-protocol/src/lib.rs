@@ -2,8 +2,8 @@
 
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor,
-    CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, SessionId,
-    SessionSummary,
+    CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, RoutingProfileId,
+    SessionId, SessionSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,7 @@ pub enum Command {
     },
     GetSnapshot,
     GetCallableCatalog,
+    GetRoutingCatalog,
     CreateSession {
         parent_session: Option<SessionId>,
         name: Option<String>,
@@ -85,6 +86,9 @@ pub enum Reply {
     },
     CallableCatalog {
         callables: Vec<CallableDescriptor>,
+    },
+    RoutingCatalog {
+        profiles: Vec<RoutingProfileId>,
     },
     Session {
         session: SessionSummary,
@@ -199,6 +203,29 @@ mod tests {
         let value = serde_json::to_value(message).expect("serialize callable catalog request");
         assert_eq!(value["command"]["type"], "get_callable_catalog");
         assert_eq!(value["command"].as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn routing_catalog_wire_shape_is_conductor_owned() {
+        let request = ClientMessage {
+            id: 11,
+            command: Command::GetRoutingCatalog,
+        };
+        let value = serde_json::to_value(request).expect("serialize routing catalog request");
+        assert_eq!(value["command"]["type"], "get_routing_catalog");
+        assert_eq!(value["command"].as_object().unwrap().len(), 1);
+
+        let reply = ServerMessage::Response {
+            id: 11,
+            response: ResponsePayload::Ok {
+                result: Reply::RoutingCatalog {
+                    profiles: vec![RoutingProfileId::parse("router.mixed").unwrap()],
+                },
+            },
+        };
+        let value = serde_json::to_value(reply).expect("serialize routing catalog reply");
+        assert_eq!(value["result"]["type"], "routing_catalog");
+        assert_eq!(value["result"]["profiles"][0], "router.mixed");
     }
 
     #[test]
