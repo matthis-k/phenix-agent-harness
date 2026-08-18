@@ -34,6 +34,7 @@ impl RoutingRegistry {
         Ok(())
     }
 
+    /// Returns the configured profile identifiers in stable lexical order.
     #[must_use]
     pub fn profiles(&self) -> Vec<RoutingProfileId> {
         self.profiles.keys().cloned().collect()
