@@ -181,12 +181,18 @@ pub enum OrchestrationPolicy {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentNode {
     pub callable: CallableId,
     pub objective: Option<String>,
 }
 
+/// Canonical parsed orchestration definition.
+///
+/// Source adapters such as Markdown, Lua values, JSON, or RON produce this type
+/// directly. There is no intermediate workflow-definition domain model.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OrchestrationDefinition {
     pub descriptor: CallableDescriptor,
     pub policy: OrchestrationPolicy,
@@ -296,6 +302,18 @@ pub enum ExecutionEventKind {
 mod tests {
     use super::*;
 
+    fn orchestration_descriptor() -> CallableDescriptor {
+        CallableDescriptor {
+            id: CallableId::parse("workflow.example").unwrap(),
+            kind: CallableKind::Orchestration,
+            description: "Example orchestration".to_owned(),
+            input_schema: serde_json::json!({"type": "string"}),
+            output_schema: serde_json::json!({"type": "string"}),
+            capabilities: CapabilitySet::default(),
+            policy: CallablePolicy::default(),
+        }
+    }
+
     #[test]
     fn target_is_one_mode_only() {
         let target = ExecutionTarget::Routed(RoutingProfileId::parse("default").unwrap());
@@ -316,5 +334,40 @@ mod tests {
         });
         let session: SessionSummary = serde_json::from_value(value).unwrap();
         assert_eq!(session.state, SessionState::Active);
+    }
+
+    #[test]
+    fn orchestration_definition_is_the_direct_source_shape() {
+        let definition = OrchestrationDefinition {
+            descriptor: orchestration_descriptor(),
+            policy: OrchestrationPolicy::Sequential,
+            nodes: vec![AgentNode {
+                callable: CallableId::parse("agent.scout").unwrap(),
+                objective: Some("Inspect the repository".to_owned()),
+            }],
+        };
+
+        let value = serde_json::to_value(&definition).unwrap();
+        assert_eq!(value["descriptor"]["kind"], "workflow");
+        assert!(value.get("nodes").is_some());
+        assert!(value.get("steps").is_none());
+        assert_eq!(
+            serde_json::from_value::<OrchestrationDefinition>(value).unwrap(),
+            definition
+        );
+    }
+
+    #[test]
+    fn orchestration_definition_rejects_legacy_step_shape() {
+        let value = serde_json::json!({
+            "descriptor": orchestration_descriptor(),
+            "policy": "sequential",
+            "steps": [{
+                "callable": "agent.scout",
+                "objective": "Inspect the repository"
+            }]
+        });
+
+        assert!(serde_json::from_value::<OrchestrationDefinition>(value).is_err());
     }
 }
