@@ -29,6 +29,8 @@ _: {
           test -n "$conductor_binary"
           cp "$conductor_binary" "$out/libexec/phenix-conductor"
           makeWrapper "$out/libexec/phenix-conductor" "$out/bin/phenix-conductor" \
+            --set PHENIX_BASH "${pkgs.bash}/bin/bash" \
+            --set PHENIX_GREP "${pkgs.gnugrep}/bin/grep" \
             --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
             --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           runHook postInstall
@@ -81,6 +83,7 @@ _: {
             {
               printf '%s\n' '{"id":1,"command":{"type":"initialize","after_sequence":null}}'
               printf '%s\n' '{"id":2,"command":{"type":"create_session","parent_session":null,"name":"product smoke","target":{"kind":"fixed","value":{"backend":"phenix","provider":"openai-codex","model":"product-smoke-model","inference":{}}}}}'
+              printf '%s\n' '{"id":3,"command":{"type":"get_callable_catalog"}}'
             } | "$conductor" > "$response"
 
             jq -s -e '
@@ -118,6 +121,18 @@ _: {
                     and .default_target.value.inference.effort == null
                   )
               ] | length == 1)
+              and ([
+                .[]
+                | select(
+                    .type == "response"
+                    and .id == 3
+                    and .status == "ok"
+                    and .result.type == "callable_catalog"
+                  )
+                | .result.callables[]
+                | select(.kind == "tool" and (.id == "bash" or .id == "grep" or .id == "read" or .id == "write"))
+                | .id
+              ] | sort == ["bash", "grep", "read", "write"])
             ' "$response" >/dev/null
 
             touch "$out"

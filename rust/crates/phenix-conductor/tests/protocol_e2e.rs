@@ -5,9 +5,9 @@ use phenix_conductor::{
     InvocationGuard, InvocationPolicyContext, InvocationSubject, PolicyDenial,
 };
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionState, ExecutionTarget, WorkflowDefinition,
-    WorkflowExecutionPolicy, WorkflowStep,
+    AgentNode, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionEventKind, ExecutionState, ExecutionTarget, OrchestrationDefinition,
+    OrchestrationPolicy,
 };
 use phenix_protocol::{Command, Reply};
 use serde_json::json;
@@ -55,10 +55,10 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
                 .register_agent(descriptor("agent.catalog", CallableKind::Agent, false))
                 .unwrap();
             runtime
-                .register_workflow(WorkflowDefinition {
-                    descriptor: descriptor("workflow.catalog", CallableKind::Workflow, false),
-                    policy: WorkflowExecutionPolicy::Sequential,
-                    steps: vec![WorkflowStep {
+                .register_orchestration(OrchestrationDefinition {
+                    descriptor: descriptor("workflow.catalog", CallableKind::Orchestration, false),
+                    policy: OrchestrationPolicy::Sequential,
+                    nodes: vec![AgentNode {
                         callable: CallableId::parse("agent.catalog").unwrap(),
                         objective: Some("catalog step".to_owned()),
                     }],
@@ -86,7 +86,8 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
         descriptor.id.as_str() == "agent.catalog" && descriptor.kind == CallableKind::Agent
     }));
     assert!(callables.iter().any(|descriptor| {
-        descriptor.id.as_str() == "workflow.catalog" && descriptor.kind == CallableKind::Workflow
+        descriptor.id.as_str() == "workflow.catalog"
+            && descriptor.kind == CallableKind::Orchestration
     }));
     assert_eq!(run.backend.opened(), 0);
     assert_eq!(run.backend.executed(), 0);
@@ -406,15 +407,15 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
                 .register_agent(descriptor("agent.second", CallableKind::Agent, false))
                 .unwrap();
             runtime
-                .register_workflow(WorkflowDefinition {
-                    descriptor: descriptor("workflow.two-step", CallableKind::Workflow, false),
-                    policy: WorkflowExecutionPolicy::Sequential,
-                    steps: vec![
-                        WorkflowStep {
+                .register_orchestration(OrchestrationDefinition {
+                    descriptor: descriptor("workflow.two-step", CallableKind::Orchestration, false),
+                    policy: OrchestrationPolicy::Sequential,
+                    nodes: vec![
+                        AgentNode {
                             callable: CallableId::parse("agent.first").unwrap(),
                             objective: Some("first step".to_owned()),
                         },
-                        WorkflowStep {
+                        AgentNode {
                             callable: CallableId::parse("agent.second").unwrap(),
                             objective: Some("second step".to_owned()),
                         },
@@ -657,10 +658,10 @@ fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
         .register_agent(descriptor("guarded-step", CallableKind::Agent, true))
         .unwrap();
     runtime
-        .register_workflow(WorkflowDefinition {
-            descriptor: descriptor("workflow", CallableKind::Workflow, false),
-            policy: WorkflowExecutionPolicy::Sequential,
-            steps: vec![WorkflowStep {
+        .register_orchestration(OrchestrationDefinition {
+            descriptor: descriptor("workflow", CallableKind::Orchestration, false),
+            policy: OrchestrationPolicy::Sequential,
+            nodes: vec![AgentNode {
                 callable: CallableId::parse("guarded-step").unwrap(),
                 objective: None,
             }],
@@ -676,7 +677,7 @@ fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
     let root = runtime.submit(&session.id, "root").unwrap();
 
     let error = runtime
-        .start_workflow(
+        .start_orchestration(
             &root.id,
             &CallableId::parse("workflow").unwrap(),
             "objective",

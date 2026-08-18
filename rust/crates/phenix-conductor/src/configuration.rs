@@ -1,5 +1,5 @@
 use phenix_conductor::{ConductorError, ConductorRuntime};
-use phenix_core::{CallableDescriptor, RoutingProfile, WorkflowDefinition};
+use phenix_core::{CallableDescriptor, OrchestrationDefinition, RoutingProfile};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -18,7 +18,7 @@ pub struct RuntimeConfiguration {
     #[serde(default)]
     pub agents: Vec<CallableDescriptor>,
     #[serde(default)]
-    pub workflows: Vec<WorkflowDefinition>,
+    pub orchestrations: Vec<OrchestrationDefinition>,
     #[serde(default)]
     pub routing_profiles: Vec<RoutingProfile>,
 }
@@ -40,8 +40,8 @@ impl RuntimeConfiguration {
         for agent in self.agents {
             runtime.register_agent(agent)?;
         }
-        for workflow in self.workflows {
-            runtime.register_workflow(workflow)?;
+        for orchestration in self.orchestrations {
+            runtime.register_orchestration(orchestration)?;
         }
         for profile in self.routing_profiles {
             runtime.register_routing_profile(profile)?;
@@ -105,9 +105,9 @@ impl From<ConductorError> for ConfigurationError {
 mod tests {
     use super::*;
     use phenix_core::{
-        BackendId, CallableId, CallableKind, CallablePolicy, CapabilitySet, ExecutionTarget,
-        InferenceOptions, ModelId, ModelTarget, ProviderId, RoutingProfileId,
-        WorkflowExecutionPolicy, WorkflowStep,
+        AgentNode, BackendId, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+        ExecutionTarget, InferenceOptions, ModelId, ModelTarget, OrchestrationPolicy, ProviderId,
+        RoutingProfileId,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -136,10 +136,10 @@ mod tests {
     #[test]
     fn application_configuration_rebinds_agents_workflows_and_routes() {
         let agent = descriptor("agent.fixture", CallableKind::Agent);
-        let workflow = WorkflowDefinition {
-            descriptor: descriptor("workflow.fixture", CallableKind::Workflow),
-            policy: WorkflowExecutionPolicy::Sequential,
-            steps: vec![WorkflowStep {
+        let workflow = OrchestrationDefinition {
+            descriptor: descriptor("workflow.fixture", CallableKind::Orchestration),
+            policy: OrchestrationPolicy::Sequential,
+            nodes: vec![AgentNode {
                 callable: agent.id.clone(),
                 objective: Some("inspect the objective".to_owned()),
             }],
@@ -151,7 +151,7 @@ mod tests {
         };
         let encoded = serde_json::to_string(&RuntimeConfiguration {
             agents: vec![agent.clone()],
-            workflows: vec![workflow],
+            orchestrations: vec![workflow],
             routing_profiles: vec![route],
         })
         .unwrap();
@@ -189,10 +189,10 @@ mod tests {
         let workflow_id = CallableId::parse("workflow.implement").unwrap();
         let configuration = RuntimeConfiguration {
             agents: vec![agent.clone()],
-            workflows: vec![WorkflowDefinition {
-                descriptor: descriptor(workflow_id.as_str(), CallableKind::Workflow),
-                policy: WorkflowExecutionPolicy::Sequential,
-                steps: vec![WorkflowStep {
+            orchestrations: vec![OrchestrationDefinition {
+                descriptor: descriptor(workflow_id.as_str(), CallableKind::Orchestration),
+                policy: OrchestrationPolicy::Sequential,
+                nodes: vec![AgentNode {
                     callable: agent.id,
                     objective: Some("Implement the bounded change.".to_owned()),
                 }],
@@ -207,7 +207,7 @@ mod tests {
             .unwrap();
         let root = runtime.submit(&session.id, "root").unwrap();
         let workflow = runtime
-            .start_workflow(&root.id, &workflow_id, "Fix routing selection")
+            .start_orchestration(&root.id, &workflow_id, "Fix routing selection")
             .unwrap();
         let child = runtime
             .snapshot()

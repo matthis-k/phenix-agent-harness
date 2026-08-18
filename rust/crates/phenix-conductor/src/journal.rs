@@ -14,8 +14,14 @@ pub const JOURNAL_FORMAT_VERSION: u64 = 1;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JournalExecutionPayload {
-    Invocation { input: String },
-    Workflow { objective: String, next_step: usize },
+    Invocation {
+        input: String,
+    },
+    #[serde(rename = "workflow")]
+    Orchestration {
+        objective: String,
+        next_node: usize,
+    },
 }
 
 impl From<&ExecutionPayload> for JournalExecutionPayload {
@@ -24,12 +30,12 @@ impl From<&ExecutionPayload> for JournalExecutionPayload {
             ExecutionPayload::Invocation { input } => Self::Invocation {
                 input: input.clone(),
             },
-            ExecutionPayload::Workflow {
+            ExecutionPayload::Orchestration {
                 objective,
-                next_step,
-            } => Self::Workflow {
+                next_node,
+            } => Self::Orchestration {
                 objective: objective.clone(),
-                next_step: *next_step,
+                next_node: *next_node,
             },
         }
     }
@@ -39,12 +45,12 @@ impl From<JournalExecutionPayload> for ExecutionPayload {
     fn from(value: JournalExecutionPayload) -> Self {
         match value {
             JournalExecutionPayload::Invocation { input } => Self::Invocation { input },
-            JournalExecutionPayload::Workflow {
+            JournalExecutionPayload::Orchestration {
                 objective,
-                next_step,
-            } => Self::Workflow {
+                next_node,
+            } => Self::Orchestration {
                 objective,
-                next_step,
+                next_node,
             },
         }
     }
@@ -82,9 +88,10 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         state: ExecutionState,
     },
-    WorkflowAdvanced {
+    #[serde(rename = "workflow_advanced")]
+    OrchestrationAdvanced {
         execution_id: ExecutionId,
-        next_step: usize,
+        next_node: usize,
     },
     InvocationResolved {
         execution_id: ExecutionId,
@@ -425,29 +432,29 @@ pub(crate) fn apply_domain_event(
             }
             execution.summary.state = next.clone();
         }
-        DomainEvent::WorkflowAdvanced {
+        DomainEvent::OrchestrationAdvanced {
             execution_id,
-            next_step,
+            next_node,
         } => {
             let execution = state.executions.get_mut(execution_id).ok_or_else(|| {
                 JournalError::InvalidEvent(format!(
                     "workflow advance references unknown execution {execution_id}"
                 ))
             })?;
-            let ExecutionPayload::Workflow {
-                next_step: current, ..
+            let ExecutionPayload::Orchestration {
+                next_node: current, ..
             } = &mut execution.payload
             else {
                 return Err(JournalError::InvalidEvent(format!(
                     "workflow advance references non-workflow execution {execution_id}"
                 )));
             };
-            if *next_step != *current + 1 {
+            if *next_node != *current + 1 {
                 return Err(JournalError::InvalidEvent(format!(
-                    "workflow {execution_id} advanced from {current} to {next_step}"
+                    "workflow {execution_id} advanced from {current} to {next_node}"
                 )));
             }
-            *current = *next_step;
+            *current = *next_node;
         }
         DomainEvent::InvocationResolved {
             execution_id,

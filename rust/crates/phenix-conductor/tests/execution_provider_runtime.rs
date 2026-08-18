@@ -4,9 +4,10 @@ use phenix_conductor::{
     InvocationGuard, InvocationPolicyContext, InvocationSubject, PolicyDenial,
 };
 use phenix_core::{
-    BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
-    ModelTarget, ProviderId, WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
+    AgentNode, BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy,
+    CapabilitySet, ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget,
+    InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition, OrchestrationPolicy,
+    ProviderId,
 };
 use serde_json::json;
 use std::sync::{
@@ -209,10 +210,10 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         )
         .unwrap();
     runtime
-        .register_workflow(WorkflowDefinition {
-            descriptor: descriptor("workflow.native", CallableKind::Workflow),
-            policy: WorkflowExecutionPolicy::Sequential,
-            steps: vec![WorkflowStep {
+        .register_orchestration(OrchestrationDefinition {
+            descriptor: descriptor("workflow.native", CallableKind::Orchestration),
+            policy: OrchestrationPolicy::Sequential,
+            nodes: vec![AgentNode {
                 callable: step,
                 objective: Some("provider step".to_owned()),
             }],
@@ -220,7 +221,7 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         .unwrap();
     let root = root(&mut runtime);
     let workflow = runtime
-        .start_workflow(
+        .start_orchestration(
             &root.id,
             &CallableId::parse("workflow.native").unwrap(),
             "workflow objective",
@@ -263,10 +264,10 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         )
         .unwrap();
     runtime
-        .register_workflow(WorkflowDefinition {
-            descriptor: descriptor("workflow.native", CallableKind::Workflow),
-            policy: WorkflowExecutionPolicy::Sequential,
-            steps: vec![WorkflowStep {
+        .register_orchestration(OrchestrationDefinition {
+            descriptor: descriptor("workflow.native", CallableKind::Orchestration),
+            policy: OrchestrationPolicy::Sequential,
+            nodes: vec![AgentNode {
                 callable: CallableId::parse("agent.native").unwrap(),
                 objective: None,
             }],
@@ -274,7 +275,7 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         .unwrap();
     let root = root(&mut runtime);
     let workflow = runtime
-        .start_workflow(
+        .start_orchestration(
             &root.id,
             &CallableId::parse("workflow.native").unwrap(),
             "workflow objective",

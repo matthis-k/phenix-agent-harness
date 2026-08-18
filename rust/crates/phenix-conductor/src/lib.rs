@@ -32,8 +32,8 @@ use phenix_backend::{
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, ConfigRevisionId, ExecutionEvent,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
-    ExecutionTarget, ModelTarget, RoutingProfile, SessionId, SessionState, SessionSummary,
-    ToolCallId, WorkflowDefinition,
+    ExecutionTarget, ModelTarget, OrchestrationDefinition, RoutingProfile, SessionId, SessionState,
+    SessionSummary, ToolCallId,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -129,7 +129,7 @@ struct SessionRecord {
 #[derive(Clone, Debug)]
 enum ExecutionPayload {
     Invocation { input: String },
-    Workflow { objective: String, next_step: usize },
+    Orchestration { objective: String, next_node: usize },
 }
 
 #[derive(Clone, Debug)]
@@ -308,11 +308,11 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    pub fn register_workflow(
+    pub fn register_orchestration(
         &mut self,
-        definition: WorkflowDefinition,
+        definition: OrchestrationDefinition,
     ) -> Result<(), ConductorError> {
-        self.callables.register_workflow(definition)?;
+        self.callables.register_orchestration(definition)?;
         Ok(())
     }
 
@@ -484,38 +484,34 @@ impl ConductorRuntime {
         )
     }
 
-    pub fn start_workflow(
+    pub fn start_orchestration(
         &mut self,
         parent_id: &ExecutionId,
         callable: &CallableId,
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let definition = self.callables.workflow(callable)?.clone();
+        let definition = self.callables.orchestration(callable)?.clone();
         self.check_callable_policy(
             parent_id,
             &definition.descriptor,
-            CallableOperation::StartWorkflow,
+            CallableOperation::StartOrchestration,
         )?;
-        for step in &definition.steps {
+        for step in &definition.nodes {
             let descriptor = self.callables.descriptor(&step.callable)?.clone();
             self.callables.execution_provider(&step.callable)?;
-            self.check_callable_policy(
-                parent_id,
-                &descriptor,
-                CallableOperation::StartWorkflowStep,
-            )?;
+            self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgentNode)?;
         }
         let summary = self.create_child(
             parent_id,
-            ExecutionKind::Workflow,
+            ExecutionKind::Orchestration,
             callable.clone(),
-            ExecutionPayload::Workflow {
+            ExecutionPayload::Orchestration {
                 objective: objective.into(),
-                next_step: 0,
+                next_node: 0,
             },
         )?;
         self.set_state(&summary.id, ExecutionState::Running)?;
-        self.advance_workflow(&summary.id)?;
+        self.advance_orchestration(&summary.id)?;
         Ok(self
             .executions
             .get(&summary.id)
@@ -592,7 +588,7 @@ impl ConductorRuntime {
                 .executions
                 .get(execution_id)
                 .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-            if execution.summary.kind == ExecutionKind::Workflow {
+            if execution.summary.kind == ExecutionKind::Orchestration {
                 return Err(ConductorError::NonModelExecution(execution_id.clone()));
             }
             let ExecutionPayload::Invocation { input } = &execution.payload else {
@@ -858,17 +854,18 @@ impl ConductorRuntime {
                         state,
                     },
                 )?;
-                self.refresh_workflow(&parent)?;
+                self.refresh_orchestration(&parent)?;
             }
         }
         Ok(())
     }
 
-    fn refresh_workflow(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
+    fn refresh_orchestration(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
         let Some(workflow) = self.executions.get(execution_id) else {
             return Err(ConductorError::UnknownExecution(execution_id.clone()));
         };
-        if workflow.summary.kind != ExecutionKind::Workflow || is_terminal(&workflow.summary.state)
+        if workflow.summary.kind != ExecutionKind::Orchestration
+            || is_terminal(&workflow.summary.state)
         {
             return Ok(());
         }
@@ -893,18 +890,18 @@ impl ConductorRuntime {
         if states.iter().any(|state| !is_terminal(state)) {
             return Ok(());
         }
-        self.advance_workflow(execution_id)
+        self.advance_orchestration(execution_id)
     }
 
-    fn advance_workflow(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
-        let (callable, objective, next_step, state) = {
+    fn advance_orchestration(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
+        let (callable, objective, next_node, state) = {
             let execution = self
                 .executions
                 .get(execution_id)
                 .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-            let ExecutionPayload::Workflow {
+            let ExecutionPayload::Orchestration {
                 objective,
-                next_step,
+                next_node,
             } = &execution.payload
             else {
                 return Err(ConductorError::NonModelExecution(execution_id.clone()));
@@ -916,19 +913,19 @@ impl ConductorRuntime {
                     .clone()
                     .expect("workflow execution has callable"),
                 objective.clone(),
-                *next_step,
+                *next_node,
                 execution.summary.state.clone(),
             )
         };
         if state != ExecutionState::Running {
             return Ok(());
         }
-        let definition = self.callables.workflow(&callable)?.clone();
-        if next_step >= definition.steps.len() {
+        let definition = self.callables.orchestration(&callable)?.clone();
+        if next_node >= definition.nodes.len() {
             self.set_state(execution_id, ExecutionState::Completed)?;
             return Ok(());
         }
-        let step = definition.steps[next_step].clone();
+        let step = definition.nodes[next_node].clone();
         let objective = match step.objective {
             Some(step_objective) => {
                 format!(
@@ -941,9 +938,9 @@ Workflow objective:
             None => objective,
         };
         self.start_agent(execution_id, &step.callable, objective)?;
-        self.record_domain_event(DomainEvent::WorkflowAdvanced {
+        self.record_domain_event(DomainEvent::OrchestrationAdvanced {
             execution_id: execution_id.clone(),
-            next_step: next_step + 1,
+            next_node: next_node + 1,
         })?;
         Ok(())
     }

@@ -2,8 +2,9 @@ use super::{descriptor, fixed_target, protocol_harness, session_id};
 use phenix_backend::ToolPresentation;
 use phenix_conductor::ConductorRuntime;
 use phenix_core::{
-    BackendId, CallableId, CallableKind, ExecutionEventKind, ExecutionState, ExecutionTarget,
-    RoutingProfile, RoutingProfileId, WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
+    AgentNode, BackendId, CallableId, CallableKind, ExecutionEventKind, ExecutionState,
+    ExecutionTarget, OrchestrationDefinition, OrchestrationPolicy, RoutingProfile,
+    RoutingProfileId,
 };
 use phenix_protocol::{Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage};
 use protocol_harness::{execution_id, model_target, MockAction, MockModelScript, ProtocolHarness};
@@ -34,15 +35,15 @@ fn bind_two_step_workflow(runtime: &mut ConductorRuntime) {
         .register_agent(descriptor("agent.second", CallableKind::Agent))
         .unwrap();
     runtime
-        .register_workflow(WorkflowDefinition {
-            descriptor: descriptor("workflow.two-step", CallableKind::Workflow),
-            policy: WorkflowExecutionPolicy::Sequential,
-            steps: vec![
-                WorkflowStep {
+        .register_orchestration(OrchestrationDefinition {
+            descriptor: descriptor("workflow.two-step", CallableKind::Orchestration),
+            policy: OrchestrationPolicy::Sequential,
+            nodes: vec![
+                AgentNode {
                     callable: CallableId::parse("agent.first").unwrap(),
                     objective: Some("first".to_owned()),
                 },
-                WorkflowStep {
+                AgentNode {
                     callable: CallableId::parse("agent.second").unwrap(),
                     objective: Some("second".to_owned()),
                 },
@@ -335,7 +336,7 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
     let session = runtime.create_session(None, None, fixed_target()).unwrap();
     let root = runtime.submit(&session.id, "root").unwrap();
     let workflow = runtime
-        .start_workflow(
+        .start_orchestration(
             &root.id,
             &CallableId::parse("workflow.two-step").unwrap(),
             "workflow objective",

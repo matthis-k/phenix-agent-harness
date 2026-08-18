@@ -4,10 +4,10 @@ use phenix_backend::{
 };
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{
-    BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
-    ModelTarget, ProviderId, RoutingProfile, RoutingProfileId, WorkflowDefinition,
-    WorkflowExecutionPolicy, WorkflowStep,
+    AgentNode, BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy,
+    CapabilitySet, ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget,
+    InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition, OrchestrationPolicy,
+    ProviderId, RoutingProfile, RoutingProfileId,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -259,15 +259,15 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
         .register_agent(descriptor("agent.worker", CallableKind::Agent))
         .unwrap();
     runtime
-        .register_workflow(WorkflowDefinition {
-            descriptor: descriptor("workflow.implement", CallableKind::Workflow),
-            policy: WorkflowExecutionPolicy::Sequential,
-            steps: vec![
-                WorkflowStep {
+        .register_orchestration(OrchestrationDefinition {
+            descriptor: descriptor("workflow.implement", CallableKind::Orchestration),
+            policy: OrchestrationPolicy::Sequential,
+            nodes: vec![
+                AgentNode {
                     callable: scout,
                     objective: Some("inspect".to_owned()),
                 },
-                WorkflowStep {
+                AgentNode {
                     callable: worker,
                     objective: None,
                 },
@@ -278,7 +278,7 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
     let root = runtime.submit(&session.id, "root").unwrap();
     let workflow_id = CallableId::parse("workflow.implement").unwrap();
     let workflow = runtime
-        .start_workflow(&root.id, &workflow_id, "implement")
+        .start_orchestration(&root.id, &workflow_id, "implement")
         .unwrap();
 
     assert_eq!(workflow.state, ExecutionState::Running);

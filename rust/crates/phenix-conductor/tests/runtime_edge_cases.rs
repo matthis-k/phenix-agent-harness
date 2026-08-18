@@ -1,9 +1,9 @@
 use phenix_backend::ToolPresentation;
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, SessionId,
-    WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
+    AgentNode, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, OrchestrationDefinition,
+    OrchestrationPolicy, SessionId,
 };
 use phenix_protocol::Command;
 use serde_json::json;
@@ -390,15 +390,15 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
         .register_agent(descriptor("agent.second", CallableKind::Agent))
         .unwrap();
     runtime
-        .register_workflow(WorkflowDefinition {
-            descriptor: descriptor("workflow.edge", CallableKind::Workflow),
-            policy: WorkflowExecutionPolicy::Sequential,
-            steps: vec![
-                WorkflowStep {
+        .register_orchestration(OrchestrationDefinition {
+            descriptor: descriptor("workflow.edge", CallableKind::Orchestration),
+            policy: OrchestrationPolicy::Sequential,
+            nodes: vec![
+                AgentNode {
                     callable: CallableId::parse("agent.first").unwrap(),
                     objective: Some("first".to_owned()),
                 },
-                WorkflowStep {
+                AgentNode {
                     callable: CallableId::parse("agent.second").unwrap(),
                     objective: Some("second".to_owned()),
                 },
@@ -408,7 +408,7 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
     let session = runtime.create_session(None, None, fixed_target()).unwrap();
     let root = runtime.submit(&session.id, "root").unwrap();
     let workflow = runtime
-        .start_workflow(
+        .start_orchestration(
             &root.id,
             &CallableId::parse("workflow.edge").unwrap(),
             "workflow",

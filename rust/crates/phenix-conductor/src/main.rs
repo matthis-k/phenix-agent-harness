@@ -10,6 +10,7 @@ use std::path::PathBuf;
 mod configuration;
 #[cfg(unix)]
 mod local_service;
+mod workspace_tools;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -64,6 +65,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(path) => ConductorServer::load_or_new(JsonFileStore::new(path))?,
         None => ConductorServer::new(ConductorRuntime::new()),
     };
+
+    {
+        let mut runtime = server.runtime();
+        workspace_tools::register(&mut runtime, cwd.clone())?;
+    }
 
     if let Some(path) = arguments.configuration {
         let configuration = configuration::RuntimeConfiguration::load(path)?;

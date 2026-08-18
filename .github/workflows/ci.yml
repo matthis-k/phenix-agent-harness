@@ -118,6 +118,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-model-tool-loop
 
+      - name: "conductor / black_box_workflow_callables"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-workflow-callables
+
       - name: "conductor / execution_provider_runtime"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
