@@ -23,28 +23,6 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
-      - name: Wire routing provider requirements
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("rust/crates/phenix-conductor/src/server.rs")
-          source = path.read_text()
-          source = source.replace(
-              "    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget,\n    RoutingProfileId, SessionId, SessionState,\n",
-              "    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget,\n    RoutingProfileDescriptor, SessionId, SessionState,\n",
-              1,
-          )
-          source = source.replace(
-              "    fn routing_profiles(&self) -> Vec<RoutingProfileId> {\n        self.routing.profiles()\n    }",
-              "    fn routing_profiles(&self) -> Vec<RoutingProfileDescriptor> {\n        self.routing.descriptors()\n    }",
-              1,
-          )
-          path.write_text(source)
-          PY
-          cargo fmt --manifest-path rust/Cargo.toml --all
-
       - name: Apply deterministic maintenance fixes
         run: |
           set -euo pipefail
@@ -66,7 +44,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: expose routing provider requirements"
+          git commit -m "chore: apply CI autofixes"
           git push origin "HEAD:$HEAD_REF"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
