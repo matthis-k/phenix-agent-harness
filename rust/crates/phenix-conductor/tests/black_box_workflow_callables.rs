@@ -77,11 +77,7 @@ impl BackendSession for WorkflowSession {
         let tool_outputs = if self.model == "root" {
             assert_eq!(
                 self.tools,
-                vec![
-                    "probe",
-                    "phenix_workflow_list",
-                    "phenix_workflow_start",
-                ]
+                vec!["probe", "phenix_workflow_list", "phenix_workflow_start",]
             );
 
             let listed = host.invoke_tool(ToolInvocation {
@@ -243,8 +239,9 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
             id: 2,
             command: Command::Submit {
                 session_id: phenix_core::SessionId::parse("session-1").unwrap(),
-                text: "What can I call? Use the appropriate workflow to check the requested change."
-                    .to_owned(),
+                text:
+                    "What can I call? Use the appropriate workflow to check the requested change."
+                        .to_owned(),
             },
         },
     ]);
@@ -286,10 +283,7 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
     assert!(turns[2].prompt.contains("verify the change"));
     assert!(turns[2].prompt.contains(WORKFLOW_OBJECTIVE));
     assert_eq!(turns[2].tools, vec!["probe"]);
-    assert_eq!(
-        turns[2].tool_outputs,
-        vec![r#"{"model":"verifier"}"#]
-    );
+    assert_eq!(turns[2].tool_outputs, vec![r#"{"model":"verifier"}"#]);
 
     let runtime = server.runtime();
     let snapshot = runtime.snapshot();
