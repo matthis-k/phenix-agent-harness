@@ -4,17 +4,16 @@ on:
   pull_request:
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
   autofix:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 60
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          fetch-depth: 1
           ref: ${{ github.event.pull_request.head.ref }}
 
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
@@ -23,38 +22,35 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-            max-jobs = auto
 
-      - name: Apply workspace grep fix
+      - name: Apply deterministic maintenance fixes
         run: |
           set -euo pipefail
-          python3 .github/tmp_workspace_grep_patch.py
-          git fetch --depth=1 origin main
-          git show origin/main:.github/workflows/sync-maintenance.yml > .github/workflows/sync-maintenance.yml
-          rm .github/workflows/tmp-workspace-grep-patch.yml .github/tmp_workspace_grep_patch.py
           nix run .#phenix-maintenance -- fix
           git diff --check
 
-      - name: Validate source
-        run: nix run .#phenix-maintenance -- check source
-
-      - name: Validate unit tests
-        env:
-          CARGO_HOME: ${{ runner.temp }}/phenix-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/phenix-cargo-target
-        run: nix run .#phenix-maintenance -- test unit
-
-      - name: Validate packaged conductor
-        run: nix run .#phenix-maintenance -- test product phenix-acp
-
-      - name: Commit fix
+      - name: Commit autofixes
+        id: commit
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-          git status --short
+
+          if test -z "$(git status --porcelain=v1 --untracked-files=all)"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "fix: make workspace grep path-safe and rg-backed"
+          git commit -m "chore: apply CI autofixes"
           git push origin "HEAD:$HEAD_REF"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate corrected head
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: gh workflow run ci.yml --ref "$HEAD_REF"
