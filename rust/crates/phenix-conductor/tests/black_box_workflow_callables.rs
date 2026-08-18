@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufReader, Cursor};
 use std::sync::{Arc, Mutex};
 
-const WORKFLOW_ID: &str = "workflow.inspect-and-verify";
-const WORKFLOW_OBJECTIVE: &str = "check the requested change";
+const ORCHESTRATION_ID: &str = "orchestration.inspect-and-verify";
+const ORCHESTRATION_OBJECTIVE: &str = "check the requested change";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ObservedTurn {
@@ -27,21 +27,21 @@ struct ObservedTurn {
 }
 
 #[derive(Clone, Default)]
-struct WorkflowRecorder {
+struct OrchestrationRecorder {
     turns: Arc<Mutex<Vec<ObservedTurn>>>,
 }
 
-struct WorkflowBackend {
-    recorder: WorkflowRecorder,
+struct OrchestrationBackend {
+    recorder: OrchestrationRecorder,
 }
 
-struct WorkflowSession {
-    recorder: WorkflowRecorder,
+struct OrchestrationSession {
+    recorder: OrchestrationRecorder,
     model: String,
     tools: Vec<String>,
 }
 
-impl Backend for WorkflowBackend {
+impl Backend for OrchestrationBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
             tool_presentations: BTreeSet::from([ToolPresentation::Native]),
@@ -55,7 +55,7 @@ impl Backend for WorkflowBackend {
         request: BackendSessionRequest,
     ) -> Result<Arc<dyn BackendSession>, BackendError> {
         assert_eq!(request.tools.presentation(), Some(ToolPresentation::Native));
-        Ok(Arc::new(WorkflowSession {
+        Ok(Arc::new(OrchestrationSession {
             recorder: self.recorder.clone(),
             model: request.model.model.as_str().to_owned(),
             tools: request
@@ -68,7 +68,7 @@ impl Backend for WorkflowBackend {
     }
 }
 
-impl BackendSession for WorkflowSession {
+impl BackendSession for OrchestrationSession {
     fn execute(
         &self,
         request: BackendExecutionRequest,
@@ -77,35 +77,41 @@ impl BackendSession for WorkflowSession {
         let tool_outputs = if self.model == "root" {
             assert_eq!(
                 self.tools,
-                vec!["probe", "phenix_workflow_list", "phenix_workflow_start",]
+                vec![
+                    "probe",
+                    "phenix_orchestration_list",
+                    "phenix_orchestration_start",
+                ]
             );
 
             let listed = host.invoke_tool(ToolInvocation {
-                callable: CallableId::parse("phenix_workflow_list").unwrap(),
+                callable: CallableId::parse("phenix_orchestration_list").unwrap(),
                 arguments_json: "{}".to_owned(),
             })?;
             assert!(listed.success);
             let listed_json: Value = serde_json::from_str(&listed.output).unwrap();
-            let workflow_ids = listed_json["workflows"]
-                .as_array()
-                .unwrap()
+            let orchestrations = listed_json["orchestrations"].as_array().unwrap();
+            let orchestration_ids = orchestrations
                 .iter()
-                .filter_map(|workflow| workflow["id"].as_str())
+                .filter_map(|orchestration| orchestration["id"].as_str())
                 .collect::<Vec<_>>();
-            assert_eq!(workflow_ids, vec![WORKFLOW_ID]);
+            assert_eq!(orchestration_ids, vec![ORCHESTRATION_ID]);
+            assert!(orchestrations
+                .iter()
+                .all(|orchestration| orchestration["kind"] == "orchestration"));
 
             let started = host.invoke_tool(ToolInvocation {
-                callable: CallableId::parse("phenix_workflow_start").unwrap(),
+                callable: CallableId::parse("phenix_orchestration_start").unwrap(),
                 arguments_json: json!({
-                    "workflow": WORKFLOW_ID,
-                    "objective": WORKFLOW_OBJECTIVE,
+                    "orchestration": ORCHESTRATION_ID,
+                    "objective": ORCHESTRATION_OBJECTIVE,
                 })
                 .to_string(),
             })?;
             assert!(started.success);
             let started_json: Value = serde_json::from_str(&started.output).unwrap();
-            assert_eq!(started_json["callable"], WORKFLOW_ID);
-            assert_eq!(started_json["kind"], "workflow");
+            assert_eq!(started_json["callable"], ORCHESTRATION_ID);
+            assert_eq!(started_json["kind"], "orchestration");
             assert_eq!(started_json["state"], "running");
 
             vec![listed.output, started.output]
@@ -168,8 +174,8 @@ fn request_lines(messages: &[ClientMessage]) -> Vec<u8> {
 }
 
 #[test]
-fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
-    let recorder = WorkflowRecorder::default();
+fn root_model_discovers_and_starts_orchestration_then_worker_runs_mock_agents() {
+    let recorder = OrchestrationRecorder::default();
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_tool(descriptor("probe", CallableKind::Tool), |arguments| {
@@ -186,10 +192,10 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
         .register_agent(descriptor(verifier.as_str(), CallableKind::Agent))
         .unwrap();
 
-    let workflow = CallableId::parse(WORKFLOW_ID).unwrap();
+    let orchestration = CallableId::parse(ORCHESTRATION_ID).unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
-            descriptor: descriptor(workflow.as_str(), CallableKind::Orchestration),
+            descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
             policy: OrchestrationPolicy::Sequential,
             nodes: vec![
                 AgentNode {
@@ -204,7 +210,7 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
         })
         .unwrap();
 
-    let routing = RoutingProfileId::parse("router.workflow-test").unwrap();
+    let routing = RoutingProfileId::parse("router.orchestration-test").unwrap();
     runtime
         .register_routing_profile(RoutingProfile {
             id: routing.clone(),
@@ -220,7 +226,7 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
     server
         .register_backend(
             BackendId::parse("fixture").unwrap(),
-            Box::new(WorkflowBackend {
+            Box::new(OrchestrationBackend {
                 recorder: recorder.clone(),
             }),
         )
@@ -231,7 +237,7 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
             id: 1,
             command: Command::CreateSession {
                 parent_session: None,
-                name: Some("workflow-test".to_owned()),
+                name: Some("orchestration-test".to_owned()),
                 target: ExecutionTarget::Routed(routing),
             },
         },
@@ -239,9 +245,8 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
             id: 2,
             command: Command::Submit {
                 session_id: phenix_core::SessionId::parse("session-1").unwrap(),
-                text:
-                    "What can I call? Use the appropriate workflow to check the requested change."
-                        .to_owned(),
+                text: "What can I call? Use the appropriate orchestration to check the requested change."
+                    .to_owned(),
             },
         },
     ]);
@@ -275,13 +280,13 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
 
     assert_eq!(turns[1].model, "scout");
     assert!(turns[1].prompt.contains("inspect the repository"));
-    assert!(turns[1].prompt.contains(WORKFLOW_OBJECTIVE));
+    assert!(turns[1].prompt.contains(ORCHESTRATION_OBJECTIVE));
     assert_eq!(turns[1].tools, vec!["probe"]);
     assert_eq!(turns[1].tool_outputs, vec![r#"{"model":"scout"}"#]);
 
     assert_eq!(turns[2].model, "verifier");
     assert!(turns[2].prompt.contains("verify the change"));
-    assert!(turns[2].prompt.contains(WORKFLOW_OBJECTIVE));
+    assert!(turns[2].prompt.contains(ORCHESTRATION_OBJECTIVE));
     assert_eq!(turns[2].tools, vec!["probe"]);
     assert_eq!(turns[2].tool_outputs, vec![r#"{"model":"verifier"}"#]);
 
@@ -294,18 +299,23 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
         .expect("root execution exists");
     assert_eq!(root.state, ExecutionState::Completed);
 
-    let workflow_execution = snapshot
+    let orchestration_execution = snapshot
         .executions
         .iter()
-        .find(|execution| execution.callable.as_ref() == Some(&workflow))
-        .expect("workflow execution exists");
-    assert_eq!(workflow_execution.parent_execution.as_ref(), Some(&root.id));
-    assert_eq!(workflow_execution.state, ExecutionState::Completed);
+        .find(|execution| execution.callable.as_ref() == Some(&orchestration))
+        .expect("orchestration execution exists");
+    assert_eq!(
+        orchestration_execution.parent_execution.as_ref(),
+        Some(&root.id)
+    );
+    assert_eq!(orchestration_execution.state, ExecutionState::Completed);
 
     let children = snapshot
         .executions
         .iter()
-        .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow_execution.id))
+        .filter(|execution| {
+            execution.parent_execution.as_ref() == Some(&orchestration_execution.id)
+        })
         .collect::<Vec<_>>();
     assert_eq!(children.len(), 2);
     assert!(children
@@ -323,8 +333,8 @@ fn root_model_discovers_and_starts_workflow_then_worker_runs_mock_agents() {
     assert_eq!(
         tool_calls,
         vec![
-            "phenix_workflow_list",
-            "phenix_workflow_start",
+            "phenix_orchestration_list",
+            "phenix_orchestration_start",
             "probe",
             "probe",
         ]
