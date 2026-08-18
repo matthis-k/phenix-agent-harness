@@ -72,6 +72,12 @@
           label = "conductor / black_box_model_tool_loop";
         }
         {
+          id = "conductor-workflow-callables";
+          package = "phenix-conductor";
+          test = "black_box_workflow_callables";
+          label = "conductor / black_box_workflow_callables";
+        }
+        {
           id = "conductor-execution-providers";
           package = "phenix-conductor";
           test = "execution_provider_runtime";
