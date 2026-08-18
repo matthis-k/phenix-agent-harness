@@ -34,6 +34,11 @@ impl RoutingRegistry {
         Ok(())
     }
 
+    #[must_use]
+    pub fn profiles(&self) -> Vec<RoutingProfileId> {
+        self.profiles.keys().cloned().collect()
+    }
+
     pub fn resolve(
         &self,
         profile: &RoutingProfileId,
@@ -80,6 +85,27 @@ mod tests {
                 .resolve(&RoutingProfileId::parse("default").unwrap(), Some(&agent))
                 .unwrap(),
             model("scout")
+        );
+    }
+
+    #[test]
+    fn catalog_is_deterministically_sorted_by_profile_id() {
+        let mut routing = RoutingRegistry::default();
+        for id in ["router.zeta", "router.alpha"] {
+            routing
+                .register(RoutingProfile {
+                    id: RoutingProfileId::parse(id).unwrap(),
+                    default_target: model(id),
+                    callable_targets: BTreeMap::new(),
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            routing.profiles(),
+            vec![
+                RoutingProfileId::parse("router.alpha").unwrap(),
+                RoutingProfileId::parse("router.zeta").unwrap(),
+            ]
         );
     }
 }
