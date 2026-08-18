@@ -929,11 +929,18 @@ impl ConductorRuntime {
             return Ok(());
         }
         let step = definition.steps[next_step].clone();
-        self.start_agent(
-            execution_id,
-            &step.callable,
-            step.objective.unwrap_or(objective),
-        )?;
+        let objective = match step.objective {
+            Some(step_objective) => {
+                format!(
+                    "{step_objective}
+
+Workflow objective:
+{objective}"
+                )
+            }
+            None => objective,
+        };
+        self.start_agent(execution_id, &step.callable, objective)?;
         self.record_domain_event(DomainEvent::WorkflowAdvanced {
             execution_id: execution_id.clone(),
             next_step: next_step + 1,
