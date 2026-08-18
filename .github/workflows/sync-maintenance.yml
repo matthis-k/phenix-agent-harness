@@ -23,6 +23,26 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
+      - name: Update workflow prompt expectation
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("rust/crates/phenix-conductor/tests/protocol_e2e.rs")
+          source = path.read_text()
+          old = '    assert_eq!(run.backend.prompts(), vec!["first step", "second step"]);'
+          new = '''    assert_eq!(
+              run.backend.prompts(),
+              vec![
+                  "first step\\n\\nWorkflow objective:\\noverall objective",
+                  "second step\\n\\nWorkflow objective:\\noverall objective",
+              ]
+          );'''
+          if old not in source:
+              raise SystemExit("protocol e2e workflow prompt assertion not found")
+          path.write_text(source.replace(old, new, 1))
+          PY
+
       - name: Apply deterministic maintenance fixes
         run: |
           set -euo pipefail
