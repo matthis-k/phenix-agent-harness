@@ -255,9 +255,7 @@ fn execute_read(workspace: &Path, arguments: &str) -> Result<String, String> {
         return Err("read offset must be at least 1".to_owned());
     }
     if limit == 0 || limit > MAX_READ_LINES {
-        return Err(format!(
-            "read limit must be between 1 and {MAX_READ_LINES}"
-        ));
+        return Err(format!("read limit must be between 1 and {MAX_READ_LINES}"));
     }
 
     let content = fs::read_to_string(&path)
@@ -493,10 +491,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let workspace = std::env::temp_dir().join(format!(
-            "phenix-{label}-{}-{unique}",
-            std::process::id()
-        ));
+        let workspace =
+            std::env::temp_dir().join(format!("phenix-{label}-{}-{unique}", std::process::id()));
         fs::create_dir_all(&workspace).unwrap();
         workspace
     }
@@ -599,10 +595,7 @@ mod tests {
         let workflow_id = CallableId::parse("workflow.tool-surface").unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
-                descriptor: fixture_descriptor(
-                    workflow_id.as_str(),
-                    CallableKind::Orchestration,
-                ),
+                descriptor: fixture_descriptor(workflow_id.as_str(), CallableKind::Orchestration),
                 policy: OrchestrationPolicy::Sequential,
                 nodes: vec![
                     AgentNode {
