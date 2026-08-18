@@ -22,11 +22,11 @@ use phenix_core::{
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub const BACKEND_ID: &str = "phenix";
-const MAX_TOOL_ROUNDS: usize = 32;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ModelSelection {
@@ -105,6 +105,7 @@ pub struct PhenixBackend {
     codex_provider: Arc<ProviderClient>,
     credentials: CredentialStore,
     models: Vec<ModelSelection>,
+    max_tool_rounds: Option<NonZeroUsize>,
     persistent_sessions: BTreeMap<SessionId, Arc<PhenixSession>>,
 }
 
@@ -153,6 +154,7 @@ impl PhenixBackend {
             codex_provider: Arc::new(codex_provider),
             credentials,
             models: configured_models()?,
+            max_tool_rounds: configured_max_tool_rounds()?,
             persistent_sessions: BTreeMap::new(),
         })
     }
@@ -188,6 +190,7 @@ impl PhenixBackend {
             credentials: self.credentials.clone(),
             model: Mutex::new(request.model),
             tools: Mutex::new(request.tools),
+            max_tool_rounds: self.max_tool_rounds,
             history: Mutex::new(Vec::new()),
             active: Mutex::new(false),
             cancelled: AtomicBool::new(false),
@@ -350,6 +353,7 @@ struct PhenixSession {
     credentials: CredentialStore,
     model: Mutex<ModelTarget>,
     tools: Mutex<PreparedToolSurface>,
+    max_tool_rounds: Option<NonZeroUsize>,
     history: Mutex<Vec<ChatMessage>>,
     active: Mutex<bool>,
     cancelled: AtomicBool,
@@ -432,8 +436,17 @@ impl PhenixSession {
             })
             .collect::<Vec<_>>();
         let reasoning_effort = parse_reasoning_effort(model.inference.effort.as_deref())?;
+        let mut tool_rounds = 0usize;
 
-        for _round in 0..MAX_TOOL_ROUNDS {
+        loop {
+            if let Some(limit) = self.max_tool_rounds {
+                if tool_rounds >= limit.get() {
+                    return Err(BackendError::Protocol(format!(
+                        "provider exceeded {limit} consecutive tool rounds"
+                    )));
+                }
+            }
+            tool_rounds += 1;
             if self.cancelled.load(Ordering::Acquire) {
                 return Ok(history);
             }
@@ -507,10 +520,6 @@ impl PhenixSession {
             }
             history.push(ChatMessage::from(responses));
         }
-
-        Err(BackendError::Protocol(format!(
-            "provider exceeded {MAX_TOOL_ROUNDS} consecutive tool rounds"
-        )))
     }
 }
 
@@ -588,6 +597,25 @@ fn model_descriptor(
         target: selection.target()?,
         name: selection.wire_value(),
         selectable: provider_has_valid_auth(credentials, &selection.provider)?,
+    })
+}
+
+fn configured_max_tool_rounds() -> Result<Option<NonZeroUsize>, BackendError> {
+    let value = std::env::var("PHENIX_MAX_TOOL_ROUNDS").ok();
+    parse_max_tool_rounds(value.as_deref())
+}
+
+fn parse_max_tool_rounds(value: Option<&str>) -> Result<Option<NonZeroUsize>, BackendError> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed = value.parse::<usize>().map_err(|error| {
+        BackendError::Protocol(format!(
+            "PHENIX_MAX_TOOL_ROUNDS must be a positive integer: {error}"
+        ))
+    })?;
+    NonZeroUsize::new(parsed).map(Some).ok_or_else(|| {
+        BackendError::Protocol("PHENIX_MAX_TOOL_ROUNDS must be greater than zero".to_owned())
     })
 }
 
@@ -707,6 +735,21 @@ mod tests {
         let surface = ToolProvision::default().prepare(&capabilities).unwrap();
         assert!(surface.is_empty());
         assert!(capabilities.persistent_sessions);
+    }
+
+    #[test]
+    fn tool_round_limit_is_opt_in() {
+        assert_eq!(parse_max_tool_rounds(None).unwrap(), None);
+        assert_eq!(parse_max_tool_rounds(Some("  ")).unwrap(), None);
+        assert_eq!(parse_max_tool_rounds(Some("7")).unwrap().unwrap().get(), 7);
+        assert!(matches!(
+            parse_max_tool_rounds(Some("0")),
+            Err(BackendError::Protocol(_))
+        ));
+        assert!(matches!(
+            parse_max_tool_rounds(Some("many")),
+            Err(BackendError::Protocol(_))
+        ));
     }
 
     #[test]
