@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/opt-in-tool-round-limit
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
