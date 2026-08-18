@@ -1,9 +1,9 @@
 name: Orchestration terminology refactor
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - agent/orchestration-cleanup-run
 
 permissions:
   contents: write
