@@ -22,25 +22,28 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           path = Path("rust/crates/phenix-conductor/src/lib.rs")
           source = path.read_text()
-          old = '''        self.start_agent(
-              execution_id,
-              &step.callable,
-              step.objective.unwrap_or(objective),
-          )?;
-'''
-          new = '''        let objective = match step.objective {
+          pattern = re.compile(
+              r'''        self\.start_agent\(\n'''
+              r'''            execution_id,\n'''
+              r'''            &step\.callable,\n'''
+              r'''            step\.objective\.unwrap_or\(objective\),\n'''
+              r'''        \)\?;'''
+          )
+          replacement = '''        let objective = match step.objective {
               Some(step_objective) => {
                   format!("{step_objective}\\n\\nWorkflow objective:\\n{objective}")
               }
               None => objective,
           };
-          self.start_agent(execution_id, &step.callable, objective)?;
-'''
-          if old not in source:
-              raise SystemExit("workflow dispatch pattern not found")
-          path.write_text(source.replace(old, new, 1))
+          self.start_agent(execution_id, &step.callable, objective)?;'''
+          source, count = pattern.subn(replacement, source, count=1)
+          if count != 1:
+              raise SystemExit(f"expected one workflow dispatch pattern, replaced {count}")
+          path.write_text(source)
           PY
           cargo fmt --manifest-path rust/Cargo.toml --all
           git diff -- rust/crates/phenix-conductor/src/lib.rs rust/crates/phenix-conductor/tests/workflow_objective.rs
