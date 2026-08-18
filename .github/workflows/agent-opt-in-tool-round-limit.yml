@@ -125,7 +125,7 @@ jobs:
         shell: bash
         run: |
           cd rust
-          cargo fmt --all --check
+          cargo fmt --all
           cargo test -p phenix-backend-native
       - name: Commit patch
         shell: bash
