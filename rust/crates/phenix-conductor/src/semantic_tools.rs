@@ -2,7 +2,7 @@ use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, ExecutionSummary,
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 pub(crate) const WORKFLOW_LIST_ID: &str = "phenix_workflow_list";
 pub(crate) const WORKFLOW_START_ID: &str = "phenix_workflow_start";
@@ -20,6 +20,18 @@ pub(crate) fn descriptors() -> Vec<CallableDescriptor> {
 
 pub(crate) fn is_semantic_tool(id: &CallableId) -> bool {
     matches!(id.as_str(), WORKFLOW_LIST_ID | WORKFLOW_START_ID)
+}
+
+pub(crate) fn parse_list(arguments_json: &str) -> Result<(), String> {
+    let value: Value = serde_json::from_str(arguments_json)
+        .map_err(|error| format!("invalid workflow list arguments: {error}"))?;
+    let Some(object) = value.as_object() else {
+        return Err("workflow list arguments must be an object".to_owned());
+    };
+    if !object.is_empty() {
+        return Err("workflow list arguments must be empty".to_owned());
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_start(arguments_json: &str) -> Result<(CallableId, String), String> {
