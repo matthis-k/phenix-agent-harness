@@ -2,8 +2,8 @@
 
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor,
-    CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget, RoutingProfileId,
-    SessionId, SessionSummary,
+    CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget,
+    RoutingProfileDescriptor, SessionId, SessionSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +88,7 @@ pub enum Reply {
         callables: Vec<CallableDescriptor>,
     },
     RoutingCatalog {
-        profiles: Vec<RoutingProfileId>,
+        profiles: Vec<RoutingProfileDescriptor>,
     },
     Session {
         session: SessionSummary,
@@ -149,6 +149,7 @@ pub enum ServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_core::{ProviderId, RoutingProfileId};
 
     #[test]
     fn protocol_has_explicit_request_ids() {
@@ -219,13 +220,23 @@ mod tests {
             id: 11,
             response: ResponsePayload::Ok {
                 result: Reply::RoutingCatalog {
-                    profiles: vec![RoutingProfileId::parse("router.mixed").unwrap()],
+                    profiles: vec![RoutingProfileDescriptor {
+                        id: RoutingProfileId::parse("router.mixed").unwrap(),
+                        providers: vec![
+                            ProviderId::parse("openai-codex").unwrap(),
+                            ProviderId::parse("opencode-go").unwrap(),
+                        ],
+                    }],
                 },
             },
         };
         let value = serde_json::to_value(reply).expect("serialize routing catalog reply");
         assert_eq!(value["result"]["type"], "routing_catalog");
-        assert_eq!(value["result"]["profiles"][0], "router.mixed");
+        assert_eq!(value["result"]["profiles"][0]["id"], "router.mixed");
+        assert_eq!(
+            value["result"]["profiles"][0]["providers"],
+            serde_json::json!(["openai-codex", "opencode-go"])
+        );
     }
 
     #[test]
