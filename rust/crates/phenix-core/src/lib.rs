@@ -53,9 +53,17 @@ id_type!(ModelId);
 id_type!(RoutingProfileId);
 id_type!(AuthenticationMethodId);
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InferenceEffort {
+    Low,
+    Medium,
+    High,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InferenceOptions {
-    pub effort: Option<String>,
+    pub effort: Option<InferenceEffort>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -179,10 +187,25 @@ pub enum WorkflowExecutionPolicy {
     Sequential,
 }
 
+/// Typed source for the input passed to one workflow step.
+///
+/// The current sequential executor binds every step to the workflow's root
+/// input and may prepend a static instruction. Future dataflow can add new
+/// binding variants here (for example a previous step's structured output)
+/// without introducing a parallel workflow representation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum WorkflowStepInput {
+    WorkflowInput {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instruction: Option<String>,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowStep {
     pub callable: CallableId,
-    pub objective: Option<String>,
+    pub input: WorkflowStepInput,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -314,5 +337,15 @@ mod tests {
         });
         let session: SessionSummary = serde_json::from_value(value).unwrap();
         assert_eq!(session.state, SessionState::Active);
+    }
+
+    #[test]
+    fn workflow_step_input_serializes_its_binding_source() {
+        let value = serde_json::to_value(WorkflowStepInput::WorkflowInput {
+            instruction: Some("Inspect first".to_owned()),
+        })
+        .unwrap();
+        assert_eq!(value["source"], "workflow_input");
+        assert_eq!(value["instruction"], "Inspect first");
     }
 }
