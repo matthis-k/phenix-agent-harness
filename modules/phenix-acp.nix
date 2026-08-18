@@ -30,6 +30,7 @@ _: {
           cp "$conductor_binary" "$out/libexec/phenix-conductor"
           makeWrapper "$out/libexec/phenix-conductor" "$out/bin/phenix-conductor" \
             --set PHENIX_BASH "${pkgs.bash}/bin/bash" \
+            --set PHENIX_GREP "${pkgs.gnugrep}/bin/grep" \
             --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
             --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           runHook postInstall
@@ -129,8 +130,9 @@ _: {
                     and .result.type == "callable_catalog"
                   )
                 | .result.callables[]
-                | select(.id == "bash" and .kind == "tool")
-              ] | length == 1)
+                | select(.kind == "tool" and (.id == "bash" or .id == "grep" or .id == "read" or .id == "write"))
+                | .id
+              ] | sort == ["bash", "grep", "read", "write"])
             ' "$response" >/dev/null
 
             touch "$out"
