@@ -8,13 +8,13 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
-pub(super) const WORKFLOW_LIST_ID: &str = "phenix_workflow_list";
-pub(super) const WORKFLOW_START_ID: &str = "phenix_workflow_start";
+pub(super) const ORCHESTRATION_LIST_ID: &str = "phenix_orchestration_list";
+pub(super) const ORCHESTRATION_START_ID: &str = "phenix_orchestration_start";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WorkflowStartInput {
-    workflow: String,
+struct OrchestrationStartInput {
+    orchestration: String,
     objective: String,
 }
 
@@ -25,17 +25,20 @@ pub(super) fn extend_root_workflow_tools(
     let is_root = runtime.snapshot().executions.iter().any(|execution| {
         execution.id == resolved.execution_id && execution.kind == ExecutionKind::Root
     });
-    let has_workflows = runtime
+    let has_orchestrations = runtime
         .callable_descriptors()
         .iter()
         .any(|descriptor| descriptor.kind == CallableKind::Orchestration);
-    if is_root && has_workflows {
+    if is_root && has_orchestrations {
         resolved.tools.callables.extend(descriptors());
     }
 }
 
 pub(super) fn is_semantic_tool(id: &CallableId) -> bool {
-    matches!(id.as_str(), WORKFLOW_LIST_ID | WORKFLOW_START_ID)
+    matches!(
+        id.as_str(),
+        ORCHESTRATION_LIST_ID | ORCHESTRATION_START_ID
+    )
 }
 
 pub(super) fn invoke(
@@ -72,7 +75,7 @@ pub(super) fn invoke(
         .map_err(conductor_protocol_error)?;
 
     let result = match invocation.callable.as_str() {
-        WORKFLOW_LIST_ID => match parse_list(&invocation.arguments_json) {
+        ORCHESTRATION_LIST_ID => match parse_list(&invocation.arguments_json) {
             Ok(()) => ToolResult {
                 output: list_output(
                     runtime
@@ -88,9 +91,9 @@ pub(super) fn invoke(
                 success: false,
             },
         },
-        WORKFLOW_START_ID => match parse_start(&invocation.arguments_json) {
-            Ok((workflow, objective)) => {
-                match runtime.start_orchestration(execution_id, &workflow, objective) {
+        ORCHESTRATION_START_ID => match parse_start(&invocation.arguments_json) {
+            Ok((orchestration, objective)) => {
+                match runtime.start_orchestration(execution_id, &orchestration, objective) {
                     Ok(execution) => ToolResult {
                         output: start_output(&execution),
                         success: true,
@@ -123,34 +126,34 @@ pub(super) fn invoke(
 }
 
 fn descriptors() -> Vec<CallableDescriptor> {
-    vec![workflow_list_descriptor(), workflow_start_descriptor()]
+    vec![orchestration_list_descriptor(), orchestration_start_descriptor()]
 }
 
 fn parse_list(arguments_json: &str) -> Result<(), String> {
     let value: Value = serde_json::from_str(arguments_json)
-        .map_err(|error| format!("invalid workflow list arguments: {error}"))?;
+        .map_err(|error| format!("invalid orchestration list arguments: {error}"))?;
     let Some(object) = value.as_object() else {
-        return Err("workflow list arguments must be an object".to_owned());
+        return Err("orchestration list arguments must be an object".to_owned());
     };
     if !object.is_empty() {
-        return Err("workflow list arguments must be empty".to_owned());
+        return Err("orchestration list arguments must be empty".to_owned());
     }
     Ok(())
 }
 
 fn parse_start(arguments_json: &str) -> Result<(CallableId, String), String> {
-    let input: WorkflowStartInput = serde_json::from_str(arguments_json)
-        .map_err(|error| format!("invalid workflow start arguments: {error}"))?;
+    let input: OrchestrationStartInput = serde_json::from_str(arguments_json)
+        .map_err(|error| format!("invalid orchestration start arguments: {error}"))?;
     if input.objective.trim().is_empty() {
-        return Err("workflow objective must not be empty".to_owned());
+        return Err("orchestration objective must not be empty".to_owned());
     }
-    let workflow = CallableId::parse(input.workflow)
-        .map_err(|error| format!("invalid workflow id: {error}"))?;
-    Ok((workflow, input.objective))
+    let orchestration = CallableId::parse(input.orchestration)
+        .map_err(|error| format!("invalid orchestration id: {error}"))?;
+    Ok((orchestration, input.objective))
 }
 
-fn list_output(workflows: Vec<CallableDescriptor>) -> String {
-    json!({ "workflows": workflows }).to_string()
+fn list_output(orchestrations: Vec<CallableDescriptor>) -> String {
+    json!({ "orchestrations": orchestrations }).to_string()
 }
 
 fn start_output(execution: &ExecutionSummary) -> String {
@@ -167,11 +170,11 @@ fn conductor_protocol_error(error: crate::ConductorError) -> BackendError {
     BackendError::Protocol(error.to_string())
 }
 
-fn workflow_list_descriptor() -> CallableDescriptor {
+fn orchestration_list_descriptor() -> CallableDescriptor {
     CallableDescriptor {
-        id: CallableId::parse(WORKFLOW_LIST_ID).expect("static workflow list id"),
+        id: CallableId::parse(ORCHESTRATION_LIST_ID).expect("static orchestration list id"),
         kind: CallableKind::Tool,
-        description: "List the workflows this Phenix root agent can call. Use this instead of guessing workflow names.".to_owned(),
+        description: "List the orchestrations this Phenix root agent can call. Use this instead of guessing orchestration names.".to_owned(),
         input_schema: json!({
             "type": "object",
             "additionalProperties": false,
@@ -179,9 +182,9 @@ fn workflow_list_descriptor() -> CallableDescriptor {
         }),
         output_schema: json!({
             "type": "object",
-            "required": ["workflows"],
+            "required": ["orchestrations"],
             "properties": {
-                "workflows": { "type": "array" }
+                "orchestrations": { "type": "array" }
             }
         }),
         capabilities: CapabilitySet::default(),
@@ -191,25 +194,25 @@ fn workflow_list_descriptor() -> CallableDescriptor {
     }
 }
 
-fn workflow_start_descriptor() -> CallableDescriptor {
+fn orchestration_start_descriptor() -> CallableDescriptor {
     CallableDescriptor {
-        id: CallableId::parse(WORKFLOW_START_ID).expect("static workflow start id"),
+        id: CallableId::parse(ORCHESTRATION_START_ID).expect("static orchestration start id"),
         kind: CallableKind::Tool,
-        description: "Start one conductor-owned workflow returned by phenix_workflow_list with a concrete objective.".to_owned(),
+        description: "Start one conductor-owned orchestration returned by phenix_orchestration_list with a concrete objective.".to_owned(),
         input_schema: json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["workflow", "objective"],
+            "required": ["orchestration", "objective"],
             "properties": {
-                "workflow": {
+                "orchestration": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Workflow id returned by phenix_workflow_list"
+                    "description": "Orchestration id returned by phenix_orchestration_list"
                 },
                 "objective": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Objective for the workflow"
+                    "description": "Objective for the orchestration"
                 }
             }
         }),
