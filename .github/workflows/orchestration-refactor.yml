@@ -1,0 +1,131 @@
+name: Orchestration terminology refactor
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/orchestration-terminology
+          fetch-depth: 0
+      - name: Clean internal orchestration vocabulary
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              'rust/crates/phenix-conductor/src/callables.rs': [
+                  ('InvalidAgentNode {\n        workflow: CallableId,', 'InvalidAgentNode {\n        orchestration: CallableId,'),
+                  ('Self::EmptyOrchestration(id) => write!(f, "workflow has no nodes: {id}"),', 'Self::EmptyOrchestration(id) => write!(f, "orchestration has no nodes: {id}"),'),
+                  ('Self::InvalidAgentNode { workflow, callable }', 'Self::InvalidAgentNode { orchestration, callable }'),
+                  ('"workflow {workflow} references non-executable or unknown callable {callable}"', '"orchestration {orchestration} references non-executable or unknown callable {callable}"'),
+                  ('for step in &definition.nodes {', 'for node in &definition.nodes {'),
+                  ('step.callable', 'node.callable'),
+                  ('workflow: definition.descriptor.id.clone()', 'orchestration: definition.descriptor.id.clone()'),
+                  ('/// Start an agent or workflow as a first-class top-level execution in a', '/// Start an agent or orchestration as a first-class top-level execution in a'),
+                  ('let step_descriptor = self.callables.descriptor(&node.callable)?.clone();', 'let node_descriptor = self.callables.descriptor(&node.callable)?.clone();'),
+                  ('&step_descriptor,', '&node_descriptor,'),
+                  ('expect("workflow exists after top-level creation")', 'expect("orchestration exists after top-level creation")'),
+                  ('fn workflows_validate_executable_binding_not_agent_marker_implementation()', 'fn orchestrations_validate_executable_binding_not_agent_marker_implementation()'),
+                  ('fn session_workflow_entrypoint_creates_normal_child_execution_tree()', 'fn session_orchestration_entrypoint_creates_normal_child_execution_tree()'),
+                  ('let workflow = runtime', 'let orchestration = runtime'),
+                  ('workflow.parent_execution', 'orchestration.parent_execution'),
+                  ('workflow.kind', 'orchestration.kind'),
+                  ('workflow.state', 'orchestration.state'),
+                  ('&workflow.id', '&orchestration.id'),
+                  ('workflow.id.clone()', 'orchestration.id.clone()'),
+                  ('expect("workflow started its first ordinary child execution")', 'expect("orchestration started its first ordinary child execution")'),
+              ],
+              'rust/crates/phenix-conductor/src/lib.rs': [
+                  ('for step in &definition.nodes {', 'for node in &definition.nodes {'),
+                  ('step.callable', 'node.callable'),
+                  ('expect("workflow exists after creation")', 'expect("orchestration exists after creation")'),
+                  ('let Some(workflow) = self.executions.get(execution_id)', 'let Some(orchestration) = self.executions.get(execution_id)'),
+                  ('workflow.summary.kind', 'orchestration.summary.kind'),
+                  ('workflow.summary.state', 'orchestration.summary.state'),
+                  ('expect("workflow execution has callable")', 'expect("orchestration execution has callable")'),
+                  ('let step = definition.nodes[next_node].clone();', 'let node = definition.nodes[next_node].clone();'),
+                  ('match step.objective', 'match node.objective'),
+                  ('Some(step_objective)', 'Some(node_objective)'),
+                  ('{step_objective}', '{node_objective}'),
+                  ('Workflow objective:', 'Orchestration objective:'),
+                  ('&step.callable', '&node.callable'),
+              ],
+              'rust/crates/phenix-conductor/src/configuration.rs': [
+                  ('own the concrete agent, workflow, and routing-profile instances', 'own the concrete agent, orchestration, and routing-profile instances'),
+                  ('fn application_configuration_rebinds_agents_workflows_and_routes()', 'fn application_configuration_rebinds_agents_orchestrations_and_routes()'),
+                  ('let workflow = OrchestrationDefinition', 'let orchestration = OrchestrationDefinition'),
+                  ('orchestrations: vec![workflow],', 'orchestrations: vec![orchestration],'),
+                  ('fn configured_workflow_step_keeps_the_user_objective()', 'fn configured_orchestration_node_keeps_the_user_objective()'),
+                  ('let workflow_id =', 'let orchestration_id ='),
+                  ('descriptor(workflow_id.as_str()', 'descriptor(orchestration_id.as_str()'),
+                  ('&workflow_id,', '&orchestration_id,'),
+                  ('let workflow = runtime', 'let orchestration = runtime'),
+                  ('Some(&workflow.id)', 'Some(&orchestration.id)'),
+                  ('expect("workflow child exists")', 'expect("orchestration node execution exists")'),
+                  ('Workflow objective:', 'Orchestration objective:'),
+              ],
+          }
+
+          for file, pairs in replacements.items():
+              path = Path(file)
+              text = path.read_text()
+              for old, new in pairs:
+                  text = text.replace(old, new)
+              path.write_text(text)
+
+          for path in Path('rust').rglob('*.rs'):
+              text = path.read_text().replace('Workflow objective:', 'Orchestration objective:')
+              path.write_text(text)
+
+          core = Path('rust/crates/phenix-core/src/lib.rs')
+          text = core.read_text()
+          marker = '#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\npub struct OrchestrationDefinition {'
+          replacement = '''/// Canonical parsed orchestration definition.\n///\n/// Source adapters such as Markdown, Lua values, JSON, or RON produce this\n/// type directly. There is no intermediate workflow-definition domain model.\n#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\npub struct OrchestrationDefinition {'''
+          if marker not in text:
+              raise SystemExit('OrchestrationDefinition marker not found')
+          core.write_text(text.replace(marker, replacement))
+          PY
+      - name: Document source adapter boundary
+        run: |
+          if ! grep -q '^## Definition source boundary' rust/ARCHITECTURE.md; then
+            cat >> rust/ARCHITECTURE.md <<'EOF'
+
+## Definition source boundary
+
+Orchestration authoring sources are adapters, not runtime models:
+
+```text
+source (Markdown / Lua value / JSON / RON)
+    -> parse
+OrchestrationDefinition
+    -> instantiate
+orchestration execution tree
+```
+
+Every source adapter must produce the canonical typed `OrchestrationDefinition` directly. The conductor does not define or compile through an intermediate `WorkflowDefinition`. `AgentNode` describes an autonomous agent assignment in that orchestration; the agent remains free to decide how to satisfy its objective within its capabilities and policy.
+EOF
+          fi
+      - name: Format and validate
+        run: |
+          cd rust
+          cargo fmt --all
+          cargo check --locked --workspace
+          cargo test --locked -p phenix-core
+          cargo test --locked -p phenix-conductor
+      - name: Commit cleanup
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'refactor: align orchestration source and runtime vocabulary'
+          git push origin HEAD:agent/orchestration-terminology
