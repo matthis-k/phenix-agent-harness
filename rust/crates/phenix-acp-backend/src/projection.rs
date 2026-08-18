@@ -402,9 +402,7 @@ fn apply_tool_update(
 
 fn terminal_output(tool: &ToolCall) -> Option<String> {
     let raw_output = tool.raw_output.as_ref()?;
-    if raw_output.get("terminalId").is_none() {
-        return None;
-    }
+    raw_output.get("terminalId")?;
     let output = raw_output
         .get("output")
         .and_then(serde_json::Value::as_str)
