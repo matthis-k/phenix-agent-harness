@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/fix-workspace-grep-rg
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -16,6 +19,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 1
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
 
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
