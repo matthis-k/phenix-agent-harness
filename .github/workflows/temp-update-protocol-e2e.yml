@@ -1,0 +1,49 @@
+name: "Temporary protocol e2e update"
+
+on:
+  push:
+    branches:
+      - "feat/auth-discovery-strategies"
+    paths:
+      - ".github/workflows/temp-update-protocol-e2e.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: feat/auth-discovery-strategies
+
+      - name: Update protocol workflow prompt expectation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("rust/crates/phenix-conductor/tests/protocol_e2e.rs")
+          source = path.read_text()
+          old = '    assert_eq!(run.backend.prompts(), vec!["first step", "second step"]);'
+          new = '''    assert_eq!(
+        run.backend.prompts(),
+        vec![
+            "first step\\n\\nWorkflow objective:\\noverall objective",
+            "second step\\n\\nWorkflow objective:\\noverall objective",
+        ]
+    );'''
+          if old not in source:
+              raise SystemExit("protocol e2e workflow prompt assertion not found")
+          path.write_text(source.replace(old, new, 1))
+          PY
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff -- rust/crates/phenix-conductor/tests/protocol_e2e.rs
+
+      - name: Commit expectation update
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/crates/phenix-conductor/tests/protocol_e2e.rs
+          git commit -m 'test: preserve workflow objective in protocol e2e'
+          git push origin HEAD:feat/auth-discovery-strategies
