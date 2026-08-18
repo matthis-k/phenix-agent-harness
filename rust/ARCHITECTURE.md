@@ -19,7 +19,7 @@ The purge commit deliberately removes the previous ACP-shaped application runtim
 Orchestration authoring formats are source adapters, not additional domain models:
 
 ```text
-source (Markdown / Lua value / JSON / RON)
+source (Markdown / Lua object / JSON / RON)
     -> parse
 OrchestrationDefinition
     -> instantiate
