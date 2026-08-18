@@ -94,8 +94,9 @@ mod tests {
         BackendSession, BackendSessionRequest, ToolPresentation,
     };
     use phenix_core::{
-        BackendId, ExecutionId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
-        RoutingProfile, RoutingProfileId, WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
+        BackendId, ExecutionId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
+        ProviderId, RoutingProfile, RoutingProfileId, WorkflowDefinition, WorkflowExecutionPolicy,
+        WorkflowStep,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
@@ -142,10 +143,7 @@ mod tests {
             &mut self,
             request: BackendSessionRequest,
         ) -> Result<Arc<dyn BackendSession>, BackendError> {
-            assert_eq!(
-                request.tools.presentation(),
-                Some(ToolPresentation::Native)
-            );
+            assert_eq!(request.tools.presentation(), Some(ToolPresentation::Native));
             let tools = request
                 .tools
                 .callables()
@@ -292,7 +290,9 @@ mod tests {
         let session = runtime
             .create_session(None, None, ExecutionTarget::Routed(routing))
             .unwrap();
-        let root = runtime.submit(&session.id, "exercise the workflow").unwrap();
+        let root = runtime
+            .submit(&session.id, "exercise the workflow")
+            .unwrap();
         let workflow = runtime
             .start_workflow(&root.id, &workflow_id, "change and verify")
             .unwrap();
