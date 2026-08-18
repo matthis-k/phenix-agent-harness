@@ -1,8 +1,8 @@
 use crate::{ConductorRuntime, ResolvedInvocation};
 use phenix_backend::{BackendError, ToolInvocation, ToolResult};
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, ExecutionEventKind,
-    ExecutionKind, ExecutionSummary,
+    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionEventKind, ExecutionKind, ExecutionSummary,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -22,11 +22,9 @@ pub(super) fn extend_root_workflow_tools(
     runtime: &ConductorRuntime,
     resolved: &mut ResolvedInvocation,
 ) {
-    let is_root = runtime
-        .snapshot()
-        .executions
-        .iter()
-        .any(|execution| execution.id == resolved.execution_id && execution.kind == ExecutionKind::Root);
+    let is_root = runtime.snapshot().executions.iter().any(|execution| {
+        execution.id == resolved.execution_id && execution.kind == ExecutionKind::Root
+    });
     let has_workflows = runtime
         .callable_descriptors()
         .iter()
@@ -91,17 +89,18 @@ pub(super) fn invoke(
             },
         },
         WORKFLOW_START_ID => match parse_start(&invocation.arguments_json) {
-            Ok((workflow, objective)) => match runtime.start_workflow(execution_id, &workflow, objective)
-            {
-                Ok(execution) => ToolResult {
-                    output: start_output(&execution),
-                    success: true,
-                },
-                Err(error) => ToolResult {
-                    output: error.to_string(),
-                    success: false,
-                },
-            },
+            Ok((workflow, objective)) => {
+                match runtime.start_workflow(execution_id, &workflow, objective) {
+                    Ok(execution) => ToolResult {
+                        output: start_output(&execution),
+                        success: true,
+                    },
+                    Err(error) => ToolResult {
+                        output: error.to_string(),
+                        success: false,
+                    },
+                }
+            }
             Err(error) => ToolResult {
                 output: error,
                 success: false,
