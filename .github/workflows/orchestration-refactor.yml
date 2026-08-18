@@ -1,0 +1,115 @@
+name: Orchestration terminology refactor
+
+on:
+  push:
+    branches:
+      - agent/orchestration-terminology
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore native agent tooling tree
+        run: |
+          git fetch origin 8fb06c2f17a62cbe6b56c91cb4a152e1f37febc1
+          git checkout 8fb06c2f17a62cbe6b56c91cb4a152e1f37febc1 -- \
+            .github/workflows/ci.yml \
+            modules/development.nix \
+            modules/phenix-acp.nix \
+            rust/crates/phenix-conductor/src/main.rs \
+            rust/crates/phenix-conductor/src/semantic_tools.rs \
+            rust/crates/phenix-conductor/src/server.rs \
+            rust/crates/phenix-conductor/src/workspace_tools.rs \
+            rust/crates/phenix-conductor/tests/black_box_workflow_callables.rs
+      - name: Refactor workflow domain to orchestration domain
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          rust_files = list(Path('rust').rglob('*.rs'))
+          replacements = [
+              ('WorkflowDefinition', 'OrchestrationDefinition'),
+              ('WorkflowExecutionPolicy', 'OrchestrationPolicy'),
+              ('WorkflowStep', 'AgentNode'),
+              ('CallableKind::Workflow', 'CallableKind::Orchestration'),
+              ('ExecutionKind::Workflow', 'ExecutionKind::Orchestration'),
+              ('ExecutionPayload::Workflow', 'ExecutionPayload::Orchestration'),
+              ('JournalExecutionPayload::Workflow', 'JournalExecutionPayload::Orchestration'),
+              ('DomainEvent::WorkflowAdvanced', 'DomainEvent::OrchestrationAdvanced'),
+              ('CallableImplementation::Workflow', 'CallableImplementation::Orchestration'),
+              ('InvalidWorkflowStep', 'InvalidOrchestrationNode'),
+              ('EmptyWorkflow', 'EmptyOrchestration'),
+              ('StartWorkflowStep', 'StartOrchestrationNode'),
+              ('StartWorkflow', 'StartOrchestration'),
+              ('register_workflow', 'register_orchestration'),
+              ('start_workflow', 'start_orchestration'),
+              ('advance_workflow', 'advance_orchestration'),
+              ('refresh_workflow', 'refresh_orchestration'),
+              ('next_step', 'next_node'),
+          ]
+          for path in rust_files:
+              text = path.read_text()
+              for old, new in replacements:
+                  text = text.replace(old, new)
+              text = re.sub(r'\bsteps\b', 'nodes', text)
+              text = text.replace('pub fn workflow(', 'pub fn orchestration(')
+              text = text.replace('.workflow(', '.orchestration(')
+              text = text.replace('CallableImplementation::Workflow(', 'CallableImplementation::Orchestration(')
+              text = text.replace('Workflow(Box<OrchestrationDefinition>)', 'Orchestration(Box<OrchestrationDefinition>)')
+              text = text.replace('Workflow {', 'Orchestration {')
+              text = text.replace('WorkflowAdvanced {', 'OrchestrationAdvanced {')
+              path.write_text(text)
+
+          core = Path('rust/crates/phenix-core/src/lib.rs')
+          text = core.read_text()
+          text = text.replace(
+              'pub enum CallableKind {\n    Tool,\n    Agent,\n    Workflow,\n}',
+              'pub enum CallableKind {\n    Tool,\n    Agent,\n    #[serde(rename = "workflow")]\n    Orchestration,\n}'
+          )
+          text = text.replace(
+              'pub enum ExecutionKind {\n    Root,\n    Agent,\n    Workflow,\n}',
+              'pub enum ExecutionKind {\n    Root,\n    Agent,\n    #[serde(rename = "workflow")]\n    Orchestration,\n}'
+          )
+          core.write_text(text)
+
+          journal = Path('rust/crates/phenix-conductor/src/journal.rs')
+          text = journal.read_text()
+          text = text.replace(
+              '    Orchestration { objective: String, next_node: usize },',
+              '    #[serde(rename = "workflow")]\n    Orchestration { objective: String, next_node: usize },'
+          )
+          text = text.replace(
+              '    OrchestrationAdvanced {\n        execution_id: ExecutionId,',
+              '    #[serde(rename = "workflow_advanced")]\n    OrchestrationAdvanced {\n        execution_id: ExecutionId,'
+          )
+          journal.write_text(text)
+
+          config = Path('rust/crates/phenix-conductor/src/configuration.rs')
+          text = config.read_text()
+          text = re.sub(r'\bworkflows\b', 'orchestrations', text)
+          text = text.replace('for workflow in self.orchestrations {\n            runtime.register_orchestration(workflow)?;',
+                              'for orchestration in self.orchestrations {\n            runtime.register_orchestration(orchestration)?;')
+          config.write_text(text)
+          PY
+      - name: Format and validate Rust
+        run: |
+          cd rust
+          cargo fmt --all
+          cargo check --locked --workspace
+          cargo test --locked -p phenix-core
+          cargo test --locked -p phenix-conductor
+      - name: Commit refactor
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'refactor: make orchestration the canonical workflow domain'
+          git push origin HEAD:agent/orchestration-terminology
