@@ -22,7 +22,7 @@ struct Arguments {
     #[arg(long, value_name = "DIR")]
     cwd: Option<PathBuf>,
 
-    /// Application-owned agents, workflows, and routing profiles to register at startup.
+    /// Application-owned executable configuration rebound for this process.
     #[arg(long, value_name = "FILE")]
     configuration: Option<PathBuf>,
 
