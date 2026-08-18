@@ -24,6 +24,9 @@ use std::sync::{
 };
 use std::thread;
 
+#[path = "semantic_tools.rs"]
+mod semantic_tools;
+
 const EVENT_BUFFER: usize = 256;
 const OUTPUT_BUFFER: usize = 256;
 const EXECUTION_BUFFER: usize = 64;
@@ -407,7 +410,7 @@ impl ConductorServer {
             }),
         )?;
 
-        if execution_kind == ExecutionKind::Workflow {
+        if execution_kind == ExecutionKind::Orchestration {
             let pending = {
                 let runtime = self.lock_runtime()?;
                 runtime
@@ -644,7 +647,7 @@ fn execute_job_chain(
             store,
             persist_lock,
         )?;
-        current = next_workflow_execution(runtime, &execution_id)?;
+        current = next_scheduled_execution(runtime, &execution_id)?;
     }
     Ok(())
 }
@@ -707,7 +710,11 @@ fn execute_model_execution(
         let mut runtime_guard = runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
-        runtime_guard.resolve_invocation(execution_id)
+        let mut resolved = runtime_guard.resolve_invocation(execution_id);
+        if let Ok(resolved) = &mut resolved {
+            semantic_tools::extend_root_workflow_tools(&runtime_guard, resolved);
+        }
+        resolved
     };
     let resolved = match resolved {
         Ok(resolved) => resolved,
@@ -960,7 +967,7 @@ fn finish_provider_execution(
     Ok(())
 }
 
-fn next_workflow_execution(
+fn next_scheduled_execution(
     runtime: &SharedRuntime,
     completed_execution: &ExecutionId,
 ) -> Result<Option<ExecutionId>, ServerError> {
@@ -968,30 +975,51 @@ fn next_workflow_execution(
         .lock()
         .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
         .snapshot();
-    let Some(parent_id) = snapshot
-        .executions
-        .iter()
-        .find(|execution| execution.id == *completed_execution)
-        .and_then(|execution| execution.parent_execution.clone())
-    else {
-        return Ok(None);
-    };
-    let parent_running = snapshot.executions.iter().any(|execution| {
-        execution.id == parent_id
-            && execution.kind == ExecutionKind::Workflow
-            && execution.state == ExecutionState::Running
-    });
-    if !parent_running {
-        return Ok(None);
+    let mut scope = Some(completed_execution.clone());
+    while let Some(scope_id) = scope {
+        let Some(scope_execution) = snapshot
+            .executions
+            .iter()
+            .find(|execution| execution.id == scope_id)
+        else {
+            return Ok(None);
+        };
+        if matches!(
+            scope_execution.state,
+            ExecutionState::Failed | ExecutionState::Cancelled | ExecutionState::Interrupted
+        ) {
+            return Ok(None);
+        }
+        if let Some(pending) = snapshot.executions.iter().find(|candidate| {
+            candidate.state == ExecutionState::Pending
+                && execution_is_descendant(&snapshot.executions, &candidate.id, &scope_id)
+        }) {
+            return Ok(Some(pending.id.clone()));
+        }
+        scope = scope_execution.parent_execution.clone();
     }
-    Ok(snapshot
-        .executions
-        .into_iter()
-        .find(|execution| {
-            execution.parent_execution.as_ref() == Some(&parent_id)
-                && execution.state == ExecutionState::Pending
-        })
-        .map(|execution| execution.id))
+    Ok(None)
+}
+
+fn execution_is_descendant(
+    executions: &[phenix_core::ExecutionSummary],
+    candidate: &ExecutionId,
+    ancestor: &ExecutionId,
+) -> bool {
+    let mut parent = executions
+        .iter()
+        .find(|execution| execution.id == *candidate)
+        .and_then(|execution| execution.parent_execution.clone());
+    while let Some(parent_id) = parent {
+        if parent_id == *ancestor {
+            return true;
+        }
+        parent = executions
+            .iter()
+            .find(|execution| execution.id == parent_id)
+            .and_then(|execution| execution.parent_execution.clone());
+    }
+    false
 }
 
 fn fail_shared_execution(
@@ -1105,7 +1133,16 @@ impl BackendHost for SharedRuntimeHost {
                     self.execution_id
                 )));
             }
-            runtime.invoke_tool(&self.execution_id, &self.allowed_tools, invocation)?
+            if semantic_tools::is_semantic_tool(&invocation.callable) {
+                semantic_tools::invoke(
+                    &mut runtime,
+                    &self.execution_id,
+                    &self.allowed_tools,
+                    invocation,
+                )?
+            } else {
+                runtime.invoke_tool(&self.execution_id, &self.allowed_tools, invocation)?
+            }
         };
         self.persist()?;
         Ok(result)
@@ -1399,8 +1436,9 @@ mod tests {
     use super::*;
     use phenix_backend::{BackendExecutionRequest, BackendSessionRequest};
     use phenix_core::{
-        CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet, InferenceOptions, ModelId,
-        ModelTarget, ProviderId, WorkflowDefinition, WorkflowExecutionPolicy, WorkflowStep,
+        AgentNode, CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet,
+        InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition, OrchestrationPolicy,
+        ProviderId,
     };
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1454,10 +1492,10 @@ mod tests {
             .register_agent(descriptor("agent.child", CallableKind::Agent))
             .unwrap();
         runtime
-            .register_workflow(WorkflowDefinition {
-                descriptor: descriptor("workflow.tree", CallableKind::Workflow),
-                policy: WorkflowExecutionPolicy::Sequential,
-                steps: vec![WorkflowStep {
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor("workflow.tree", CallableKind::Orchestration),
+                policy: OrchestrationPolicy::Sequential,
+                nodes: vec![AgentNode {
                     callable: CallableId::parse("agent.child").unwrap(),
                     objective: Some("child".to_owned()),
                 }],
@@ -1469,7 +1507,7 @@ mod tests {
             .unwrap();
         let root = runtime.submit(&session.id, "root").unwrap();
         let workflow = runtime
-            .start_workflow(
+            .start_orchestration(
                 &root.id,
                 &CallableId::parse("workflow.tree").unwrap(),
                 "tree",

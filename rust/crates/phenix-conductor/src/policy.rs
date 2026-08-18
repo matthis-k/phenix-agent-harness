@@ -6,8 +6,8 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CallableOperation {
     StartAgent,
-    StartWorkflow,
-    StartWorkflowStep,
+    StartOrchestration,
+    StartAgentNode,
     DispatchProvider,
     InvokeTool,
 }

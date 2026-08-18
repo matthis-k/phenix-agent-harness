@@ -6,7 +6,7 @@ use crate::{
 use phenix_backend::ToolResult;
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, SessionId, WorkflowDefinition,
+    ExecutionState, ExecutionSummary, OrchestrationDefinition, SessionId,
 };
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -25,8 +25,8 @@ pub enum CallableRegistryError {
         actual: CallableKind,
     },
     NotExecutable(CallableId),
-    EmptyWorkflow(CallableId),
-    InvalidWorkflowStep {
+    EmptyOrchestration(CallableId),
+    InvalidAgentNode {
         workflow: CallableId,
         callable: CallableId,
     },
@@ -46,8 +46,8 @@ impl Display for CallableRegistryError {
                 "callable {callable} has kind {actual:?}, expected {expected:?}"
             ),
             Self::NotExecutable(id) => write!(f, "callable is not execution-provider backed: {id}"),
-            Self::EmptyWorkflow(id) => write!(f, "workflow has no steps: {id}"),
-            Self::InvalidWorkflowStep { workflow, callable } => write!(
+            Self::EmptyOrchestration(id) => write!(f, "workflow has no nodes: {id}"),
+            Self::InvalidAgentNode { workflow, callable } => write!(
                 f,
                 "workflow {workflow} references non-executable or unknown callable {callable}"
             ),
@@ -60,7 +60,7 @@ impl Error for CallableRegistryError {}
 enum CallableImplementation {
     Tool(Arc<ToolHandler>),
     Executable(ExecutionProviderBinding),
-    Workflow(Box<WorkflowDefinition>),
+    Orchestration(Box<OrchestrationDefinition>),
 }
 
 struct CallableEntry {
@@ -143,31 +143,31 @@ impl CallableRegistry {
         )
     }
 
-    pub fn register_workflow(
+    pub fn register_orchestration(
         &mut self,
-        definition: WorkflowDefinition,
+        definition: OrchestrationDefinition,
     ) -> Result<(), CallableRegistryError> {
-        if definition.descriptor.kind != CallableKind::Workflow {
+        if definition.descriptor.kind != CallableKind::Orchestration {
             return Err(CallableRegistryError::WrongKind {
                 callable: definition.descriptor.id,
-                expected: CallableKind::Workflow,
+                expected: CallableKind::Orchestration,
                 actual: definition.descriptor.kind,
             });
         }
-        if definition.steps.is_empty() {
-            return Err(CallableRegistryError::EmptyWorkflow(
+        if definition.nodes.is_empty() {
+            return Err(CallableRegistryError::EmptyOrchestration(
                 definition.descriptor.id,
             ));
         }
-        for step in &definition.steps {
+        for step in &definition.nodes {
             let Some(entry) = self.entries.get(&step.callable) else {
-                return Err(CallableRegistryError::InvalidWorkflowStep {
+                return Err(CallableRegistryError::InvalidAgentNode {
                     workflow: definition.descriptor.id.clone(),
                     callable: step.callable.clone(),
                 });
             };
             if !entry.is_executable() {
-                return Err(CallableRegistryError::InvalidWorkflowStep {
+                return Err(CallableRegistryError::InvalidAgentNode {
                     workflow: definition.descriptor.id.clone(),
                     callable: step.callable.clone(),
                 });
@@ -176,8 +176,8 @@ impl CallableRegistry {
         let descriptor = definition.descriptor.clone();
         self.register(
             descriptor,
-            CallableKind::Workflow,
-            CallableImplementation::Workflow(Box::new(definition)),
+            CallableKind::Orchestration,
+            CallableImplementation::Orchestration(Box::new(definition)),
         )
     }
 
@@ -248,16 +248,19 @@ impl CallableRegistry {
         }
     }
 
-    pub fn workflow(&self, id: &CallableId) -> Result<&WorkflowDefinition, CallableRegistryError> {
+    pub fn orchestration(
+        &self,
+        id: &CallableId,
+    ) -> Result<&OrchestrationDefinition, CallableRegistryError> {
         let entry = self
             .entries
             .get(id)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
         match &entry.implementation {
-            CallableImplementation::Workflow(definition) => Ok(definition.as_ref()),
+            CallableImplementation::Orchestration(definition) => Ok(definition.as_ref()),
             _ => Err(CallableRegistryError::WrongKind {
                 callable: id.clone(),
-                expected: CallableKind::Workflow,
+                expected: CallableKind::Orchestration,
                 actual: entry.descriptor.kind.clone(),
             }),
         }
@@ -334,37 +337,37 @@ impl ConductorRuntime {
                     objective,
                 )
             }
-            CallableKind::Workflow => {
-                let definition = self.callables.workflow(callable)?.clone();
+            CallableKind::Orchestration => {
+                let definition = self.callables.orchestration(callable)?.clone();
                 self.check_session_callable_policy(
                     session_id,
                     &execution_id,
                     &definition.descriptor,
-                    CallableOperation::StartWorkflow,
+                    CallableOperation::StartOrchestration,
                 )?;
-                for step in &definition.steps {
+                for step in &definition.nodes {
                     let step_descriptor = self.callables.descriptor(&step.callable)?.clone();
                     self.callables.execution_provider(&step.callable)?;
                     self.check_session_callable_policy(
                         session_id,
                         &execution_id,
                         &step_descriptor,
-                        CallableOperation::StartWorkflowStep,
+                        CallableOperation::StartAgentNode,
                     )?;
                 }
                 let summary = self.create_session_callable_execution(
                     session_id,
                     execution_id,
-                    ExecutionKind::Workflow,
+                    ExecutionKind::Orchestration,
                     callable.clone(),
-                    ExecutionPayload::Workflow {
+                    ExecutionPayload::Orchestration {
                         objective: objective.clone(),
-                        next_step: 0,
+                        next_node: 0,
                     },
                     objective,
                 )?;
                 self.set_state(&summary.id, ExecutionState::Running)?;
-                self.advance_workflow(&summary.id)?;
+                self.advance_orchestration(&summary.id)?;
                 Ok(self
                     .executions
                     .get(&summary.id)
@@ -457,8 +460,8 @@ mod tests {
         ExecutionProviderRequest,
     };
     use phenix_core::{
-        BackendId, CallablePolicy, CapabilitySet, ExecutionTarget, InferenceOptions, ModelId,
-        ModelTarget, ProviderId, WorkflowExecutionPolicy, WorkflowStep,
+        AgentNode, BackendId, CallablePolicy, CapabilitySet, ExecutionTarget, InferenceOptions,
+        ModelId, ModelTarget, OrchestrationPolicy, ProviderId,
     };
     use serde_json::json;
 
@@ -547,10 +550,10 @@ mod tests {
             .register_provider_agent(descriptor("native", CallableKind::Agent), TestProvider)
             .unwrap();
         registry
-            .register_workflow(WorkflowDefinition {
-                descriptor: descriptor("workflow", CallableKind::Workflow),
-                policy: WorkflowExecutionPolicy::Sequential,
-                steps: vec![WorkflowStep {
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor("workflow", CallableKind::Orchestration),
+                policy: OrchestrationPolicy::Sequential,
+                nodes: vec![AgentNode {
                     callable: CallableId::parse("native").unwrap(),
                     objective: None,
                 }],
@@ -615,10 +618,10 @@ mod tests {
             .register_agent(descriptor("worker", CallableKind::Agent))
             .unwrap();
         runtime
-            .register_workflow(WorkflowDefinition {
-                descriptor: descriptor("implement", CallableKind::Workflow),
-                policy: WorkflowExecutionPolicy::Sequential,
-                steps: vec![WorkflowStep {
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor("implement", CallableKind::Orchestration),
+                policy: OrchestrationPolicy::Sequential,
+                nodes: vec![AgentNode {
                     callable: CallableId::parse("worker").unwrap(),
                     objective: None,
                 }],
@@ -634,7 +637,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(workflow.parent_execution, None);
-        assert_eq!(workflow.kind, ExecutionKind::Workflow);
+        assert_eq!(workflow.kind, ExecutionKind::Orchestration);
         assert_eq!(workflow.state, ExecutionState::Running);
         let child = runtime
             .snapshot()

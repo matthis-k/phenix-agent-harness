@@ -138,7 +138,8 @@ pub enum ExecutionTarget {
 pub enum CallableKind {
     Tool,
     Agent,
-    Workflow,
+    #[serde(rename = "workflow")]
+    Orchestration,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -175,21 +176,21 @@ pub struct RoutingProfileDescriptor {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkflowExecutionPolicy {
+pub enum OrchestrationPolicy {
     Sequential,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorkflowStep {
+pub struct AgentNode {
     pub callable: CallableId,
     pub objective: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorkflowDefinition {
+pub struct OrchestrationDefinition {
     pub descriptor: CallableDescriptor,
-    pub policy: WorkflowExecutionPolicy,
-    pub steps: Vec<WorkflowStep>,
+    pub policy: OrchestrationPolicy,
+    pub nodes: Vec<AgentNode>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -197,7 +198,8 @@ pub struct WorkflowDefinition {
 pub enum ExecutionKind {
     Root,
     Agent,
-    Workflow,
+    #[serde(rename = "workflow")]
+    Orchestration,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
