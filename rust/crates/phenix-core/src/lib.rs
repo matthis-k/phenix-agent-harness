@@ -168,6 +168,12 @@ pub struct RoutingProfile {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RoutingProfileDescriptor {
+    pub id: RoutingProfileId,
+    pub providers: Vec<ProviderId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowExecutionPolicy {
     Sequential,
