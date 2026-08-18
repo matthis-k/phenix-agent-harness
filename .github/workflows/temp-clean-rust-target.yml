@@ -1,0 +1,33 @@
+name: Temporary rust target cleanup
+
+on:
+  push:
+    branches:
+      - feat/auth-discovery-strategies
+    paths:
+      - .github/workflows/temp-clean-rust-target.yml
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: feat/auth-discovery-strategies
+      - name: Remove generated Cargo artifacts
+        run: |
+          set -euo pipefail
+          rm -rf rust/target
+          if ! grep -qxF 'rust/target/' .gitignore; then
+            printf '\nrust/target/\n' >> .gitignore
+          fi
+          rm .github/workflows/temp-clean-rust-target.yml
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'chore: ignore Rust build artifacts'
+          git push origin HEAD:feat/auth-discovery-strategies
