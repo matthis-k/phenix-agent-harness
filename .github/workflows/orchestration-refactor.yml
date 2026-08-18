@@ -1,9 +1,9 @@
 name: Orchestration terminology refactor
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/orchestration-terminology
+      - main
 
 permissions:
   contents: write
@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: agent/orchestration-terminology
           fetch-depth: 0
       - name: Restore native agent tooling tree
         run: |
