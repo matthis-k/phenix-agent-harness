@@ -96,10 +96,7 @@ mod tests {
             .register(RoutingProfile {
                 id: RoutingProfileId::parse("default").unwrap(),
                 default_target: model("mock", "root"),
-                callable_targets: BTreeMap::from([(
-                    agent.clone(),
-                    model("mock", "scout"),
-                )]),
+                callable_targets: BTreeMap::from([(agent.clone(), model("mock", "scout"))]),
             })
             .unwrap();
         assert_eq!(
@@ -118,20 +115,14 @@ mod tests {
             .register(RoutingProfile {
                 id: RoutingProfileId::parse("router.zeta").unwrap(),
                 default_target: model("openai-codex", "root"),
-                callable_targets: BTreeMap::from([(
-                    agent.clone(),
-                    model("opencode-go", "scout"),
-                )]),
+                callable_targets: BTreeMap::from([(agent.clone(), model("opencode-go", "scout"))]),
             })
             .unwrap();
         routing
             .register(RoutingProfile {
                 id: RoutingProfileId::parse("router.alpha").unwrap(),
                 default_target: model("openai-api", "root"),
-                callable_targets: BTreeMap::from([(
-                    agent,
-                    model("openai-api", "scout"),
-                )]),
+                callable_targets: BTreeMap::from([(agent, model("openai-api", "scout"))]),
             })
             .unwrap();
 
