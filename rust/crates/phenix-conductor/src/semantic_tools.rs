@@ -35,10 +35,7 @@ pub(super) fn extend_root_workflow_tools(
 }
 
 pub(super) fn is_semantic_tool(id: &CallableId) -> bool {
-    matches!(
-        id.as_str(),
-        ORCHESTRATION_LIST_ID | ORCHESTRATION_START_ID
-    )
+    matches!(id.as_str(), ORCHESTRATION_LIST_ID | ORCHESTRATION_START_ID)
 }
 
 pub(super) fn invoke(
@@ -126,7 +123,10 @@ pub(super) fn invoke(
 }
 
 fn descriptors() -> Vec<CallableDescriptor> {
-    vec![orchestration_list_descriptor(), orchestration_start_descriptor()]
+    vec![
+        orchestration_list_descriptor(),
+        orchestration_start_descriptor(),
+    ]
 }
 
 fn parse_list(arguments_json: &str) -> Result<(), String> {
