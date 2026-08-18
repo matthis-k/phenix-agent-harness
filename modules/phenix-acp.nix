@@ -40,7 +40,7 @@ _: {
             candidate="$HOME"
             ;;
           "~/"*)
-            candidate="$HOME/''${path#~/}"
+            candidate="$HOME/''${path:2}"
             ;;
           /*)
             candidate="$path"
