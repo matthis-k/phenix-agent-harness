@@ -9,7 +9,7 @@ use phenix_backend::{
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget,
-    RoutingProfileId, SessionId, SessionState,
+    RoutingProfileDescriptor, SessionId, SessionState,
 };
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
@@ -1218,8 +1218,8 @@ impl ConductorRuntime {
             .map(|record| record.summary.state.clone())
     }
 
-    fn routing_profiles(&self) -> Vec<RoutingProfileId> {
-        self.routing.profiles()
+    fn routing_profiles(&self) -> Vec<RoutingProfileDescriptor> {
+        self.routing.descriptors()
     }
 }
 
