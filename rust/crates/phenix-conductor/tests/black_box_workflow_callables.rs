@@ -233,7 +233,10 @@ fn workflow_catalog_and_execution_use_the_real_server_and_agent_tool_path() {
         .map(|descriptor| (descriptor.id.as_str(), descriptor.kind.clone()))
         .collect::<BTreeMap<_, _>>();
     assert_eq!(callable_kinds.get("probe"), Some(&CallableKind::Tool));
-    assert_eq!(callable_kinds.get("agent.scout"), Some(&CallableKind::Agent));
+    assert_eq!(
+        callable_kinds.get("agent.scout"),
+        Some(&CallableKind::Agent)
+    );
     assert_eq!(
         callable_kinds.get("agent.verifier"),
         Some(&CallableKind::Agent)
@@ -287,7 +290,9 @@ fn workflow_catalog_and_execution_use_the_real_server_and_agent_tool_path() {
             .count(),
         2
     );
-    assert!(snapshot.executions.iter().filter(|execution| {
-        execution.parent_execution.as_ref() == Some(&workflow_execution.id)
-    }).all(|execution| execution.state == ExecutionState::Completed));
+    assert!(snapshot
+        .executions
+        .iter()
+        .filter(|execution| { execution.parent_execution.as_ref() == Some(&workflow_execution.id) })
+        .all(|execution| execution.state == ExecutionState::Completed));
 }
