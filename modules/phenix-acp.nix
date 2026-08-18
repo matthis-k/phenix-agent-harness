@@ -4,6 +4,77 @@ _: {
     let
       rustSource = pkgs.lib.cleanSource ../rust;
 
+      phenixWorkspaceGrep = pkgs.writeShellScript "phenix-workspace-grep" ''
+        set -euo pipefail
+
+        ignore_case=()
+        while (( "$#" > 0 )); do
+          case "$1" in
+            --recursive|--line-number|--with-filename|--binary-files=without-match|--exclude-dir=.git)
+              shift
+              ;;
+            --ignore-case)
+              ignore_case+=(--ignore-case)
+              shift
+              ;;
+            --)
+              shift
+              break
+              ;;
+            *)
+              printf 'unsupported grep option: %s\n' "$1" >&2
+              exit 2
+              ;;
+          esac
+        done
+
+        if (( "$#" != 2 )); then
+          printf 'expected grep pattern and path, got %s arguments\n' "$#" >&2
+          exit 2
+        fi
+
+        pattern="$1"
+        path="$2"
+        case "$path" in
+          "~")
+            candidate="$HOME"
+            ;;
+          "~/"*)
+            candidate="$HOME/''${path:2}"
+            ;;
+          /*)
+            candidate="$path"
+            ;;
+          *)
+            candidate="$PWD/$path"
+            ;;
+        esac
+
+        workspace="$(${pkgs.coreutils}/bin/realpath -m -- "$PWD")"
+        candidate="$(${pkgs.coreutils}/bin/realpath -m -- "$candidate")"
+        case "$candidate" in
+          "$workspace"|"$workspace"/*)
+            ;;
+          *)
+            printf 'grep path escapes workspace: %s\n' "$path" >&2
+            exit 2
+            ;;
+        esac
+        search_path="$(${pkgs.coreutils}/bin/realpath -m --relative-to="$workspace" -- "$candidate")"
+
+        exec ${pkgs.ripgrep}/bin/rg \
+          --hidden \
+          --no-ignore \
+          --line-number \
+          --with-filename \
+          --no-heading \
+          --color never \
+          --glob '!.git/**' \
+          --glob '!**/.git/**' \
+          "''${ignore_case[@]}" \
+          -- "$pattern" "$search_path"
+      '';
+
       phenixConductor = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-conductor";
         version = "0";
@@ -30,7 +101,7 @@ _: {
           cp "$conductor_binary" "$out/libexec/phenix-conductor"
           makeWrapper "$out/libexec/phenix-conductor" "$out/bin/phenix-conductor" \
             --set PHENIX_BASH "${pkgs.bash}/bin/bash" \
-            --set PHENIX_GREP "${pkgs.gnugrep}/bin/grep" \
+            --set PHENIX_GREP "${phenixWorkspaceGrep}" \
             --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
             --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           runHook postInstall
@@ -72,6 +143,44 @@ _: {
           }
           ''
             phenix-acp-smoke
+
+            grep_home="$TMPDIR/grep-home"
+            grep_workspace="$grep_home/phenix/repos/phenix-nvim"
+            mkdir -p "$grep_workspace/lua/phenix" "$grep_workspace/.git"
+            printf '%s\n' 'transcript input' > "$grep_workspace/lua/phenix/ui.lua"
+            printf '%s\n' 'transcript should not escape .git' > "$grep_workspace/.git/secret.txt"
+            (
+              cd "$grep_workspace"
+              HOME="$grep_home" "${phenixWorkspaceGrep}" \
+                --recursive \
+                --line-number \
+                --with-filename \
+                --binary-files=without-match \
+                --exclude-dir=.git \
+                -- \
+                'transcript|input' \
+                '~/phenix/repos/phenix-nvim'
+            ) > "$TMPDIR/grep-output.txt"
+            grep -F -- 'lua/phenix/ui.lua:1:transcript input' "$TMPDIR/grep-output.txt" >/dev/null
+            if grep -F -- '.git/secret.txt' "$TMPDIR/grep-output.txt" >/dev/null; then
+              echo 'workspace grep searched .git unexpectedly' >&2
+              exit 1
+            fi
+            if (
+              cd "$grep_workspace"
+              HOME="$grep_home" "${phenixWorkspaceGrep}" \
+                --recursive \
+                --line-number \
+                --with-filename \
+                --binary-files=without-match \
+                --exclude-dir=.git \
+                -- \
+                transcript \
+                '~/outside'
+            ) >/dev/null 2>&1; then
+              echo 'workspace grep accepted a path outside the workspace' >&2
+              exit 1
+            fi
 
             conductor="${phenixConductor}/bin/phenix-conductor"
             "$conductor" --help > "$TMPDIR/conductor-help.txt"
