@@ -153,6 +153,20 @@ fn parse_start(arguments_json: &str) -> Result<(CallableId, String), String> {
 }
 
 fn list_output(orchestrations: Vec<CallableDescriptor>) -> String {
+    let orchestrations = orchestrations
+        .into_iter()
+        .map(|descriptor| {
+            json!({
+                "id": descriptor.id,
+                "kind": "orchestration",
+                "description": descriptor.description,
+                "input_schema": descriptor.input_schema,
+                "output_schema": descriptor.output_schema,
+                "capabilities": descriptor.capabilities,
+                "policy": descriptor.policy,
+            })
+        })
+        .collect::<Vec<_>>();
     json!({ "orchestrations": orchestrations }).to_string()
 }
 
@@ -160,7 +174,7 @@ fn start_output(execution: &ExecutionSummary) -> String {
     json!({
         "execution_id": execution.id,
         "callable": execution.callable,
-        "kind": execution.kind,
+        "kind": "orchestration",
         "state": execution.state,
     })
     .to_string()
