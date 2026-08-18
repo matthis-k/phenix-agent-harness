@@ -8,8 +8,8 @@ use phenix_backend::{
 };
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget, SessionId,
-    SessionState,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget,
+    RoutingProfileDescriptor, SessionId, SessionState,
 };
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
@@ -260,6 +260,11 @@ impl ConductorServer {
                 self.respond(output, id, Ok(Reply::CallableCatalog { callables }))?;
                 return Ok(());
             }
+            Command::GetRoutingCatalog => {
+                let profiles = self.lock_runtime()?.routing_profiles();
+                self.respond(output, id, Ok(Reply::RoutingCatalog { profiles }))?;
+                return Ok(());
+            }
             _ => {}
         }
         let persist = matches!(
@@ -337,6 +342,9 @@ impl ConductorServer {
             }
             Command::GetCallableCatalog => {
                 unreachable!("callable catalog handled before dispatch")
+            }
+            Command::GetRoutingCatalog => {
+                unreachable!("routing catalog handled before dispatch")
             }
         };
 
@@ -1208,6 +1216,10 @@ impl ConductorRuntime {
         self.executions
             .get(execution_id)
             .map(|record| record.summary.state.clone())
+    }
+
+    fn routing_profiles(&self) -> Vec<RoutingProfileDescriptor> {
+        self.routing.descriptors()
     }
 }
 

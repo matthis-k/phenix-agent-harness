@@ -18,3 +18,5 @@ result-*
 # Generated QA output
 /.phenix-qa/
 /qa-results/
+
+rust/target/

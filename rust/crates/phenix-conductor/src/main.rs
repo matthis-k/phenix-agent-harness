@@ -7,6 +7,7 @@ use std::error::Error;
 use std::io;
 use std::path::PathBuf;
 
+mod configuration;
 #[cfg(unix)]
 mod local_service;
 
@@ -20,6 +21,10 @@ struct Arguments {
     /// Working directory associated with the frontend connection.
     #[arg(long, value_name = "DIR")]
     cwd: Option<PathBuf>,
+
+    /// Application-owned executable configuration rebound for this process.
+    #[arg(long, value_name = "FILE")]
+    configuration: Option<PathBuf>,
 
     /// Durable conductor checkpoint. If omitted the process is ephemeral.
     #[arg(long, value_name = "FILE")]
@@ -59,6 +64,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(path) => ConductorServer::load_or_new(JsonFileStore::new(path))?,
         None => ConductorServer::new(ConductorRuntime::new()),
     };
+
+    if let Some(path) = arguments.configuration {
+        let configuration = configuration::RuntimeConfiguration::load(path)?;
+        let mut runtime = server.runtime();
+        configuration.apply(&mut runtime)?;
+    }
 
     // Product invariant: a bare conductor is immediately usable. External ACP
     // registrations extend this backend set; they never supply the default.

@@ -1,5 +1,7 @@
-use phenix_core::{CallableId, ModelTarget, RoutingProfile, RoutingProfileId};
-use std::collections::BTreeMap;
+use phenix_core::{
+    CallableId, ModelTarget, RoutingProfile, RoutingProfileDescriptor, RoutingProfileId,
+};
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -34,6 +36,28 @@ impl RoutingRegistry {
         Ok(())
     }
 
+    /// Returns the configured routing profiles with the distinct providers that
+    /// must be authenticated before the profile can be used.
+    #[must_use]
+    pub fn descriptors(&self) -> Vec<RoutingProfileDescriptor> {
+        self.profiles
+            .values()
+            .map(|profile| {
+                let mut providers = BTreeSet::from([profile.default_target.provider.clone()]);
+                providers.extend(
+                    profile
+                        .callable_targets
+                        .values()
+                        .map(|target| target.provider.clone()),
+                );
+                RoutingProfileDescriptor {
+                    id: profile.id.clone(),
+                    providers: providers.into_iter().collect(),
+                }
+            })
+            .collect()
+    }
+
     pub fn resolve(
         &self,
         profile: &RoutingProfileId,
@@ -55,10 +79,10 @@ mod tests {
     use super::*;
     use phenix_core::{BackendId, InferenceOptions, ModelId, ProviderId};
 
-    fn model(name: &str) -> ModelTarget {
+    fn model(provider: &str, name: &str) -> ModelTarget {
         ModelTarget {
             backend: BackendId::parse("mock").unwrap(),
-            provider: ProviderId::parse("mock").unwrap(),
+            provider: ProviderId::parse(provider).unwrap(),
             model: ModelId::parse(name).unwrap(),
             inference: InferenceOptions::default(),
         }
@@ -71,15 +95,52 @@ mod tests {
         routing
             .register(RoutingProfile {
                 id: RoutingProfileId::parse("default").unwrap(),
-                default_target: model("root"),
-                callable_targets: BTreeMap::from([(agent.clone(), model("scout"))]),
+                default_target: model("mock", "root"),
+                callable_targets: BTreeMap::from([(agent.clone(), model("mock", "scout"))]),
             })
             .unwrap();
         assert_eq!(
             routing
                 .resolve(&RoutingProfileId::parse("default").unwrap(), Some(&agent))
                 .unwrap(),
-            model("scout")
+            model("mock", "scout")
+        );
+    }
+
+    #[test]
+    fn catalog_is_sorted_and_lists_every_distinct_provider() {
+        let agent = CallableId::parse("agent.scout").unwrap();
+        let mut routing = RoutingRegistry::default();
+        routing
+            .register(RoutingProfile {
+                id: RoutingProfileId::parse("router.zeta").unwrap(),
+                default_target: model("openai-codex", "root"),
+                callable_targets: BTreeMap::from([(agent.clone(), model("opencode-go", "scout"))]),
+            })
+            .unwrap();
+        routing
+            .register(RoutingProfile {
+                id: RoutingProfileId::parse("router.alpha").unwrap(),
+                default_target: model("openai-api", "root"),
+                callable_targets: BTreeMap::from([(agent, model("openai-api", "scout"))]),
+            })
+            .unwrap();
+
+        assert_eq!(
+            routing.descriptors(),
+            vec![
+                RoutingProfileDescriptor {
+                    id: RoutingProfileId::parse("router.alpha").unwrap(),
+                    providers: vec![ProviderId::parse("openai-api").unwrap()],
+                },
+                RoutingProfileDescriptor {
+                    id: RoutingProfileId::parse("router.zeta").unwrap(),
+                    providers: vec![
+                        ProviderId::parse("openai-codex").unwrap(),
+                        ProviderId::parse("opencode-go").unwrap(),
+                    ],
+                },
+            ]
         );
     }
 }
