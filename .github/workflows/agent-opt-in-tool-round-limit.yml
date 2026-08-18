@@ -1,12 +1,8 @@
 name: agent opt-in tool round limit
 
 on:
-  push:
-    branches:
-      - agent/opt-in-tool-round-limit
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: write
@@ -18,54 +14,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: agent/opt-in-tool-round-limit
+          fetch-depth: 1
       - name: Apply opt-in tool round limit
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
 
-          path = Path('rust/crates/phenix-backend-native/src/lib.rs')
+          path = Path("rust/crates/phenix-backend-native/src/lib.rs")
           source = path.read_text()
 
-          replacements = [
-              (
-                  'use std::collections::{BTreeMap, BTreeSet};\nuse std::sync::atomic::{AtomicBool, Ordering};',
+          replacements = {
+              'use std::collections::{BTreeMap, BTreeSet};\nuse std::sync::atomic::{AtomicBool, Ordering};':
                   'use std::collections::{BTreeMap, BTreeSet};\nuse std::num::NonZeroUsize;\nuse std::sync::atomic::{AtomicBool, Ordering};',
-              ),
-              (
-                  'pub const BACKEND_ID: &str = "phenix";\nconst MAX_TOOL_ROUNDS: usize = 32;',
+              'pub const BACKEND_ID: &str = "phenix";\nconst MAX_TOOL_ROUNDS: usize = 32;':
                   'pub const BACKEND_ID: &str = "phenix";',
-              ),
-              (
-                  '    models: Vec<ModelSelection>,\n    persistent_sessions: BTreeMap<SessionId, Arc<PhenixSession>>,',
+              '    models: Vec<ModelSelection>,\n    persistent_sessions: BTreeMap<SessionId, Arc<PhenixSession>>,':
                   '    models: Vec<ModelSelection>,\n    max_tool_rounds: Option<NonZeroUsize>,\n    persistent_sessions: BTreeMap<SessionId, Arc<PhenixSession>>,',
-              ),
-              (
-                  '            credentials,\n            models: configured_models()?,\n            persistent_sessions: BTreeMap::new(),',
+              '            credentials,\n            models: configured_models()?,\n            persistent_sessions: BTreeMap::new(),':
                   '            credentials,\n            models: configured_models()?,\n            max_tool_rounds: configured_max_tool_rounds()?,\n            persistent_sessions: BTreeMap::new(),',
-              ),
-              (
-                  '            tools: Mutex::new(request.tools),\n            history: Mutex::new(Vec::new()),',
+              '            tools: Mutex::new(request.tools),\n            history: Mutex::new(Vec::new()),':
                   '            tools: Mutex::new(request.tools),\n            max_tool_rounds: self.max_tool_rounds,\n            history: Mutex::new(Vec::new()),',
-              ),
-              (
-                  '    model: Mutex<ModelTarget>,\n    tools: Mutex<PreparedToolSurface>,\n    history: Mutex<Vec<ChatMessage>>,',
+              '    model: Mutex<ModelTarget>,\n    tools: Mutex<PreparedToolSurface>,\n    history: Mutex<Vec<ChatMessage>>,':
                   '    model: Mutex<ModelTarget>,\n    tools: Mutex<PreparedToolSurface>,\n    max_tool_rounds: Option<NonZeroUsize>,\n    history: Mutex<Vec<ChatMessage>>,',
-              ),
-              (
-                  '        let reasoning_effort = parse_reasoning_effort(model.inference.effort.as_deref())?;\n\n        for _round in 0..MAX_TOOL_ROUNDS {',
+              '        let reasoning_effort = parse_reasoning_effort(model.inference.effort.as_deref())?;\n\n        for _round in 0..MAX_TOOL_ROUNDS {':
                   '        let reasoning_effort = parse_reasoning_effort(model.inference.effort.as_deref())?;\n        let mut tool_rounds = 0usize;\n\n        loop {\n            if let Some(limit) = self.max_tool_rounds {\n                if tool_rounds >= limit.get() {\n                    return Err(BackendError::Protocol(format!(\n                        "provider exceeded {limit} consecutive tool rounds"\n                    )));\n                }\n            }\n            tool_rounds += 1;',
-              ),
-              (
-                  '            history.push(ChatMessage::from(responses));\n        }\n\n        Err(BackendError::Protocol(format!(\n            "provider exceeded {MAX_TOOL_ROUNDS} consecutive tool rounds"\n        )))\n    }',
+              '            history.push(ChatMessage::from(responses));\n        }\n\n        Err(BackendError::Protocol(format!(\n            "provider exceeded {MAX_TOOL_ROUNDS} consecutive tool rounds"\n        )))\n    }':
                   '            history.push(ChatMessage::from(responses));\n        }\n    }',
-              ),
-          ]
-
-          for old, new in replacements:
+          }
+          for old, new in replacements.items():
               if old not in source:
-                  raise SystemExit(f'missing expected source fragment:\n{old}')
+                  raise SystemExit(f"missing expected source fragment:\n{old}")
               source = source.replace(old, new, 1)
 
           marker = 'fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {'
@@ -92,7 +72,7 @@ jobs:
 
           '''
           if marker not in source:
-              raise SystemExit('configured_models marker missing')
+              raise SystemExit("configured_models marker missing")
           source = source.replace(marker, helper + marker, 1)
 
           test_marker = '    #[test]\n    fn reasoning_effort_uses_typed_inference_option() {'
@@ -100,10 +80,7 @@ jobs:
               fn tool_round_limit_is_opt_in() {
                   assert_eq!(parse_max_tool_rounds(None).unwrap(), None);
                   assert_eq!(parse_max_tool_rounds(Some("  ")).unwrap(), None);
-                  assert_eq!(
-                      parse_max_tool_rounds(Some("7")).unwrap().unwrap().get(),
-                      7
-                  );
+                  assert_eq!(parse_max_tool_rounds(Some("7")).unwrap().unwrap().get(), 7);
                   assert!(matches!(
                       parse_max_tool_rounds(Some("0")),
                       Err(BackendError::Protocol(_))
@@ -116,9 +93,8 @@ jobs:
 
           '''
           if test_marker not in source:
-              raise SystemExit('reasoning effort test marker missing')
+              raise SystemExit("reasoning effort test marker missing")
           source = source.replace(test_marker, test + test_marker, 1)
-
           path.write_text(source)
           PY
       - name: Format and test native backend
