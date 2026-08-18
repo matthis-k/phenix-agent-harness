@@ -1,0 +1,55 @@
+name: "Temporary workflow objective fix"
+
+on:
+  push:
+    branches:
+      - "feat/auth-discovery-strategies"
+    paths:
+      - ".github/workflows/temp-workflow-objective-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: feat/auth-discovery-strategies
+
+      - name: Preserve workflow objective in guided steps
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("rust/crates/phenix-conductor/src/lib.rs")
+          source = path.read_text()
+          old = '''        self.start_agent(
+              execution_id,
+              &step.callable,
+              step.objective.unwrap_or(objective),
+          )?;
+'''
+          new = '''        let objective = match step.objective {
+              Some(step_objective) => {
+                  format!("{step_objective}\\n\\nWorkflow objective:\\n{objective}")
+              }
+              None => objective,
+          };
+          self.start_agent(execution_id, &step.callable, objective)?;
+'''
+          if old not in source:
+              raise SystemExit("workflow dispatch pattern not found")
+          path.write_text(source.replace(old, new, 1))
+          PY
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff -- rust/crates/phenix-conductor/src/lib.rs rust/crates/phenix-conductor/tests/workflow_objective.rs
+
+      - name: Commit fix
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/crates/phenix-conductor/src/lib.rs rust/crates/phenix-conductor/tests/workflow_objective.rs
+          git commit -m 'fix: preserve workflow objectives in guided steps'
+          git push origin HEAD:feat/auth-discovery-strategies
