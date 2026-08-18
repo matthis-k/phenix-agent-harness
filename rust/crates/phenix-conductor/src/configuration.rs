@@ -184,6 +184,45 @@ mod tests {
     }
 
     #[test]
+    fn configured_workflow_step_keeps_the_user_objective() {
+        let agent = descriptor("agent.worker", CallableKind::Agent);
+        let workflow_id = CallableId::parse("workflow.implement").unwrap();
+        let configuration = RuntimeConfiguration {
+            agents: vec![agent.clone()],
+            workflows: vec![WorkflowDefinition {
+                descriptor: descriptor(workflow_id.as_str(), CallableKind::Workflow),
+                policy: WorkflowExecutionPolicy::Sequential,
+                steps: vec![WorkflowStep {
+                    callable: agent.id,
+                    objective: Some("Implement the bounded change.".to_owned()),
+                }],
+            }],
+            ..RuntimeConfiguration::default()
+        };
+        let mut runtime = ConductorRuntime::new();
+        configuration.apply(&mut runtime).unwrap();
+
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(target("worker")))
+            .unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let workflow = runtime
+            .start_workflow(&root.id, &workflow_id, "Fix routing selection")
+            .unwrap();
+        let child = runtime
+            .snapshot()
+            .executions
+            .into_iter()
+            .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .expect("workflow child exists");
+
+        assert_eq!(
+            runtime.resolve_invocation(&child.id).unwrap().prompt,
+            "Implement the bounded change.\n\nWorkflow objective:\nFix routing selection"
+        );
+    }
+
+    #[test]
     fn application_configuration_rejects_wrong_callable_kinds() {
         let configuration = RuntimeConfiguration {
             agents: vec![descriptor("tool.not-an-agent", CallableKind::Tool)],
