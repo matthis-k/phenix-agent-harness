@@ -20,6 +20,7 @@ jobs:
 
       - name: Update protocol workflow prompt expectation
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           path = Path("rust/crates/phenix-conductor/tests/protocol_e2e.rs")
