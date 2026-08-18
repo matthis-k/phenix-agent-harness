@@ -67,10 +67,18 @@ impl Display for ConfigurationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read { path, source } => {
-                write!(f, "failed to read conductor configuration {}: {source}", path.display())
+                write!(
+                    f,
+                    "failed to read conductor configuration {}: {source}",
+                    path.display()
+                )
             }
             Self::Parse { path, source } => {
-                write!(f, "invalid conductor configuration {}: {source}", path.display())
+                write!(
+                    f,
+                    "invalid conductor configuration {}: {source}",
+                    path.display()
+                )
             }
             Self::Runtime(source) => write!(f, "invalid conductor configuration: {source}"),
         }
@@ -169,7 +177,10 @@ mod tests {
             )
             .unwrap();
         let execution = runtime.submit(&session.id, "route me").unwrap();
-        assert_eq!(runtime.resolve_invocation(&execution.id).unwrap().model, target("fallback"));
+        assert_eq!(
+            runtime.resolve_invocation(&execution.id).unwrap().model,
+            target("fallback")
+        );
     }
 
     #[test]
