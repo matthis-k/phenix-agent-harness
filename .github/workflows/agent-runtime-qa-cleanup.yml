@@ -1,0 +1,32 @@
+name: Agent runtime QA cleanup
+
+on:
+  push:
+    branches:
+      - agent/runtime-qa-cleanup
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[runtime-qa-cleanup]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply deterministic cleanup
+        run: |
+          python3 -m py_compile .github/agent-runtime-qa-cleanup.py
+          python3 .github/agent-runtime-qa-cleanup.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Commit cleanup
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --stat
+          git commit -m 'fix: complete runtime QA cleanup [runtime-qa-cleanup]'
+          git push
