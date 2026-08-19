@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod callables;
+mod context;
 mod execution_provider;
 mod journal;
 mod persistence;
@@ -9,6 +10,7 @@ mod routing;
 mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError};
+pub use context::{ContextError, ContextRegistry};
 pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
     ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest,
@@ -33,7 +35,7 @@ use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, ConfigRevisionId, ExecutionEvent,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
     ExecutionTarget, ModelTarget, OrchestrationDefinition, RoutingProfile, SessionId, SessionState,
-    SessionSummary, ToolCallId,
+    SessionSummary, SkillDescriptor, SkillId, ToolCallId,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -59,6 +61,7 @@ pub enum ConductorError {
     ExecutionProvider(ExecutionProviderError),
     Journal(JournalError),
     Routing(RoutingRegistryError),
+    Context(ContextError),
     Backend(BackendError),
 }
 
@@ -84,6 +87,7 @@ impl Display for ConductorError {
             Self::ExecutionProvider(error) => Display::fmt(error, f),
             Self::Journal(error) => Display::fmt(error, f),
             Self::Routing(error) => Display::fmt(error, f),
+            Self::Context(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
         }
     }
@@ -118,6 +122,12 @@ impl From<JournalError> for ConductorError {
 impl From<RoutingRegistryError> for ConductorError {
     fn from(value: RoutingRegistryError) -> Self {
         Self::Routing(value)
+    }
+}
+
+impl From<ContextError> for ConductorError {
+    fn from(value: ContextError) -> Self {
+        Self::Context(value)
     }
 }
 
@@ -193,6 +203,7 @@ pub struct ConductorRuntime {
     journal: RuntimeJournal,
     callables: CallableRegistry,
     routing: RoutingRegistry,
+    context: ContextRegistry,
     policy: InvocationPolicy,
     event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
     next_session: u64,
@@ -220,6 +231,7 @@ impl ConductorRuntime {
             events: Vec::new(),
             callables: CallableRegistry::default(),
             routing: RoutingRegistry::default(),
+            context: ContextRegistry::default(),
             policy: InvocationPolicy::new(),
             event_sink: None,
             next_session: 0,
@@ -322,6 +334,24 @@ impl ConductorRuntime {
     ) -> Result<(), ConductorError> {
         self.routing.register(profile)?;
         Ok(())
+    }
+
+    pub fn install_context_registry(&mut self, context: ContextRegistry) {
+        self.context = context;
+    }
+
+    #[must_use]
+    pub fn skill_descriptors(&self) -> Vec<SkillDescriptor> {
+        self.context.skill_descriptors()
+    }
+
+    #[must_use]
+    pub fn has_model_invocable_skills(&self) -> bool {
+        self.context.has_model_invocable_skills()
+    }
+
+    pub fn load_skill(&self, id: &SkillId) -> Result<String, ConductorError> {
+        Ok(self.context.skill_payload(id)?)
     }
 
     #[must_use]
@@ -622,6 +652,8 @@ impl ConductorRuntime {
             route
         };
 
+        let prompt = self.context.compose_prompt(&input)?;
+
         Ok(ResolvedInvocation {
             execution_id: execution_id.clone(),
             session_id: summary.session_id,
@@ -629,7 +661,7 @@ impl ConductorRuntime {
             callable: summary.callable,
             requested_target: route.requested_target,
             model: route.model,
-            prompt: input,
+            prompt,
             tools: ToolProvision {
                 callables: self.callables.tool_descriptors(),
             },

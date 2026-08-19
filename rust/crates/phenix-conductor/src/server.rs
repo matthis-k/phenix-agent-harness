@@ -359,6 +359,11 @@ impl ConductorServer {
                 self.respond(output, id, Ok(Reply::RoutingCatalog { profiles }))?;
                 return Ok(());
             }
+            Command::GetSkillCatalog => {
+                let skills = self.lock_runtime()?.skill_descriptors();
+                self.respond(output, id, Ok(Reply::SkillCatalog { skills }))?;
+                return Ok(());
+            }
             _ => {}
         }
         let persist = matches!(
@@ -439,6 +444,9 @@ impl ConductorServer {
             }
             Command::GetRoutingCatalog => {
                 unreachable!("routing catalog handled before dispatch")
+            }
+            Command::GetSkillCatalog => {
+                unreachable!("skill catalog handled before dispatch")
             }
         };
 

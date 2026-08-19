@@ -2,7 +2,7 @@ use crate::{ConductorRuntime, ResolvedInvocation};
 use phenix_backend::{BackendError, ToolInvocation, ToolResult};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionKind, ExecutionSummary,
+    ExecutionEventKind, ExecutionKind, ExecutionSummary, SkillId,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -10,12 +10,19 @@ use std::collections::BTreeSet;
 
 pub(super) const ORCHESTRATION_LIST_ID: &str = "phenix_orchestration_list";
 pub(super) const ORCHESTRATION_START_ID: &str = "phenix_orchestration_start";
+pub(super) const SKILL_LOAD_ID: &str = "phenix_skill_load";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OrchestrationStartInput {
     orchestration: String,
     objective: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkillLoadInput {
+    skill: String,
 }
 
 pub(super) fn extend_root_workflow_tools(
@@ -30,12 +37,18 @@ pub(super) fn extend_root_workflow_tools(
         .iter()
         .any(|descriptor| descriptor.kind == CallableKind::Orchestration);
     if is_root && has_orchestrations {
-        resolved.tools.callables.extend(descriptors());
+        resolved.tools.callables.extend(orchestration_descriptors());
+    }
+    if runtime.has_model_invocable_skills() {
+        resolved.tools.callables.push(skill_load_descriptor());
     }
 }
 
 pub(super) fn is_semantic_tool(id: &CallableId) -> bool {
-    matches!(id.as_str(), ORCHESTRATION_LIST_ID | ORCHESTRATION_START_ID)
+    matches!(
+        id.as_str(),
+        ORCHESTRATION_LIST_ID | ORCHESTRATION_START_ID | SKILL_LOAD_ID
+    )
 }
 
 pub(super) fn invoke(
@@ -88,6 +101,22 @@ pub(super) fn invoke(
                 success: false,
             },
         },
+        SKILL_LOAD_ID => match parse_skill_load(&invocation.arguments_json) {
+            Ok(skill) => match runtime.load_skill(&skill) {
+                Ok(output) => ToolResult {
+                    output,
+                    success: true,
+                },
+                Err(error) => ToolResult {
+                    output: error.to_string(),
+                    success: false,
+                },
+            },
+            Err(error) => ToolResult {
+                output: error,
+                success: false,
+            },
+        },
         ORCHESTRATION_START_ID => match parse_start(&invocation.arguments_json) {
             Ok((orchestration, objective)) => {
                 match runtime.start_orchestration(execution_id, &orchestration, objective) {
@@ -122,7 +151,7 @@ pub(super) fn invoke(
     Ok(result)
 }
 
-fn descriptors() -> Vec<CallableDescriptor> {
+fn orchestration_descriptors() -> Vec<CallableDescriptor> {
     vec![
         orchestration_list_descriptor(),
         orchestration_start_descriptor(),
@@ -150,6 +179,12 @@ fn parse_start(arguments_json: &str) -> Result<(CallableId, String), String> {
     let orchestration = CallableId::parse(input.orchestration)
         .map_err(|error| format!("invalid orchestration id: {error}"))?;
     Ok((orchestration, input.objective))
+}
+
+fn parse_skill_load(arguments_json: &str) -> Result<SkillId, String> {
+    let input: SkillLoadInput = serde_json::from_str(arguments_json)
+        .map_err(|error| format!("invalid skill load arguments: {error}"))?;
+    SkillId::parse(input.skill).map_err(|error| format!("invalid skill id: {error}"))
 }
 
 fn list_output(orchestrations: Vec<CallableDescriptor>) -> String {
@@ -182,6 +217,33 @@ fn start_output(execution: &ExecutionSummary) -> String {
 
 fn conductor_protocol_error(error: crate::ConductorError) -> BackendError {
     BackendError::Protocol(error.to_string())
+}
+
+fn skill_load_descriptor() -> CallableDescriptor {
+    CallableDescriptor {
+        id: CallableId::parse(SKILL_LOAD_ID).expect("static skill load id"),
+        kind: CallableKind::Tool,
+        description: "Load the full instructions and resource inventory for one discoverable Phenix skill by id. Use the available-skills catalog from context instead of guessing names.".to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["skill"],
+            "properties": {
+                "skill": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Skill id from the available-skills catalog"
+                }
+            }
+        }),
+        output_schema: json!({
+            "type": "string"
+        }),
+        capabilities: CapabilitySet::default(),
+        policy: CallablePolicy {
+            requires_permission: false,
+        },
+    }
 }
 
 fn orchestration_list_descriptor() -> CallableDescriptor {

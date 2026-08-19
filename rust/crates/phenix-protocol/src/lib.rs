@@ -3,7 +3,7 @@
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor,
     CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget,
-    RoutingProfileDescriptor, SessionId, SessionSummary,
+    RoutingProfileDescriptor, SessionId, SessionSummary, SkillDescriptor,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +23,7 @@ pub enum Command {
     GetSnapshot,
     GetCallableCatalog,
     GetRoutingCatalog,
+    GetSkillCatalog,
     CreateSession {
         parent_session: Option<SessionId>,
         name: Option<String>,
@@ -89,6 +90,9 @@ pub enum Reply {
     },
     RoutingCatalog {
         profiles: Vec<RoutingProfileDescriptor>,
+    },
+    SkillCatalog {
+        skills: Vec<SkillDescriptor>,
     },
     Session {
         session: SessionSummary,
@@ -203,6 +207,17 @@ mod tests {
         };
         let value = serde_json::to_value(message).expect("serialize callable catalog request");
         assert_eq!(value["command"]["type"], "get_callable_catalog");
+        assert_eq!(value["command"].as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn skill_catalog_wire_shape_is_conductor_owned() {
+        let request = ClientMessage {
+            id: 12,
+            command: Command::GetSkillCatalog,
+        };
+        let value = serde_json::to_value(request).expect("serialize skill catalog request");
+        assert_eq!(value["command"]["type"], "get_skill_catalog");
         assert_eq!(value["command"].as_object().unwrap().len(), 1);
     }
 
