@@ -1,0 +1,35 @@
+name: Agent runtime QA follow-up
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Apply follow-up
+        run: |
+          python3 -m py_compile .github/agent-runtime-qa-followup.py
+          python3 .github/agent-runtime-qa-followup.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Commit product changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust/crates/phenix-backend-acp/src/lib.rs \
+                  rust/crates/phenix-backend-native/src/lib.rs \
+                  rust/crates/phenix-conductor/src/journal.rs \
+                  rust/crates/phenix-core/src/lib.rs
+          git diff --cached --stat
+          git commit -m 'fix: harden runtime QA migration follow-up'
+          git push
