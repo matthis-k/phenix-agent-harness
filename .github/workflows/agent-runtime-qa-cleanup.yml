@@ -4,18 +4,22 @@ on:
   push:
     branches:
       - agent/runtime-qa-cleanup
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: ${{ !contains(github.event.head_commit.message, '[runtime-qa-cleanup]') }}
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[runtime-qa-cleanup]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
       - name: Apply deterministic cleanup
         run: |
           python3 -m py_compile .github/agent-runtime-qa-cleanup.py
