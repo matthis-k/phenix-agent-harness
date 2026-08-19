@@ -64,8 +64,10 @@ impl ContextRegistry {
     pub fn discover(cwd: impl AsRef<Path>) -> Result<Self, ContextError> {
         let cwd = cwd.as_ref();
         let project_root = project_root(cwd);
-        let mut registry = Self::default();
-        registry.base_documents = discover_base_documents(&project_root, cwd)?;
+        let mut registry = Self {
+            base_documents: discover_base_documents(&project_root, cwd)?,
+            ..Self::default()
+        };
 
         // Lowest to highest precedence. Project-local sources override user sources,
         // portable roots override compatibility roots, and Phenix-native roots win.
