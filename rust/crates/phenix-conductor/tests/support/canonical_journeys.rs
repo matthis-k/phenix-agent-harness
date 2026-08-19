@@ -36,7 +36,7 @@ fn bind_two_step_workflow(runtime: &mut ConductorRuntime) {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
-            descriptor: descriptor("workflow.two-step", CallableKind::Orchestration),
+            descriptor: descriptor("orchestration.two-step", CallableKind::Orchestration),
             policy: OrchestrationPolicy::Sequential,
             nodes: vec![
                 AgentNode {
@@ -335,11 +335,11 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
     bind_two_step_workflow(&mut runtime);
     let session = runtime.create_session(None, None, fixed_target()).unwrap();
     let root = runtime.submit(&session.id, "root").unwrap();
-    let workflow = runtime
+    let orchestration = runtime
         .start_orchestration(
             &root.id,
-            &CallableId::parse("workflow.two-step").unwrap(),
-            "workflow objective",
+            &CallableId::parse("orchestration.two-step").unwrap(),
+            "orchestration objective",
         )
         .unwrap();
     let first = runtime
@@ -347,7 +347,7 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
         .executions
         .into_iter()
         .find(|execution| {
-            execution.parent_execution.as_ref() == Some(&workflow.id)
+            execution.parent_execution.as_ref() == Some(&orchestration.id)
                 && execution
                     .callable
                     .as_ref()
@@ -363,7 +363,7 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
         .executions
         .iter()
         .find(|execution| {
-            execution.parent_execution.as_ref() == Some(&workflow.id)
+            execution.parent_execution.as_ref() == Some(&orchestration.id)
                 && execution
                     .callable
                     .as_ref()
@@ -387,7 +387,7 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
         final_snapshot
             .executions
             .iter()
-            .find(|execution| execution.id == workflow.id)
+            .find(|execution| execution.id == orchestration.id)
             .unwrap()
             .state,
         ExecutionState::Completed

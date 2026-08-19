@@ -191,7 +191,7 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
-                descriptor: descriptor("workflow.test", CallableKind::Orchestration),
+                descriptor: descriptor("orchestration.test", CallableKind::Orchestration),
                 policy: OrchestrationPolicy::Sequential,
                 nodes: vec![
                     AgentNode {
@@ -225,11 +225,11 @@ mod tests {
         bind_workflow_config(&mut runtime);
         let session = runtime.create_session(None, None, fixed()).unwrap();
         let root = runtime.submit(&session.id, "root").unwrap();
-        let workflow = runtime
+        let orchestration = runtime
             .start_orchestration(
                 &root.id,
-                &CallableId::parse("workflow.test").unwrap(),
-                "workflow objective",
+                &CallableId::parse("orchestration.test").unwrap(),
+                "orchestration objective",
             )
             .unwrap();
         let before_snapshot = runtime.snapshot();
@@ -252,7 +252,7 @@ mod tests {
             .executions
             .into_iter()
             .find(|execution| {
-                execution.parent_execution.as_ref() == Some(&workflow.id)
+                execution.parent_execution.as_ref() == Some(&orchestration.id)
                     && execution.kind == ExecutionKind::Agent
                     && execution.state == ExecutionState::Pending
             })
@@ -266,7 +266,7 @@ mod tests {
             snapshot
                 .executions
                 .iter()
-                .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+                .filter(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
                 .count(),
             2
         );

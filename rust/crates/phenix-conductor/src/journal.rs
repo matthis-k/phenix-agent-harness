@@ -14,14 +14,8 @@ pub const JOURNAL_FORMAT_VERSION: u64 = 1;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JournalExecutionPayload {
-    Invocation {
-        input: String,
-    },
-    #[serde(rename = "workflow")]
-    Orchestration {
-        objective: String,
-        next_node: usize,
-    },
+    Invocation { input: String },
+    Orchestration { objective: String, next_node: usize },
 }
 
 impl From<&ExecutionPayload> for JournalExecutionPayload {
@@ -88,7 +82,6 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         state: ExecutionState,
     },
-    #[serde(rename = "workflow_advanced")]
     OrchestrationAdvanced {
         execution_id: ExecutionId,
         next_node: usize,
@@ -438,7 +431,7 @@ pub(crate) fn apply_domain_event(
         } => {
             let execution = state.executions.get_mut(execution_id).ok_or_else(|| {
                 JournalError::InvalidEvent(format!(
-                    "workflow advance references unknown execution {execution_id}"
+                    "orchestration advance references unknown execution {execution_id}"
                 ))
             })?;
             let ExecutionPayload::Orchestration {
@@ -446,12 +439,12 @@ pub(crate) fn apply_domain_event(
             } = &mut execution.payload
             else {
                 return Err(JournalError::InvalidEvent(format!(
-                    "workflow advance references non-workflow execution {execution_id}"
+                    "orchestration advance references non-orchestration execution {execution_id}"
                 )));
             };
             if *next_node != *current + 1 {
                 return Err(JournalError::InvalidEvent(format!(
-                    "workflow {execution_id} advanced from {current} to {next_node}"
+                    "orchestration {execution_id} advanced from {current} to {next_node}"
                 )));
             }
             *current = *next_node;

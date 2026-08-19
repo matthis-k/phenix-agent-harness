@@ -260,7 +260,7 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
-            descriptor: descriptor("workflow.implement", CallableKind::Orchestration),
+            descriptor: descriptor("orchestration.implement", CallableKind::Orchestration),
             policy: OrchestrationPolicy::Sequential,
             nodes: vec![
                 AgentNode {
@@ -276,14 +276,14 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
         .unwrap();
     let session = runtime.create_session(None, None, fixed()).unwrap();
     let root = runtime.submit(&session.id, "root").unwrap();
-    let workflow_id = CallableId::parse("workflow.implement").unwrap();
-    let workflow = runtime
+    let workflow_id = CallableId::parse("orchestration.implement").unwrap();
+    let orchestration = runtime
         .start_orchestration(&root.id, &workflow_id, "implement")
         .unwrap();
 
-    assert_eq!(workflow.state, ExecutionState::Running);
+    assert_eq!(orchestration.state, ExecutionState::Running);
     assert!(matches!(
-        runtime.resolve_invocation(&workflow.id),
+        runtime.resolve_invocation(&orchestration.id),
         Err(ConductorError::NonModelExecution(_))
     ));
 
@@ -292,7 +292,7 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
         .executions
         .iter()
         .find(|execution| {
-            execution.parent_execution.as_ref() == Some(&workflow.id)
+            execution.parent_execution.as_ref() == Some(&orchestration.id)
                 && execution.kind == ExecutionKind::Agent
         })
         .unwrap()
@@ -301,7 +301,7 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
         snapshot
             .executions
             .iter()
-            .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .filter(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
             .count(),
         1
     );
@@ -317,7 +317,7 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
         .executions
         .iter()
         .find(|execution| {
-            execution.parent_execution.as_ref() == Some(&workflow.id)
+            execution.parent_execution.as_ref() == Some(&orchestration.id)
                 && execution.id != first.id
                 && execution.state == ExecutionState::Pending
         })
@@ -327,7 +327,7 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
         snapshot
             .executions
             .iter()
-            .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .filter(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
             .count(),
         2
     );
@@ -338,7 +338,7 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
         snapshot
             .executions
             .iter()
-            .find(|execution| execution.id == workflow.id)
+            .find(|execution| execution.id == orchestration.id)
             .unwrap()
             .state,
         ExecutionState::Completed

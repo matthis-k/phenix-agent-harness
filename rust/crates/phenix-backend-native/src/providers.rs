@@ -3,6 +3,7 @@ use genai::adapter::AdapterKind;
 use genai::resolver::{AuthData, Endpoint};
 use genai::{ModelIden, ServiceTarget};
 use phenix_backend::BackendError;
+use phenix_core::{ModelId, ProviderId};
 
 pub(crate) const OPENAI_API_PROVIDER: &str = "openai-api";
 pub(crate) const ANTHROPIC_PROVIDER: &str = "anthropic";
@@ -11,6 +12,7 @@ pub(crate) const GITHUB_COPILOT_PROVIDER: &str = "github-copilot";
 pub(crate) const OPENCODE_ZEN_PROVIDER: &str = "opencode-zen";
 pub(crate) const OPENCODE_GO_PROVIDER: &str = "opencode-go";
 pub(crate) const OPEN_ROUTER_PROVIDER: &str = "open-router";
+pub(crate) const OLLAMA_PROVIDER: &str = "ollama";
 pub(crate) const OLLAMA_CLOUD_PROVIDER: &str = "ollama-cloud";
 pub(crate) const DEEPSEEK_PROVIDER: &str = "deepseek";
 pub(crate) const GROQ_PROVIDER: &str = "groq";
@@ -56,24 +58,27 @@ const DEEPSEEK_API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
 const GROQ_API_KEY_ENV: &str = "GROQ_API_KEY";
 const XAI_API_KEY_ENV: &str = "XAI_API_KEY";
 
-pub(crate) fn is_gateway_provider(provider: &str) -> bool {
+pub(crate) fn is_gateway_provider(provider: &ProviderId) -> bool {
     matches!(
-        provider,
-        "opencode" | OPENCODE_ZEN_PROVIDER | OPENCODE_GO_PROVIDER
+        provider.as_str(),
+        OPENCODE_ZEN_PROVIDER | OPENCODE_GO_PROVIDER
     )
 }
 
-pub(crate) fn validate_gateway_model(provider: &str, model: &str) -> Result<(), BackendError> {
+pub(crate) fn validate_gateway_model(
+    provider: &ProviderId,
+    model: &ModelId,
+) -> Result<(), BackendError> {
     gateway_adapter(provider, model).map(|_| ())
 }
 
 pub(crate) fn gateway_target(
     credentials: &CredentialStore,
-    provider: &str,
-    model: &str,
+    provider: &ProviderId,
+    model: &ModelId,
 ) -> Result<Option<ServiceTarget>, BackendError> {
-    let (credential_provider, endpoint, auth_names) = match provider {
-        "opencode" | OPENCODE_ZEN_PROVIDER => (
+    let (credential_provider, endpoint, auth_names) = match provider.as_str() {
+        OPENCODE_ZEN_PROVIDER => (
             OPENCODE_ZEN_PROVIDER,
             OPENCODE_ZEN_ENDPOINT,
             &[OPENCODE_API_KEY_ENV][..],
@@ -96,26 +101,47 @@ pub(crate) fn gateway_target(
     Ok(Some(ServiceTarget {
         endpoint: Endpoint::from_static(endpoint),
         auth,
-        model: ModelIden::new(adapter_kind, model),
+        model: ModelIden::new(adapter_kind, model.as_str()),
     }))
 }
 
-pub(crate) fn canonical_auth_provider(provider: &str) -> Option<&'static str> {
-    match provider {
-        "openai" | "openai-responses" | OPENAI_API_PROVIDER => Some(OPENAI_API_PROVIDER),
+pub(crate) fn canonical_auth_provider(provider: &ProviderId) -> Option<&'static str> {
+    match provider.as_str() {
+        OPENAI_API_PROVIDER => Some(OPENAI_API_PROVIDER),
         "openai-codex" => Some("openai-codex"),
         ANTHROPIC_PROVIDER => Some(ANTHROPIC_PROVIDER),
-        "google" | GEMINI_PROVIDER => Some(GEMINI_PROVIDER),
+        GEMINI_PROVIDER => Some(GEMINI_PROVIDER),
         GITHUB_COPILOT_PROVIDER => Some(GITHUB_COPILOT_PROVIDER),
-        "opencode" | OPENCODE_ZEN_PROVIDER => Some(OPENCODE_ZEN_PROVIDER),
+        OPENCODE_ZEN_PROVIDER => Some(OPENCODE_ZEN_PROVIDER),
         OPENCODE_GO_PROVIDER => Some(OPENCODE_GO_PROVIDER),
-        "openrouter" | OPEN_ROUTER_PROVIDER => Some(OPEN_ROUTER_PROVIDER),
+        OPEN_ROUTER_PROVIDER => Some(OPEN_ROUTER_PROVIDER),
         OLLAMA_CLOUD_PROVIDER => Some(OLLAMA_CLOUD_PROVIDER),
         DEEPSEEK_PROVIDER => Some(DEEPSEEK_PROVIDER),
         GROQ_PROVIDER => Some(GROQ_PROVIDER),
         XAI_PROVIDER => Some(XAI_PROVIDER),
         _ => None,
     }
+}
+
+pub(crate) fn genai_model(provider: &ProviderId, model: &ModelId) -> Result<String, BackendError> {
+    let namespace = match provider.as_str() {
+        OPENAI_API_PROVIDER | "openai-codex" => "openai_resp",
+        ANTHROPIC_PROVIDER => "anthropic",
+        GEMINI_PROVIDER => "gemini",
+        GITHUB_COPILOT_PROVIDER => "github_copilot",
+        OPEN_ROUTER_PROVIDER => "open_router",
+        OLLAMA_PROVIDER => "ollama",
+        OLLAMA_CLOUD_PROVIDER => "ollama_cloud",
+        DEEPSEEK_PROVIDER => "deepseek",
+        GROQ_PROVIDER => "groq",
+        XAI_PROVIDER => "xai",
+        other => {
+            return Err(BackendError::Unsupported(format!(
+                "unsupported Phenix provider {other:?}"
+            )))
+        }
+    };
+    Ok(format!("{namespace}::{}", model.as_str()))
 }
 
 pub(crate) fn is_api_key_auth_provider(provider: &str) -> bool {
@@ -218,9 +244,9 @@ pub(crate) fn environment_name(provider: &str) -> Option<&'static str> {
     }
 }
 
-fn gateway_adapter(provider: &str, model: &str) -> Result<AdapterKind, BackendError> {
-    match provider {
-        "opencode" | OPENCODE_ZEN_PROVIDER => zen_adapter(model),
+fn gateway_adapter(provider: &ProviderId, model: &ModelId) -> Result<AdapterKind, BackendError> {
+    match provider.as_str() {
+        OPENCODE_ZEN_PROVIDER => zen_adapter(model),
         OPENCODE_GO_PROVIDER => Ok(go_adapter(model)),
         other => Err(BackendError::Unsupported(format!(
             "provider {other:?} is not an OpenCode gateway"
@@ -228,7 +254,8 @@ fn gateway_adapter(provider: &str, model: &str) -> Result<AdapterKind, BackendEr
     }
 }
 
-fn zen_adapter(model: &str) -> Result<AdapterKind, BackendError> {
+fn zen_adapter(model: &ModelId) -> Result<AdapterKind, BackendError> {
+    let model = model.as_str();
     if model.starts_with("gemini-") {
         return Err(BackendError::Unsupported(format!(
             "OpenCode Zen model {model:?} requires the Google-native Zen endpoint, which the built-in Phenix backend does not expose yet"
@@ -243,7 +270,8 @@ fn zen_adapter(model: &str) -> Result<AdapterKind, BackendError> {
     Ok(AdapterKind::OpenAI)
 }
 
-fn go_adapter(model: &str) -> AdapterKind {
+fn go_adapter(model: &ModelId) -> AdapterKind {
+    let model = model.as_str();
     if model.starts_with("gpt-") {
         return AdapterKind::OpenAIResp;
     }
@@ -268,6 +296,14 @@ fn auth_from_environment(names: &[&'static str]) -> AuthData {
 mod tests {
     use super::*;
 
+    fn provider(value: &str) -> ProviderId {
+        ProviderId::parse(value).unwrap()
+    }
+
+    fn model(value: &str) -> ModelId {
+        ModelId::parse(value).unwrap()
+    }
+
     #[test]
     fn default_catalog_covers_requested_provider_classes() {
         for provider in [
@@ -288,63 +324,85 @@ mod tests {
     }
 
     #[test]
-    fn every_supported_remote_provider_has_an_auth_adapter() {
-        for (provider, auth_provider) in [
-            ("openai", OPENAI_API_PROVIDER),
-            ("openai-api", OPENAI_API_PROVIDER),
-            ("openai-responses", OPENAI_API_PROVIDER),
+    fn only_canonical_phenix_provider_ids_have_auth_mappings() {
+        for (provider_id, auth_provider) in [
+            (OPENAI_API_PROVIDER, OPENAI_API_PROVIDER),
             ("anthropic", ANTHROPIC_PROVIDER),
             ("gemini", GEMINI_PROVIDER),
-            ("google", GEMINI_PROVIDER),
             ("github-copilot", GITHUB_COPILOT_PROVIDER),
-            ("opencode", OPENCODE_ZEN_PROVIDER),
             ("opencode-zen", OPENCODE_ZEN_PROVIDER),
             ("opencode-go", OPENCODE_GO_PROVIDER),
             ("open-router", OPEN_ROUTER_PROVIDER),
-            ("openrouter", OPEN_ROUTER_PROVIDER),
             ("ollama-cloud", OLLAMA_CLOUD_PROVIDER),
             ("deepseek", DEEPSEEK_PROVIDER),
             ("groq", GROQ_PROVIDER),
             ("xai", XAI_PROVIDER),
         ] {
-            assert_eq!(canonical_auth_provider(provider), Some(auth_provider));
+            assert_eq!(
+                canonical_auth_provider(&provider(provider_id)),
+                Some(auth_provider)
+            );
             assert!(is_api_key_auth_provider(auth_provider));
             assert!(environment_name(auth_provider).is_some());
             assert!(environment_description(auth_provider).is_some());
         }
         assert_eq!(
-            canonical_auth_provider("openai-codex"),
+            canonical_auth_provider(&provider("openai-codex")),
             Some("openai-codex")
         );
-        assert!(!is_api_key_auth_provider("openai-codex"));
-        assert_eq!(canonical_auth_provider("ollama"), None);
+        for alias in [
+            "openai",
+            "openai-responses",
+            "google",
+            "opencode",
+            "openrouter",
+        ] {
+            assert_eq!(
+                canonical_auth_provider(&provider(alias)),
+                None,
+                "alias {alias}"
+            );
+        }
+        assert_eq!(canonical_auth_provider(&provider(OLLAMA_PROVIDER)), None);
+    }
+
+    #[test]
+    fn canonical_provider_mapping_owns_provider_adapter_identity() {
+        assert_eq!(
+            genai_model(&provider(OPENAI_API_PROVIDER), &model("gpt-5.6-terra")).unwrap(),
+            "openai_resp::gpt-5.6-terra"
+        );
+        assert!(genai_model(&provider("openai-responses"), &model("gpt-5.6-terra")).is_err());
     }
 
     #[test]
     fn opencode_go_uses_each_current_wire_protocol() {
-        assert_eq!(go_adapter("gpt-5.6-luna"), AdapterKind::OpenAIResp);
-        assert_eq!(go_adapter("qwen3.7-plus"), AdapterKind::Anthropic);
-        assert_eq!(go_adapter("minimax-m3"), AdapterKind::Anthropic);
-        assert_eq!(go_adapter("deepseek-v4-flash"), AdapterKind::OpenAI);
+        assert_eq!(go_adapter(&model("gpt-5.6-luna")), AdapterKind::OpenAIResp);
+        assert_eq!(go_adapter(&model("qwen3.7-plus")), AdapterKind::Anthropic);
+        assert_eq!(go_adapter(&model("minimax-m3")), AdapterKind::Anthropic);
+        assert_eq!(go_adapter(&model("deepseek-v4-flash")), AdapterKind::OpenAI);
     }
 
     #[test]
     fn opencode_zen_uses_each_current_wire_protocol() {
         assert_eq!(
-            zen_adapter("gpt-5.6-terra").unwrap(),
+            zen_adapter(&model("gpt-5.6-terra")).unwrap(),
             AdapterKind::OpenAIResp
         );
         assert_eq!(
-            zen_adapter("claude-sonnet-5").unwrap(),
+            zen_adapter(&model("claude-sonnet-5")).unwrap(),
             AdapterKind::Anthropic
         );
-        assert_eq!(zen_adapter("qwen3.7-plus").unwrap(), AdapterKind::Anthropic);
         assert_eq!(
-            zen_adapter("deepseek-v4-flash").unwrap(),
+            zen_adapter(&model("qwen3.7-plus")).unwrap(),
+            AdapterKind::Anthropic
+        );
+        assert_eq!(
+            zen_adapter(&model("deepseek-v4-flash")).unwrap(),
             AdapterKind::OpenAI
         );
         assert!(matches!(
-            zen_adapter("gemini-3.6-flash"),
+            zen_adapter(&model("gemini-3.6-flash")),
             Err(BackendError::Unsupported(_))
         ));
     }

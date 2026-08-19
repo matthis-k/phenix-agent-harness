@@ -56,7 +56,11 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
                 .unwrap();
             runtime
                 .register_orchestration(OrchestrationDefinition {
-                    descriptor: descriptor("workflow.catalog", CallableKind::Orchestration, false),
+                    descriptor: descriptor(
+                        "orchestration.catalog",
+                        CallableKind::Orchestration,
+                        false,
+                    ),
                     policy: OrchestrationPolicy::Sequential,
                     nodes: vec![AgentNode {
                         callable: CallableId::parse("agent.catalog").unwrap(),
@@ -86,7 +90,7 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
         descriptor.id.as_str() == "agent.catalog" && descriptor.kind == CallableKind::Agent
     }));
     assert!(callables.iter().any(|descriptor| {
-        descriptor.id.as_str() == "workflow.catalog"
+        descriptor.id.as_str() == "orchestration.catalog"
             && descriptor.kind == CallableKind::Orchestration
     }));
     assert_eq!(run.backend.opened(), 0);
@@ -408,7 +412,11 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
                 .unwrap();
             runtime
                 .register_orchestration(OrchestrationDefinition {
-                    descriptor: descriptor("workflow.two-step", CallableKind::Orchestration, false),
+                    descriptor: descriptor(
+                        "orchestration.two-step",
+                        CallableKind::Orchestration,
+                        false,
+                    ),
                     policy: OrchestrationPolicy::Sequential,
                     nodes: vec![
                         AgentNode {
@@ -429,12 +437,12 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
             },
             Command::CreateSession {
                 parent_session: None,
-                name: Some("workflow".to_owned()),
+                name: Some("orchestration".to_owned()),
                 target: ExecutionTarget::Fixed(model_target("mock-model")),
             },
             Command::StartCallable {
                 session_id: phenix_core::SessionId::parse("session-1").unwrap(),
-                callable: CallableId::parse("workflow.two-step").unwrap(),
+                callable: CallableId::parse("orchestration.two-step").unwrap(),
                 objective: "overall objective".to_owned(),
             },
         ])
@@ -454,7 +462,7 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
     );
     assert_eq!(run.snapshot.executions.len(), 3);
 
-    let workflow = run
+    let orchestration = run
         .snapshot
         .executions
         .iter()
@@ -462,16 +470,16 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
             execution
                 .callable
                 .as_ref()
-                .is_some_and(|id| id.as_str() == "workflow.two-step")
+                .is_some_and(|id| id.as_str() == "orchestration.two-step")
         })
-        .expect("workflow execution exists");
-    assert_eq!(workflow.parent_execution, None);
-    assert_eq!(workflow.state, ExecutionState::Completed);
+        .expect("orchestration execution exists");
+    assert_eq!(orchestration.parent_execution, None);
+    assert_eq!(orchestration.state, ExecutionState::Completed);
     let children = run
         .snapshot
         .executions
         .iter()
-        .filter(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+        .filter(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
         .collect::<Vec<_>>();
     assert_eq!(children.len(), 2);
     assert!(children
@@ -659,7 +667,7 @@ fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
-            descriptor: descriptor("workflow", CallableKind::Orchestration, false),
+            descriptor: descriptor("orchestration", CallableKind::Orchestration, false),
             policy: OrchestrationPolicy::Sequential,
             nodes: vec![AgentNode {
                 callable: CallableId::parse("guarded-step").unwrap(),
@@ -679,7 +687,7 @@ fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
     let error = runtime
         .start_orchestration(
             &root.id,
-            &CallableId::parse("workflow").unwrap(),
+            &CallableId::parse("orchestration").unwrap(),
             "objective",
         )
         .unwrap_err();

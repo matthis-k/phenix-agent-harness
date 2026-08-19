@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 /// Process-owned executable configuration for one conductor deployment.
 ///
 /// The conductor owns validation and execution semantics, while applications
-/// own the concrete agent, workflow, and routing-profile instances supplied in
+/// own the concrete agent, orchestration, and routing-profile instances supplied in
 /// this file. Durable journals intentionally store only revision references and
 /// runtime state, so this configuration is rebound on process startup.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -136,8 +136,8 @@ mod tests {
     #[test]
     fn application_configuration_rebinds_agents_workflows_and_routes() {
         let agent = descriptor("agent.fixture", CallableKind::Agent);
-        let workflow = OrchestrationDefinition {
-            descriptor: descriptor("workflow.fixture", CallableKind::Orchestration),
+        let orchestration = OrchestrationDefinition {
+            descriptor: descriptor("orchestration.fixture", CallableKind::Orchestration),
             policy: OrchestrationPolicy::Sequential,
             nodes: vec![AgentNode {
                 callable: agent.id.clone(),
@@ -151,7 +151,7 @@ mod tests {
         };
         let encoded = serde_json::to_string(&RuntimeConfiguration {
             agents: vec![agent.clone()],
-            orchestrations: vec![workflow],
+            orchestrations: vec![orchestration],
             routing_profiles: vec![route],
         })
         .unwrap();
@@ -166,7 +166,10 @@ mod tests {
                 .into_iter()
                 .map(|item| item.id)
                 .collect::<Vec<_>>(),
-            vec![agent.id, CallableId::parse("workflow.fixture").unwrap()]
+            vec![
+                agent.id,
+                CallableId::parse("orchestration.fixture").unwrap()
+            ]
         );
 
         let session = runtime
@@ -186,7 +189,7 @@ mod tests {
     #[test]
     fn configured_workflow_step_keeps_the_user_objective() {
         let agent = descriptor("agent.worker", CallableKind::Agent);
-        let workflow_id = CallableId::parse("workflow.implement").unwrap();
+        let workflow_id = CallableId::parse("orchestration.implement").unwrap();
         let configuration = RuntimeConfiguration {
             agents: vec![agent.clone()],
             orchestrations: vec![OrchestrationDefinition {
@@ -206,15 +209,15 @@ mod tests {
             .create_session(None, None, ExecutionTarget::Fixed(target("worker")))
             .unwrap();
         let root = runtime.submit(&session.id, "root").unwrap();
-        let workflow = runtime
+        let orchestration = runtime
             .start_orchestration(&root.id, &workflow_id, "Fix routing selection")
             .unwrap();
         let child = runtime
             .snapshot()
             .executions
             .into_iter()
-            .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
-            .expect("workflow child exists");
+            .find(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
+            .expect("orchestration child exists");
 
         assert_eq!(
             runtime.resolve_invocation(&child.id).unwrap().prompt,

@@ -30,6 +30,7 @@ mod semantic_tools;
 const EVENT_BUFFER: usize = 256;
 const OUTPUT_BUFFER: usize = 256;
 const EXECUTION_BUFFER: usize = 64;
+const EXECUTION_WORKERS: usize = 4;
 
 type SharedBackend = Arc<Mutex<Box<dyn Backend>>>;
 type SharedRuntime = Arc<Mutex<ConductorRuntime>>;
@@ -180,20 +181,37 @@ impl ConductorServer {
                 }
             });
 
-            let executor = scope.spawn(move || {
-                execution_loop(
-                    execution_receiver,
-                    runtime,
-                    backends,
-                    active_scopes,
-                    store,
-                    persist_lock,
-                )
-            });
+            let execution_receiver = Arc::new(Mutex::new(execution_receiver));
+            let executors = (0..EXECUTION_WORKERS)
+                .map(|_| {
+                    let execution_receiver = Arc::clone(&execution_receiver);
+                    let runtime = runtime.clone();
+                    let backends = backends.clone();
+                    let active_scopes = active_scopes.clone();
+                    let store = store.clone();
+                    let persist_lock = persist_lock.clone();
+                    scope.spawn(move || {
+                        execution_loop(
+                            execution_receiver,
+                            runtime,
+                            backends,
+                            active_scopes,
+                            store,
+                            persist_lock,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
 
             let result = self.read_requests(input, &output_sender, &execution_sender);
             drop(execution_sender);
-            let executor_result = executor.join().map_err(|_| ServerError::WorkerPanicked)?;
+            let mut executor_result = Ok(());
+            for executor in executors {
+                let worker_result = executor.join().map_err(|_| ServerError::WorkerPanicked)?;
+                if executor_result.is_ok() {
+                    executor_result = worker_result;
+                }
+            }
 
             {
                 let mut runtime = self.lock_runtime()?;
@@ -609,14 +627,23 @@ impl ConductorServer {
 }
 
 fn execution_loop(
-    executions: Receiver<ExecutionJob>,
+    executions: Arc<Mutex<Receiver<ExecutionJob>>>,
     runtime: SharedRuntime,
     backends: BTreeMap<BackendId, SharedBackend>,
     active_scopes: ActiveScopes,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
-    while let Ok(job) = executions.recv() {
+    loop {
+        let job = {
+            let receiver = executions
+                .lock()
+                .map_err(|_| ServerError::StatePoisoned("execution receiver"))?;
+            receiver.recv()
+        };
+        let Ok(job) = job else {
+            break;
+        };
         execute_job_chain(
             job.execution_id,
             &runtime,
@@ -1442,6 +1469,8 @@ mod tests {
     };
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Condvar;
+    use std::time::Duration;
 
     struct CancelOnlySession {
         calls: Arc<AtomicUsize>,
@@ -1493,7 +1522,7 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
-                descriptor: descriptor("workflow.tree", CallableKind::Orchestration),
+                descriptor: descriptor("orchestration.tree", CallableKind::Orchestration),
                 policy: OrchestrationPolicy::Sequential,
                 nodes: vec![AgentNode {
                     callable: CallableId::parse("agent.child").unwrap(),
@@ -1506,10 +1535,10 @@ mod tests {
             .create_session(None, None, ExecutionTarget::Fixed(model_target()))
             .unwrap();
         let root = runtime.submit(&session.id, "root").unwrap();
-        let workflow = runtime
+        let orchestration = runtime
             .start_orchestration(
                 &root.id,
-                &CallableId::parse("workflow.tree").unwrap(),
+                &CallableId::parse("orchestration.tree").unwrap(),
                 "tree",
             )
             .unwrap();
@@ -1517,7 +1546,7 @@ mod tests {
             .snapshot()
             .executions
             .into_iter()
-            .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+            .find(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
             .unwrap();
         runtime
             .set_state(&child.id, ExecutionState::Running)
@@ -1553,7 +1582,7 @@ mod tests {
         assert_eq!(unrelated_calls.load(Ordering::SeqCst), 0);
 
         let runtime = server.runtime();
-        for id in [&root.id, &workflow.id, &child.id] {
+        for id in [&root.id, &orchestration.id, &child.id] {
             assert_eq!(runtime.execution_state(id), Some(ExecutionState::Cancelled));
         }
         assert_eq!(
@@ -1578,5 +1607,96 @@ mod tests {
                 .unwrap(),
         };
         assert!(Arc::strong_count(&session) >= 1);
+    }
+
+    #[derive(Clone)]
+    struct ConcurrentGate {
+        state: Arc<(Mutex<usize>, Condvar)>,
+    }
+
+    struct ConcurrentBackend {
+        gate: ConcurrentGate,
+    }
+
+    struct ConcurrentSession {
+        gate: ConcurrentGate,
+    }
+
+    impl Backend for ConcurrentBackend {
+        fn capabilities(&self) -> phenix_backend::BackendCapabilities {
+            phenix_backend::BackendCapabilities {
+                tool_presentations: BTreeSet::new(),
+                images: false,
+                persistent_sessions: false,
+            }
+        }
+
+        fn open_session(
+            &mut self,
+            _request: BackendSessionRequest,
+        ) -> Result<Arc<dyn BackendSession>, BackendError> {
+            Ok(Arc::new(ConcurrentSession {
+                gate: self.gate.clone(),
+            }))
+        }
+    }
+
+    impl BackendSession for ConcurrentSession {
+        fn execute(
+            &self,
+            _request: BackendExecutionRequest,
+            _host: &mut dyn BackendHost,
+        ) -> Result<(), BackendError> {
+            let (lock, ready) = &*self.gate.state;
+            let mut active = lock.lock().unwrap();
+            *active += 1;
+            ready.notify_all();
+            let (active, _) = ready
+                .wait_timeout_while(active, Duration::from_secs(2), |active| *active < 2)
+                .unwrap();
+            if *active < 2 {
+                return Err(BackendError::Transport(
+                    "independent sessions did not execute concurrently".to_owned(),
+                ));
+            }
+            Ok(())
+        }
+
+        fn cancel(&self, _execution_id: &ExecutionId) -> Result<(), BackendError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn independent_sessions_use_bounded_parallel_execution_lanes() {
+        assert!(EXECUTION_WORKERS >= 2);
+        let gate = ConcurrentGate {
+            state: Arc::new((Mutex::new(0), Condvar::new())),
+        };
+        let mut server = ConductorServer::new(ConductorRuntime::new());
+        server
+            .register_backend(
+                BackendId::parse("fixture").unwrap(),
+                Box::new(ConcurrentBackend { gate }),
+            )
+            .unwrap();
+        let target = serde_json::to_string(&ExecutionTarget::Fixed(model_target())).unwrap();
+        let input = format!(
+            "{{\"id\":1,\"command\":{{\"type\":\"create_session\",\"parent_session\":null,\"name\":\"a\",\"target\":{target}}}}}\n\\
+             {{\"id\":2,\"command\":{{\"type\":\"create_session\",\"parent_session\":null,\"name\":\"b\",\"target\":{target}}}}}\n\\
+             {{\"id\":3,\"command\":{{\"type\":\"submit\",\"session_id\":\"session-1\",\"text\":\"one\"}}}}\n\\
+             {{\"id\":4,\"command\":{{\"type\":\"submit\",\"session_id\":\"session-2\",\"text\":\"two\"}}}}\n"
+        );
+        server
+            .serve_ndjson(std::io::Cursor::new(input), std::io::sink())
+            .unwrap();
+        let executions = server.runtime().snapshot().executions;
+        assert_eq!(executions.len(), 2);
+        assert!(
+            executions
+                .iter()
+                .all(|execution| execution.state == ExecutionState::Completed),
+            "independent execution states: {executions:?}"
+        );
     }
 }

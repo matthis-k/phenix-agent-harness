@@ -17,8 +17,8 @@ use phenix_backend::{
 };
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodDescriptor, AuthenticationMethodId,
-    AuthenticationMethodKind, AuthenticationState, BackendCatalog, BackendId, InferenceOptions,
-    ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
+    AuthenticationMethodKind, AuthenticationState, BackendCatalog, BackendId, InferenceEffort,
+    InferenceOptions, ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,74 +28,94 @@ use std::sync::{Arc, Mutex};
 
 pub const BACKEND_ID: &str = "phenix";
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ModelSelection {
-    provider: String,
-    model: String,
+fn parse_configured_model(value: &str) -> Result<ModelTarget, BackendError> {
+    let (provider, model) = value.split_once('/').ok_or_else(|| {
+        BackendError::Protocol(format!(
+            "Phenix model selection {value:?} must be provider/model"
+        ))
+    })?;
+    if provider.trim().is_empty() || model.trim().is_empty() {
+        return Err(BackendError::Protocol(format!(
+            "Phenix model selection {value:?} must be provider/model"
+        )));
+    }
+    let target = ModelTarget {
+        backend: BackendId::parse(BACKEND_ID)
+            .map_err(|error| BackendError::Protocol(error.to_string()))?,
+        provider: ProviderId::parse(provider)
+            .map_err(|error| BackendError::Protocol(error.to_string()))?,
+        model: ModelId::parse(model).map_err(|error| BackendError::Protocol(error.to_string()))?,
+        inference: InferenceOptions::default(),
+    };
+    validate_model_target(&target)?;
+    Ok(target)
 }
 
-impl ModelSelection {
-    fn parse(value: &str) -> Result<Self, BackendError> {
-        let (provider, model) = value.split_once('/').ok_or_else(|| {
-            BackendError::Protocol(format!(
-                "Phenix model selection {value:?} must be provider/model"
-            ))
-        })?;
-        if provider.trim().is_empty() || model.trim().is_empty() {
-            return Err(BackendError::Protocol(format!(
-                "Phenix model selection {value:?} must be provider/model"
-            )));
-        }
-        Ok(Self {
-            provider: provider.to_owned(),
-            model: model.to_owned(),
+fn model_wire_value(target: &ModelTarget) -> String {
+    format!("{}/{}", target.provider, target.model)
+}
+
+fn validate_model_target(target: &ModelTarget) -> Result<(), BackendError> {
+    if target.backend.as_str() != BACKEND_ID {
+        return Err(BackendError::Unsupported(format!(
+            "Phenix backend cannot serve target backend {}",
+            target.backend
+        )));
+    }
+    if providers::is_gateway_provider(&target.provider) {
+        providers::validate_gateway_model(&target.provider, &target.model)
+    } else {
+        providers::genai_model(&target.provider, &target.model).map(|_| ())
+    }
+}
+
+fn provider_reasoning_effort(effort: &InferenceEffort) -> ReasoningEffort {
+    match effort {
+        InferenceEffort::None => ReasoningEffort::None,
+        InferenceEffort::Minimal => ReasoningEffort::Minimal,
+        InferenceEffort::Low => ReasoningEffort::Low,
+        InferenceEffort::Medium => ReasoningEffort::Medium,
+        InferenceEffort::High => ReasoningEffort::High,
+        InferenceEffort::ExtraHigh => ReasoningEffort::XHigh,
+        InferenceEffort::Max => ReasoningEffort::Max,
+    }
+}
+
+fn dispatch_tool_call<T: serde::Serialize + ?Sized>(
+    tools: &PreparedToolSurface,
+    host: &mut dyn BackendHost,
+    fn_name: &str,
+    fn_arguments: &T,
+) -> Result<String, BackendError> {
+    let Some(descriptor) = tools
+        .callables()
+        .iter()
+        .find(|descriptor| descriptor.id.as_str() == fn_name)
+    else {
+        return Ok(json!({
+            "error": format!("unknown or unavailable Phenix tool {fn_name:?}")
         })
-    }
-
-    fn wire_value(&self) -> String {
-        format!("{}/{}", self.provider, self.model)
-    }
-
-    fn validate_provider(&self) -> Result<(), BackendError> {
-        if providers::is_gateway_provider(&self.provider) {
-            providers::validate_gateway_model(&self.provider, &self.model)
-        } else {
-            self.genai_model().map(|_| ())
+        .to_string());
+    };
+    let arguments_json = match serde_json::to_string(fn_arguments) {
+        Ok(arguments) => arguments,
+        Err(error) => {
+            return Ok(json!({
+                "error": format!("cannot encode tool arguments: {error}")
+            })
+            .to_string())
         }
-    }
-
-    fn genai_model(&self) -> Result<String, BackendError> {
-        let namespace = match self.provider.as_str() {
-            "openai" => "openai",
-            "openai-api" | "openai-responses" | "openai-codex" => "openai_resp",
-            "anthropic" => "anthropic",
-            "gemini" | "google" => "gemini",
-            "github-copilot" => "github_copilot",
-            "open-router" | "openrouter" => "open_router",
-            "ollama" => "ollama",
-            "ollama-cloud" => "ollama_cloud",
-            "deepseek" => "deepseek",
-            "groq" => "groq",
-            "xai" => "xai",
-            other => {
-                return Err(BackendError::Unsupported(format!(
-                    "unsupported Phenix provider {other:?}"
-                )))
-            }
-        };
-        Ok(format!("{namespace}::{}", self.model))
-    }
-
-    fn target(&self) -> Result<ModelTarget, BackendError> {
-        Ok(ModelTarget {
-            backend: BackendId::parse(BACKEND_ID)
-                .map_err(|error| BackendError::Protocol(error.to_string()))?,
-            provider: ProviderId::parse(self.provider.clone())
-                .map_err(|error| BackendError::Protocol(error.to_string()))?,
-            model: ModelId::parse(self.model.clone())
-                .map_err(|error| BackendError::Protocol(error.to_string()))?,
-            inference: InferenceOptions::default(),
-        })
+    };
+    match host.invoke_tool(ToolInvocation {
+        callable: descriptor.id.clone(),
+        arguments_json,
+    }) {
+        Ok(result) if result.success => Ok(result.output),
+        Ok(result) => Ok(json!({ "error": result.output }).to_string()),
+        Err(BackendError::Protocol(error)) => {
+            Ok(json!({ "error": format!("tool dispatch failed: {error}") }).to_string())
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -104,7 +124,7 @@ pub struct PhenixBackend {
     provider: Arc<ProviderClient>,
     codex_provider: Arc<ProviderClient>,
     credentials: CredentialStore,
-    models: Vec<ModelSelection>,
+    models: Vec<ModelTarget>,
     max_tool_rounds: Option<NonZeroUsize>,
     persistent_sessions: BTreeMap<SessionId, Arc<PhenixSession>>,
 }
@@ -160,17 +180,7 @@ impl PhenixBackend {
     }
 
     fn validate_request(&self, request: &BackendSessionRequest) -> Result<(), BackendError> {
-        if request.model.backend.as_str() != BACKEND_ID {
-            return Err(BackendError::Unsupported(format!(
-                "Phenix backend cannot serve target backend {}",
-                request.model.backend
-            )));
-        }
-        ModelSelection {
-            provider: request.model.provider.as_str().to_owned(),
-            model: request.model.model.as_str().to_owned(),
-        }
-        .validate_provider()?;
+        validate_model_target(&request.model)?;
         if !request.tools.is_empty()
             && request.tools.presentation() != Some(ToolPresentation::Native)
         {
@@ -178,7 +188,6 @@ impl PhenixBackend {
                 "Phenix backend requires native conductor tool presentation".to_owned(),
             ));
         }
-        parse_reasoning_effort(request.model.inference.effort.as_deref())?;
         Ok(())
     }
 
@@ -213,12 +222,12 @@ impl Backend for PhenixBackend {
         let auth_providers = self
             .models
             .iter()
-            .filter_map(|selection| providers::canonical_auth_provider(&selection.provider))
+            .filter_map(|target| providers::canonical_auth_provider(&target.provider))
             .collect::<BTreeSet<_>>();
         let models = self
             .models
             .iter()
-            .map(|selection| model_descriptor(&self.credentials, selection))
+            .map(|target| model_descriptor(&self.credentials, target))
             .collect::<Result<Vec<_>, BackendError>>()?;
         let mut authentication_methods = Vec::new();
         if auth_providers.contains(oauth::PROVIDER) {
@@ -398,34 +407,27 @@ impl PhenixSession {
             .clone();
         history.push(ChatMessage::user(prompt));
 
-        let selection = ModelSelection {
-            provider: model.provider.as_str().to_owned(),
-            model: model.model.as_str().to_owned(),
-        };
-        let provider = if selection.provider == oauth::PROVIDER {
+        let provider = if model.provider.as_str() == oauth::PROVIDER {
             &self.codex_provider
         } else {
             &self.provider
         };
-        let provider_target = match providers::gateway_target(
-            &self.credentials,
-            &selection.provider,
-            &selection.model,
-        )? {
-            Some(target) => target,
-            None => {
-                let provider_model = selection.genai_model()?;
-                provider
-                    .resolve_service_target(provider_model)
-                    .await
-                    .map_err(|error| {
-                        BackendError::Transport(format!(
-                            "cannot resolve provider target for {}: {error}",
-                            selection.wire_value()
-                        ))
-                    })?
-            }
-        };
+        let provider_target =
+            match providers::gateway_target(&self.credentials, &model.provider, &model.model)? {
+                Some(target) => target,
+                None => {
+                    let provider_model = providers::genai_model(&model.provider, &model.model)?;
+                    provider
+                        .resolve_service_target(provider_model)
+                        .await
+                        .map_err(|error| {
+                            BackendError::Transport(format!(
+                                "cannot resolve provider target for {}: {error}",
+                                model_wire_value(&model)
+                            ))
+                        })?
+                }
+            };
         let tool_definitions = tools
             .callables()
             .iter()
@@ -435,7 +437,11 @@ impl PhenixSession {
                     .with_schema(descriptor.input_schema.clone())
             })
             .collect::<Vec<_>>();
-        let reasoning_effort = parse_reasoning_effort(model.inference.effort.as_deref())?;
+        let reasoning_effort = model
+            .inference
+            .effort
+            .as_ref()
+            .map(provider_reasoning_effort);
         let mut tool_rounds = 0usize;
 
         loop {
@@ -495,27 +501,7 @@ impl PhenixSession {
 
             let mut responses = Vec::new();
             for call in tool_calls {
-                let descriptor = tools
-                    .callables()
-                    .iter()
-                    .find(|descriptor| descriptor.id.as_str() == call.fn_name)
-                    .ok_or_else(|| {
-                        BackendError::Protocol(format!(
-                            "provider requested unknown Phenix tool {:?}",
-                            call.fn_name
-                        ))
-                    })?;
-                let result = host.invoke_tool(ToolInvocation {
-                    callable: descriptor.id.clone(),
-                    arguments_json: serde_json::to_string(&call.fn_arguments).map_err(|error| {
-                        BackendError::Protocol(format!("cannot encode tool arguments: {error}"))
-                    })?,
-                })?;
-                let output = if result.success {
-                    result.output
-                } else {
-                    json!({ "error": result.output }).to_string()
-                };
+                let output = dispatch_tool_call(&tools, host, &call.fn_name, &call.fn_arguments)?;
                 responses.push(ToolResponse::new(call.call_id, output));
             }
             history.push(ChatMessage::from(responses));
@@ -566,7 +552,7 @@ impl BackendSession for PhenixSession {
 
 fn provider_has_valid_auth(
     credentials: &CredentialStore,
-    provider: &str,
+    provider: &ProviderId,
 ) -> Result<bool, BackendError> {
     let Some(provider) = providers::canonical_auth_provider(provider) else {
         // Supported providers without an auth adapter, such as local Ollama,
@@ -591,12 +577,12 @@ fn provider_has_valid_auth(
 
 fn model_descriptor(
     credentials: &CredentialStore,
-    selection: &ModelSelection,
+    target: &ModelTarget,
 ) -> Result<ModelDescriptor, BackendError> {
     Ok(ModelDescriptor {
-        target: selection.target()?,
-        name: selection.wire_value(),
-        selectable: provider_has_valid_auth(credentials, &selection.provider)?,
+        target: target.clone(),
+        name: model_wire_value(target),
+        selectable: provider_has_valid_auth(credentials, &target.provider)?,
     })
 }
 
@@ -619,7 +605,7 @@ fn parse_max_tool_rounds(value: Option<&str>) -> Result<Option<NonZeroUsize>, Ba
     })
 }
 
-fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {
+fn configured_models() -> Result<Vec<ModelTarget>, BackendError> {
     let source = std::env::var("PHENIX_MODELS")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -632,10 +618,9 @@ fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        let selection = ModelSelection::parse(value)?;
-        selection.validate_provider()?;
-        if seen.insert(selection.wire_value()) {
-            models.push(selection);
+        let target = parse_configured_model(value)?;
+        if seen.insert((target.provider.clone(), target.model.clone())) {
+            models.push(target);
         }
     }
     if models.is_empty() {
@@ -646,27 +631,14 @@ fn configured_models() -> Result<Vec<ModelSelection>, BackendError> {
     Ok(models)
 }
 
-fn parse_reasoning_effort(value: Option<&str>) -> Result<Option<ReasoningEffort>, BackendError> {
-    value
-        .map(|value| match value {
-            "off" | "none" => Ok(ReasoningEffort::None),
-            "minimal" => Ok(ReasoningEffort::Minimal),
-            "low" => Ok(ReasoningEffort::Low),
-            "medium" => Ok(ReasoningEffort::Medium),
-            "high" => Ok(ReasoningEffort::High),
-            "extra_high" | "xhigh" => Ok(ReasoningEffort::XHigh),
-            "max" => Ok(ReasoningEffort::Max),
-            other => Err(BackendError::Unsupported(format!(
-                "unsupported Phenix reasoning effort {other:?}"
-            ))),
-        })
-        .transpose()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_backend::ToolProvision;
+    use phenix_backend::{ToolProvision, ToolResult};
+    use phenix_core::{
+        CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    };
+    use serde_json::json;
 
     #[test]
     fn model_catalog_marks_provider_auth_selectability() {
@@ -684,8 +656,8 @@ mod tests {
         let credentials = CredentialStore {
             path: root.join("credentials.json"),
         };
-        let codex = ModelSelection::parse("openai-codex/gpt-test").unwrap();
-        let local = ModelSelection::parse("ollama/local-test").unwrap();
+        let codex = parse_configured_model("openai-codex/gpt-test").unwrap();
+        let local = parse_configured_model("ollama/local-test").unwrap();
 
         assert!(!model_descriptor(&credentials, &codex).unwrap().selectable);
         assert!(model_descriptor(&credentials, &local).unwrap().selectable);
@@ -707,22 +679,24 @@ mod tests {
     }
 
     #[test]
-    fn model_identity_preserves_provider_and_model() {
-        let selection = ModelSelection::parse("openai-codex/gpt-5.6-sol").unwrap();
-        let target = selection.target().unwrap();
+    fn model_identity_remains_nominal_and_rejects_aliases() {
+        let target = parse_configured_model("openai-codex/gpt-5.6-sol").unwrap();
         assert_eq!(target.backend.as_str(), BACKEND_ID);
         assert_eq!(target.provider.as_str(), "openai-codex");
         assert_eq!(target.model.as_str(), "gpt-5.6-sol");
-        assert_eq!(selection.genai_model().unwrap(), "openai_resp::gpt-5.6-sol");
-    }
-
-    #[test]
-    fn openai_api_uses_responses_adapter() {
-        let selection = ModelSelection::parse("openai-api/gpt-5.6-terra").unwrap();
         assert_eq!(
-            selection.genai_model().unwrap(),
-            "openai_resp::gpt-5.6-terra"
+            providers::genai_model(&target.provider, &target.model).unwrap(),
+            "openai_resp::gpt-5.6-sol"
         );
+        for alias in [
+            "openai/gpt-5.6-sol",
+            "openai-responses/gpt-5.6-sol",
+            "google/gemini-test",
+            "opencode/model",
+            "openrouter/model",
+        ] {
+            assert!(parse_configured_model(alias).is_err(), "alias {alias}");
+        }
     }
 
     #[test]
@@ -753,14 +727,91 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_effort_uses_typed_inference_option() {
+    fn reasoning_effort_is_canonical_core_domain() {
+        assert_eq!(
+            provider_reasoning_effort(&InferenceEffort::High),
+            ReasoningEffort::High
+        );
+        assert_eq!(
+            provider_reasoning_effort(&InferenceEffort::ExtraHigh),
+            ReasoningEffort::XHigh
+        );
+    }
+
+    fn test_tool_surface() -> PreparedToolSurface {
+        ToolProvision {
+            callables: vec![CallableDescriptor {
+                id: CallableId::parse("read").unwrap(),
+                kind: CallableKind::Tool,
+                description: "test read".to_owned(),
+                input_schema: json!({"type": "object"}),
+                output_schema: json!({"type": "object"}),
+                capabilities: CapabilitySet::default(),
+                policy: CallablePolicy::default(),
+            }],
+        }
+        .prepare(&BackendCapabilities {
+            tool_presentations: BTreeSet::from([ToolPresentation::Native]),
+            images: false,
+            persistent_sessions: false,
+        })
+        .unwrap()
+    }
+
+    struct TestToolHost {
+        result: Result<ToolResult, BackendError>,
+        calls: usize,
+    }
+
+    impl BackendHost for TestToolHost {
+        fn emit(&mut self, _event: BackendEvent) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        fn invoke_tool(&mut self, _invocation: ToolInvocation) -> Result<ToolResult, BackendError> {
+            self.calls += 1;
+            self.result.clone()
+        }
+    }
+
+    #[test]
+    fn faulty_tool_calls_are_returned_to_the_model_and_transport_failures_remain_fatal() {
+        let tools = test_tool_surface();
+        let mut host = TestToolHost {
+            result: Ok(ToolResult {
+                output: "missing file".to_owned(),
+                success: false,
+            }),
+            calls: 0,
+        };
+        let failed =
+            dispatch_tool_call(&tools, &mut host, "read", &json!({"path": "missing"})).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&failed).unwrap()["error"],
+            "missing file"
+        );
+        assert_eq!(host.calls, 1);
+
+        let unknown = dispatch_tool_call(&tools, &mut host, "made_up_tool", &json!({})).unwrap();
+        assert!(unknown.contains("unknown or unavailable Phenix tool"));
+        assert_eq!(host.calls, 1, "unknown tools must not reach the host");
+
+        let mut protocol_host = TestToolHost {
+            result: Err(BackendError::Protocol("bad tool request".to_owned())),
+            calls: 0,
+        };
+        let protocol = dispatch_tool_call(&tools, &mut protocol_host, "read", &json!({})).unwrap();
+        assert!(protocol.contains("tool dispatch failed"));
+
+        let mut transport_host = TestToolHost {
+            result: Err(BackendError::Transport(
+                "persistence unavailable".to_owned(),
+            )),
+            calls: 0,
+        };
         assert!(matches!(
-            parse_reasoning_effort(Some("high")),
-            Ok(Some(ReasoningEffort::High))
-        ));
-        assert!(matches!(
-            parse_reasoning_effort(Some("unsupported")),
-            Err(BackendError::Unsupported(_))
+            dispatch_tool_call(&tools, &mut transport_host, "read", &json!({})),
+            Err(BackendError::Transport(_))
         ));
     }
 }
