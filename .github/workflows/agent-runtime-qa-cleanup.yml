@@ -27,7 +27,8 @@ jobs:
           path = Path('.github/agent-runtime-qa-cleanup.py')
           lines = path.read_text().splitlines()
           output = []
-          matched = 0
+          wrapper_matched = 0
+          sub_matched = 0
           for line in lines:
               if line.startswith("replace(module, '--set PHENIX_GREP"):
                   output.extend([
@@ -37,11 +38,16 @@ jobs:
                       "    raise RuntimeError('modules/phenix-acp.nix: PHENIX_GREP wrapper anchor changed')",
                       "write(module, content.replace(old_wrapper, '--set PHENIX_RG \"${pkgs.ripgrep}/bin/rg\"', 1))",
                   ])
-                  matched += 1
+                  wrapper_matched += 1
+              elif line.strip() == "updated, actual = re.subn(pattern, replacement, content, count=count, flags=flags)":
+                  output.append("    updated, actual = re.subn(pattern, lambda _match: replacement, content, count=count, flags=flags)")
+                  sub_matched += 1
               else:
                   output.append(line)
-          if matched != 1:
-              raise SystemExit(f'expected one PHENIX_GREP patch line, found {matched}')
+          if wrapper_matched != 1:
+              raise SystemExit(f'expected one PHENIX_GREP patch line, found {wrapper_matched}')
+          if sub_matched != 1:
+              raise SystemExit(f'expected one re.subn helper line, found {sub_matched}')
           path.write_text('\n'.join(output) + '\n')
           PY
           python3 -m py_compile .github/agent-runtime-qa-cleanup.py
