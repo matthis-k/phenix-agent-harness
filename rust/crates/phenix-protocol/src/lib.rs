@@ -182,14 +182,14 @@ mod tests {
             id: 9,
             command: Command::StartCallable {
                 session_id: SessionId::parse("session-1").expect("valid session id"),
-                callable: CallableId::parse("workflow.implement").expect("valid callable id"),
+                callable: CallableId::parse("orchestration.implement").expect("valid callable id"),
                 objective: "implement change".to_owned(),
             },
         };
         let value = serde_json::to_value(message).expect("serialize callable start");
         assert_eq!(value["command"]["type"], "start_callable");
         assert_eq!(value["command"]["session_id"], "session-1");
-        assert_eq!(value["command"]["callable"], "workflow.implement");
+        assert_eq!(value["command"]["callable"], "orchestration.implement");
         assert_eq!(value["command"]["objective"], "implement change");
         assert!(value["command"].get("backend").is_none());
         assert!(value["command"].get("provider").is_none());

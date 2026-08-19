@@ -211,7 +211,7 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
-            descriptor: descriptor("workflow.native", CallableKind::Orchestration),
+            descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             policy: OrchestrationPolicy::Sequential,
             nodes: vec![AgentNode {
                 callable: step,
@@ -220,18 +220,18 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         })
         .unwrap();
     let root = root(&mut runtime);
-    let workflow = runtime
+    let orchestration = runtime
         .start_orchestration(
             &root.id,
-            &CallableId::parse("workflow.native").unwrap(),
-            "workflow objective",
+            &CallableId::parse("orchestration.native").unwrap(),
+            "orchestration objective",
         )
         .unwrap();
     let child = runtime
         .snapshot()
         .executions
         .into_iter()
-        .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+        .find(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
         .unwrap();
 
     assert_eq!(
@@ -245,7 +245,7 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         snapshot
             .executions
             .iter()
-            .find(|execution| execution.id == workflow.id)
+            .find(|execution| execution.id == orchestration.id)
             .unwrap()
             .state,
         ExecutionState::Completed
@@ -265,7 +265,7 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
-            descriptor: descriptor("workflow.native", CallableKind::Orchestration),
+            descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             policy: OrchestrationPolicy::Sequential,
             nodes: vec![AgentNode {
                 callable: CallableId::parse("agent.native").unwrap(),
@@ -274,18 +274,18 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         })
         .unwrap();
     let root = root(&mut runtime);
-    let workflow = runtime
+    let orchestration = runtime
         .start_orchestration(
             &root.id,
-            &CallableId::parse("workflow.native").unwrap(),
-            "workflow objective",
+            &CallableId::parse("orchestration.native").unwrap(),
+            "orchestration objective",
         )
         .unwrap();
     let child = runtime
         .snapshot()
         .executions
         .into_iter()
-        .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
+        .find(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
         .unwrap();
 
     assert!(matches!(
@@ -308,7 +308,7 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         snapshot
             .executions
             .iter()
-            .find(|execution| execution.id == workflow.id)
+            .find(|execution| execution.id == orchestration.id)
             .unwrap()
             .state,
         ExecutionState::Failed

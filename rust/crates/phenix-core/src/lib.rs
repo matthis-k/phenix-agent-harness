@@ -53,9 +53,21 @@ id_type!(ModelId);
 id_type!(RoutingProfileId);
 id_type!(AuthenticationMethodId);
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InferenceEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    ExtraHigh,
+    Max,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InferenceOptions {
-    pub effort: Option<String>,
+    pub effort: Option<InferenceEffort>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -138,7 +150,6 @@ pub enum ExecutionTarget {
 pub enum CallableKind {
     Tool,
     Agent,
-    #[serde(rename = "workflow")]
     Orchestration,
 }
 
@@ -190,7 +201,8 @@ pub struct AgentNode {
 /// Canonical parsed orchestration definition.
 ///
 /// Source adapters such as Markdown, Lua values, JSON, or RON produce this type
-/// directly. There is no intermediate workflow-definition domain model.
+/// directly. There is no intermediate source-definition DTO between those adapters
+/// and this canonical domain type.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OrchestrationDefinition {
@@ -204,7 +216,6 @@ pub struct OrchestrationDefinition {
 pub enum ExecutionKind {
     Root,
     Agent,
-    #[serde(rename = "workflow")]
     Orchestration,
 }
 
@@ -304,7 +315,7 @@ mod tests {
 
     fn orchestration_descriptor() -> CallableDescriptor {
         CallableDescriptor {
-            id: CallableId::parse("workflow.example").unwrap(),
+            id: CallableId::parse("orchestration.example").unwrap(),
             kind: CallableKind::Orchestration,
             description: "Example orchestration".to_owned(),
             input_schema: serde_json::json!({"type": "string"}),
@@ -348,7 +359,7 @@ mod tests {
         };
 
         let value = serde_json::to_value(&definition).unwrap();
-        assert_eq!(value["descriptor"]["kind"], "workflow");
+        assert_eq!(value["descriptor"]["kind"], "orchestration");
         assert!(value.get("nodes").is_some());
         assert!(value.get("steps").is_none());
         assert_eq!(

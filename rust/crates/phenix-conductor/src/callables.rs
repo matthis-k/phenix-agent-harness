@@ -27,7 +27,7 @@ pub enum CallableRegistryError {
     NotExecutable(CallableId),
     EmptyOrchestration(CallableId),
     InvalidAgentNode {
-        workflow: CallableId,
+        orchestration: CallableId,
         callable: CallableId,
     },
 }
@@ -46,10 +46,10 @@ impl Display for CallableRegistryError {
                 "callable {callable} has kind {actual:?}, expected {expected:?}"
             ),
             Self::NotExecutable(id) => write!(f, "callable is not execution-provider backed: {id}"),
-            Self::EmptyOrchestration(id) => write!(f, "workflow has no nodes: {id}"),
-            Self::InvalidAgentNode { workflow, callable } => write!(
+            Self::EmptyOrchestration(id) => write!(f, "orchestration has no nodes: {id}"),
+            Self::InvalidAgentNode { orchestration, callable } => write!(
                 f,
-                "workflow {workflow} references non-executable or unknown callable {callable}"
+                "orchestration {orchestration} references non-executable or unknown callable {callable}"
             ),
         }
     }
@@ -162,13 +162,13 @@ impl CallableRegistry {
         for step in &definition.nodes {
             let Some(entry) = self.entries.get(&step.callable) else {
                 return Err(CallableRegistryError::InvalidAgentNode {
-                    workflow: definition.descriptor.id.clone(),
+                    orchestration: definition.descriptor.id.clone(),
                     callable: step.callable.clone(),
                 });
             };
             if !entry.is_executable() {
                 return Err(CallableRegistryError::InvalidAgentNode {
-                    workflow: definition.descriptor.id.clone(),
+                    orchestration: definition.descriptor.id.clone(),
                     callable: step.callable.clone(),
                 });
             }
@@ -301,7 +301,7 @@ impl CallableRegistry {
 }
 
 impl ConductorRuntime {
-    /// Start an agent or workflow as a first-class top-level execution in a
+    /// Start an agent or orchestration as a first-class top-level execution in a
     /// session. This is the conductor-owned entrypoint used by frontends; it
     /// does not synthesize a model-backed wrapper execution.
     pub fn start_session_callable(
@@ -371,7 +371,7 @@ impl ConductorRuntime {
                 Ok(self
                     .executions
                     .get(&summary.id)
-                    .expect("workflow exists after top-level creation")
+                    .expect("orchestration exists after top-level creation")
                     .summary
                     .clone())
             }
@@ -551,7 +551,7 @@ mod tests {
             .unwrap();
         registry
             .register_orchestration(OrchestrationDefinition {
-                descriptor: descriptor("workflow", CallableKind::Orchestration),
+                descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 policy: OrchestrationPolicy::Sequential,
                 nodes: vec![AgentNode {
                     callable: CallableId::parse("native").unwrap(),
@@ -628,7 +628,7 @@ mod tests {
             })
             .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
-        let workflow = runtime
+        let orchestration = runtime
             .start_session_callable(
                 &session.id,
                 &CallableId::parse("implement").unwrap(),
@@ -636,15 +636,15 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(workflow.parent_execution, None);
-        assert_eq!(workflow.kind, ExecutionKind::Orchestration);
-        assert_eq!(workflow.state, ExecutionState::Running);
+        assert_eq!(orchestration.parent_execution, None);
+        assert_eq!(orchestration.kind, ExecutionKind::Orchestration);
+        assert_eq!(orchestration.state, ExecutionState::Running);
         let child = runtime
             .snapshot()
             .executions
             .into_iter()
-            .find(|execution| execution.parent_execution.as_ref() == Some(&workflow.id))
-            .expect("workflow started its first ordinary child execution");
+            .find(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
+            .expect("orchestration started its first ordinary child execution");
         assert_eq!(child.kind, ExecutionKind::Agent);
         assert_eq!(child.callable, Some(CallableId::parse("worker").unwrap()));
         let user_inputs = runtime
@@ -657,7 +657,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             user_inputs,
-            vec![(workflow.id.clone(), "implement it".to_owned())]
+            vec![(orchestration.id.clone(), "implement it".to_owned())]
         );
     }
 }

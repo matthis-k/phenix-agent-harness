@@ -31,4 +31,4 @@ Every source adapter produces the canonical typed `OrchestrationDefinition` dire
 
 `OrchestrationDefinition` describes coordination between autonomous agent executions. Its `AgentNode`s define assignments and orchestration relationships; an agent remains free to decide how to satisfy its objective within its capabilities and policy. Runtime orchestration owns scheduling, dependency readiness, lifecycle, handoff, cancellation, and eventual graph semantics rather than prescribing an agent's internal procedure.
 
-External product vocabulary may still call an orchestration a workflow where that is the intentional user-facing contract. Such labels are presentation or persistence concerns and do not create a second workflow domain model inside the conductor.
+Orchestration is the canonical current vocabulary across source configuration, callable descriptors, protocol DTOs, execution state, and persistence. New runtime surfaces must not emit a second compatibility vocabulary for the same concept.

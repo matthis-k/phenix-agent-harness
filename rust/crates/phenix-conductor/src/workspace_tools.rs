@@ -34,6 +34,15 @@ struct WriteInput {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct EditInput {
+    path: String,
+    old_text: String,
+    new_text: String,
+    replace_all: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GrepInput {
     pattern: String,
     path: Option<String>,
@@ -157,11 +166,57 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
         move |arguments| execute_write(&write_workspace, arguments),
     )?;
 
+    let edit_workspace = workspace.clone();
+    runtime.register_tool(
+        tool_descriptor(
+            "edit",
+            format!(
+                "Edit a UTF-8 text file in the current Phenix workspace ({}). The old_text match must be unique unless replace_all is explicitly true.",
+                workspace.display()
+            ),
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "old_text", "new_text"],
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Workspace-relative file path"
+                    },
+                    "old_text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Exact text to replace"
+                    },
+                    "new_text": {
+                        "type": "string",
+                        "description": "Replacement text"
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "Replace every exact match; defaults to false and requires a unique match"
+                    }
+                }
+            }),
+            json!({
+                "type": "object",
+                "required": ["path", "replacements", "bytes_written"],
+                "properties": {
+                    "path": { "type": "string" },
+                    "replacements": { "type": "integer" },
+                    "bytes_written": { "type": "integer" }
+                }
+            }),
+        ),
+        move |arguments| execute_edit(&edit_workspace, arguments),
+    )?;
+
     runtime.register_tool(
         tool_descriptor(
             "grep",
             format!(
-                "Search text recursively in the current Phenix workspace ({}). The pattern uses GNU grep regular-expression syntax; .git is excluded.",
+                "Search text recursively in the current Phenix workspace ({}). The pattern uses ripgrep regular-expression syntax; .git is excluded.",
                 workspace.display()
             ),
             json!({
@@ -177,7 +232,7 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                     "path": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Workspace-relative file or directory to search; defaults to ."
+                        "description": "Workspace-relative, home-relative, or absolute file/directory path that resolves inside the workspace; defaults to ."
                     },
                     "case_sensitive": {
                         "type": "boolean",
@@ -304,21 +359,65 @@ fn execute_write(workspace: &Path, arguments: &str) -> Result<String, String> {
     .to_string())
 }
 
+fn execute_edit(workspace: &Path, arguments: &str) -> Result<String, String> {
+    let input: EditInput = serde_json::from_str(arguments)
+        .map_err(|error| format!("invalid edit arguments: {error}"))?;
+    if input.old_text.is_empty() {
+        return Err("edit old_text must not be empty".to_owned());
+    }
+    let relative = relative_workspace_path(&input.path)?;
+    let path = workspace.join(&relative);
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {} for edit: {error}", input.path))?;
+    let matches = content.match_indices(&input.old_text).count();
+    if matches == 0 {
+        return Err(format!("edit old_text did not match {}", input.path));
+    }
+    let replace_all = input.replace_all.unwrap_or(false);
+    if !replace_all && matches != 1 {
+        return Err(format!(
+            "edit old_text matched {matches} occurrences in {}; provide more context or set replace_all=true",
+            input.path
+        ));
+    }
+    let replacements = if replace_all { matches } else { 1 };
+    let updated = if replace_all {
+        content.replace(&input.old_text, &input.new_text)
+    } else {
+        content.replacen(&input.old_text, &input.new_text, 1)
+    };
+    fs::write(&path, updated.as_bytes())
+        .map_err(|error| format!("failed to write edited {}: {error}", input.path))?;
+
+    Ok(json!({
+        "path": relative.to_string_lossy().into_owned(),
+        "replacements": replacements,
+        "bytes_written": updated.len(),
+    })
+    .to_string())
+}
+
 fn execute_grep(workspace: &Path, arguments: &str) -> Result<String, String> {
     let input: GrepInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid grep arguments: {error}"))?;
     if input.pattern.is_empty() {
         return Err("grep pattern must not be empty".to_owned());
     }
-    let relative = relative_workspace_path(input.path.as_deref().unwrap_or("."))?;
-    let grep = std::env::var_os("PHENIX_GREP").unwrap_or_else(|| OsString::from("grep"));
-    let mut command = Command::new(grep);
+    let relative = search_workspace_path(workspace, input.path.as_deref().unwrap_or("."))?;
+    let rg = std::env::var_os("PHENIX_RG").unwrap_or_else(|| OsString::from("rg"));
+    let mut command = Command::new(rg);
     command
-        .arg("--recursive")
+        .arg("--hidden")
+        .arg("--no-ignore")
         .arg("--line-number")
         .arg("--with-filename")
-        .arg("--binary-files=without-match")
-        .arg("--exclude-dir=.git");
+        .arg("--no-heading")
+        .arg("--color")
+        .arg("never")
+        .arg("--glob")
+        .arg("!.git/**")
+        .arg("--glob")
+        .arg("!**/.git/**");
     if input.case_sensitive == Some(false) {
         command.arg("--ignore-case");
     }
@@ -328,11 +427,11 @@ fn execute_grep(workspace: &Path, arguments: &str) -> Result<String, String> {
         .arg(&relative)
         .current_dir(workspace)
         .output()
-        .map_err(|error| format!("failed to execute grep: {error}"))?;
+        .map_err(|error| format!("failed to execute ripgrep: {error}"))?;
     let exit_code = output.status.code().unwrap_or(-1);
     if !matches!(exit_code, 0 | 1) {
         return Err(format!(
-            "grep failed with exit code {exit_code}: {}",
+            "ripgrep failed with exit code {exit_code}: {}",
             capture(&output.stderr)
         ));
     }
@@ -344,6 +443,55 @@ fn execute_grep(workspace: &Path, arguments: &str) -> Result<String, String> {
         "stderr": capture(&output.stderr),
     })
     .to_string())
+}
+
+fn search_workspace_path(workspace: &Path, raw: &str) -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    normalize_search_path(workspace, raw, home.as_deref())
+}
+
+fn normalize_search_path(
+    workspace: &Path,
+    raw: &str,
+    home: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if raw.trim().is_empty() {
+        return Err("workspace path must not be empty".to_owned());
+    }
+    let workspace = fs::canonicalize(workspace).map_err(|error| {
+        format!(
+            "failed to resolve workspace {}: {error}",
+            workspace.display()
+        )
+    })?;
+    let requested = if raw == "~" {
+        home.ok_or_else(|| "cannot expand ~ because HOME is not set".to_owned())?
+            .to_path_buf()
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        home.ok_or_else(|| "cannot expand ~/ because HOME is not set".to_owned())?
+            .join(rest)
+    } else {
+        PathBuf::from(raw)
+    };
+    let candidate = if requested.is_absolute() {
+        requested
+    } else {
+        workspace.join(requested)
+    };
+    let candidate = fs::canonicalize(&candidate)
+        .map_err(|error| format!("failed to resolve grep path {raw}: {error}"))?;
+    if !candidate.starts_with(&workspace) {
+        return Err(format!("grep path escapes workspace: {raw}"));
+    }
+    let relative = candidate
+        .strip_prefix(&workspace)
+        .expect("workspace prefix was checked")
+        .to_path_buf();
+    Ok(if relative.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        relative
+    })
 }
 
 fn relative_workspace_path(raw: &str) -> Result<PathBuf, String> {
@@ -555,6 +703,57 @@ mod tests {
     }
 
     #[test]
+    fn edit_requires_a_unique_match_unless_replace_all_is_explicit() {
+        let workspace = temp_workspace("edit-tool");
+        fs::write(workspace.join("example.txt"), "alpha beta alpha\n").unwrap();
+
+        let error = execute_edit(
+            &workspace,
+            r#"{"path":"example.txt","old_text":"alpha","new_text":"omega"}"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("matched 2 occurrences"));
+
+        let result = execute_edit(
+            &workspace,
+            r#"{"path":"example.txt","old_text":"alpha","new_text":"omega","replace_all":true}"#,
+        )
+        .unwrap();
+        let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(result["replacements"], 2);
+        assert_eq!(
+            fs::read_to_string(workspace.join("example.txt")).unwrap(),
+            "omega beta omega\n"
+        );
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn grep_path_normalization_accepts_tilde_and_rejects_escape() {
+        let home = temp_workspace("grep-home");
+        let workspace = home.join("phenix/repos/phenix-nvim");
+        fs::create_dir_all(workspace.join("lua/phenix")).unwrap();
+        fs::write(workspace.join("lua/phenix/ui.lua"), "transcript input\n").unwrap();
+
+        assert_eq!(
+            normalize_search_path(&workspace, "~/phenix/repos/phenix-nvim/lua", Some(&home),)
+                .unwrap(),
+            Path::new("lua")
+        );
+        assert_eq!(
+            normalize_search_path(
+                &workspace,
+                workspace.join("lua").to_str().unwrap(),
+                Some(&home)
+            )
+            .unwrap(),
+            Path::new("lua")
+        );
+        assert!(normalize_search_path(&workspace, "~/outside", Some(&home)).is_err());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn dedicated_file_tools_reject_workspace_escape_paths() {
         assert!(relative_workspace_path("../outside").is_err());
         assert!(relative_workspace_path("nested/../../outside").is_err());
@@ -577,6 +776,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "bash".to_owned(),
+                "edit".to_owned(),
                 "grep".to_owned(),
                 "read".to_owned(),
                 "write".to_owned(),
@@ -592,7 +792,7 @@ mod tests {
                 .unwrap();
         }
 
-        let workflow_id = CallableId::parse("workflow.tool-surface").unwrap();
+        let workflow_id = CallableId::parse("orchestration.tool-surface").unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
                 descriptor: fixture_descriptor(workflow_id.as_str(), CallableKind::Orchestration),
@@ -631,9 +831,9 @@ mod tests {
             .create_session(None, None, ExecutionTarget::Routed(routing))
             .unwrap();
         let root = runtime
-            .submit(&session.id, "exercise the workflow")
+            .submit(&session.id, "exercise the orchestration")
             .unwrap();
-        let workflow = runtime
+        let orchestration = runtime
             .start_orchestration(&root.id, &workflow_id, "change and verify")
             .unwrap();
 
@@ -653,14 +853,14 @@ mod tests {
                 .executions
                 .into_iter()
                 .find(|execution| {
-                    execution.parent_execution.as_ref() == Some(&workflow.id)
+                    execution.parent_execution.as_ref() == Some(&orchestration.id)
                         && execution.callable.as_ref() == Some(agent)
                 })
-                .unwrap_or_else(|| panic!("workflow never scheduled {agent}"));
+                .unwrap_or_else(|| panic!("orchestration never scheduled {agent}"));
             runtime.drive_execution(&child.id, &mut backend).unwrap();
-            recorder.assert_model_tools(model_name, &["bash", "grep", "read", "write"]);
+            recorder.assert_model_tools(model_name, &["bash", "edit", "grep", "read", "write"]);
         }
 
-        recorder.assert_model_tools("root", &["bash", "grep", "read", "write"]);
+        recorder.assert_model_tools("root", &["bash", "edit", "grep", "read", "write"]);
     }
 }

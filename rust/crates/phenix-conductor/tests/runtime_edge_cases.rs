@@ -391,7 +391,7 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
-            descriptor: descriptor("workflow.edge", CallableKind::Orchestration),
+            descriptor: descriptor("orchestration.edge", CallableKind::Orchestration),
             policy: OrchestrationPolicy::Sequential,
             nodes: vec![
                 AgentNode {
@@ -407,11 +407,11 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
         .unwrap();
     let session = runtime.create_session(None, None, fixed_target()).unwrap();
     let root = runtime.submit(&session.id, "root").unwrap();
-    let workflow = runtime
+    let orchestration = runtime
         .start_orchestration(
             &root.id,
-            &CallableId::parse("workflow.edge").unwrap(),
-            "workflow",
+            &CallableId::parse("orchestration.edge").unwrap(),
+            "orchestration",
         )
         .unwrap();
 
@@ -422,8 +422,8 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
     assert_eq!(snapshot.executions.len(), 3);
     assert!(snapshot.executions.iter().all(|execution| {
         execution.id == root.id
-            || execution.id == workflow.id
-            || execution.parent_execution.as_ref() == Some(&workflow.id)
+            || execution.id == orchestration.id
+            || execution.parent_execution.as_ref() == Some(&orchestration.id)
     }));
     assert!(snapshot
         .executions

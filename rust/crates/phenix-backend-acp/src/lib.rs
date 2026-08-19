@@ -1116,6 +1116,7 @@ fn block_on<F: Future>(future: F) -> F::Output {
 mod tests {
     use super::*;
     use phenix_backend::ToolProvision;
+    use phenix_core::InferenceEffort;
     use serde_json::json;
 
     fn config() -> AcpBackendConfig {
@@ -1225,7 +1226,7 @@ mod tests {
     fn backend_rejects_non_exact_target_features_before_spawning() {
         let mut backend = AcpBackend::new(config());
         let mut target = model();
-        target.inference.effort = Some("high".to_owned());
+        target.inference.effort = Some(InferenceEffort::High);
         let tools = ToolProvision::default()
             .prepare(&backend.capabilities())
             .unwrap();

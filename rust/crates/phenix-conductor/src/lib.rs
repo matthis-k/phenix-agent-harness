@@ -515,7 +515,7 @@ impl ConductorRuntime {
         Ok(self
             .executions
             .get(&summary.id)
-            .expect("workflow exists after creation")
+            .expect("orchestration exists after creation")
             .summary
             .clone())
     }
@@ -861,11 +861,11 @@ impl ConductorRuntime {
     }
 
     fn refresh_orchestration(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
-        let Some(workflow) = self.executions.get(execution_id) else {
+        let Some(orchestration) = self.executions.get(execution_id) else {
             return Err(ConductorError::UnknownExecution(execution_id.clone()));
         };
-        if workflow.summary.kind != ExecutionKind::Orchestration
-            || is_terminal(&workflow.summary.state)
+        if orchestration.summary.kind != ExecutionKind::Orchestration
+            || is_terminal(&orchestration.summary.state)
         {
             return Ok(());
         }
@@ -911,7 +911,7 @@ impl ConductorRuntime {
                     .summary
                     .callable
                     .clone()
-                    .expect("workflow execution has callable"),
+                    .expect("orchestration execution has callable"),
                 objective.clone(),
                 *next_node,
                 execution.summary.state.clone(),
@@ -931,7 +931,7 @@ impl ConductorRuntime {
                 format!(
                     "{step_objective}
 
-Workflow objective:
+Orchestration objective:
 {objective}"
                 )
             }
