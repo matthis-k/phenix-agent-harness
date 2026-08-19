@@ -456,8 +456,8 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
     assert_eq!(
         run.backend.prompts(),
         vec![
-            "first step\n\nWorkflow objective:\noverall objective",
-            "second step\n\nWorkflow objective:\noverall objective",
+            "first step\n\nOrchestration objective:\noverall objective",
+            "second step\n\nOrchestration objective:\noverall objective",
         ]
     );
     assert_eq!(run.snapshot.executions.len(), 3);
