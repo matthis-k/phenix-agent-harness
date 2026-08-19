@@ -22,6 +22,20 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
       - name: Apply deterministic cleanup
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/agent-runtime-qa-cleanup.py')
+          lines = path.read_text().splitlines()
+          replacement = '''sub(module, '--set PHENIX_GREP "\\$\\{phenixWorkspaceGrep\\}" \\\\', '--set PHENIX_RG "${pkgs.ripgrep}/bin/rg" \\')'''
+          matched = 0
+          for index, line in enumerate(lines):
+              if line.startswith("replace(module, '--set PHENIX_GREP"):
+                  lines[index] = replacement
+                  matched += 1
+          if matched != 1:
+              raise SystemExit(f'expected one PHENIX_GREP patch line, found {matched}')
+          path.write_text('\n'.join(lines) + '\n')
+          PY
           python3 -m py_compile .github/agent-runtime-qa-cleanup.py
           python3 .github/agent-runtime-qa-cleanup.py
           cargo fmt --manifest-path rust/Cargo.toml --all
