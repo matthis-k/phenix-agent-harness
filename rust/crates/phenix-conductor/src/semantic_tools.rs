@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 pub(super) const ORCHESTRATION_LIST_ID: &str = "phenix_orchestration_list";
 pub(super) const ORCHESTRATION_START_ID: &str = "phenix_orchestration_start";
 pub(super) const SKILL_LOAD_ID: &str = "phenix_skill_load";
+pub(super) const SKILL_RESOURCE_READ_ID: &str = "phenix_skill_resource_read";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +24,13 @@ struct OrchestrationStartInput {
 #[serde(deny_unknown_fields)]
 struct SkillLoadInput {
     skill: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkillResourceReadInput {
+    skill: String,
+    path: String,
 }
 
 pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut ResolvedInvocation) {
@@ -39,12 +47,18 @@ pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut R
     if runtime.has_model_invocable_skills() {
         resolved.tools.callables.push(skill_load_descriptor());
     }
+    if runtime.has_skills() {
+        resolved
+            .tools
+            .callables
+            .push(skill_resource_read_descriptor());
+    }
 }
 
 pub(super) fn is_semantic_tool(id: &CallableId) -> bool {
     matches!(
         id.as_str(),
-        ORCHESTRATION_LIST_ID | ORCHESTRATION_START_ID | SKILL_LOAD_ID
+        ORCHESTRATION_LIST_ID | ORCHESTRATION_START_ID | SKILL_LOAD_ID | SKILL_RESOURCE_READ_ID
     )
 }
 
@@ -99,7 +113,23 @@ pub(super) fn invoke(
             },
         },
         SKILL_LOAD_ID => match parse_skill_load(&invocation.arguments_json) {
-            Ok(skill) => match runtime.load_skill(&skill) {
+            Ok(skill) => match runtime.load_skill(execution_id, &skill) {
+                Ok(output) => ToolResult {
+                    output,
+                    success: true,
+                },
+                Err(error) => ToolResult {
+                    output: error.to_string(),
+                    success: false,
+                },
+            },
+            Err(error) => ToolResult {
+                output: error,
+                success: false,
+            },
+        },
+        SKILL_RESOURCE_READ_ID => match parse_skill_resource_read(&invocation.arguments_json) {
+            Ok((skill, path)) => match runtime.read_skill_resource(execution_id, &skill, &path) {
                 Ok(output) => ToolResult {
                     output,
                     success: true,
@@ -184,6 +214,17 @@ fn parse_skill_load(arguments_json: &str) -> Result<SkillId, String> {
     SkillId::parse(input.skill).map_err(|error| format!("invalid skill id: {error}"))
 }
 
+fn parse_skill_resource_read(arguments_json: &str) -> Result<(SkillId, String), String> {
+    let input: SkillResourceReadInput = serde_json::from_str(arguments_json)
+        .map_err(|error| format!("invalid skill resource read arguments: {error}"))?;
+    if input.path.trim().is_empty() {
+        return Err("skill resource path must not be empty".to_owned());
+    }
+    let skill =
+        SkillId::parse(input.skill).map_err(|error| format!("invalid skill id: {error}"))?;
+    Ok((skill, input.path))
+}
+
 fn list_output(orchestrations: Vec<CallableDescriptor>) -> String {
     let orchestrations = orchestrations
         .into_iter()
@@ -236,6 +277,32 @@ fn skill_load_descriptor() -> CallableDescriptor {
         output_schema: json!({
             "type": "string"
         }),
+        capabilities: CapabilitySet::default(),
+        policy: CallablePolicy {
+            requires_permission: false,
+        },
+    }
+}
+
+fn skill_resource_read_descriptor() -> CallableDescriptor {
+    CallableDescriptor {
+        id: CallableId::parse(SKILL_RESOURCE_READ_ID).expect("static skill resource read id"),
+        kind: CallableKind::Tool,
+        description: "Read one frozen text resource listed by a skill that is active for this execution. A skill becomes active through explicit manual invocation or a successful phenix_skill_load.".to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["skill", "path"],
+            "properties": {
+                "skill": { "type": "string", "minLength": 1 },
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Relative resource path exactly as listed by the active skill"
+                }
+            }
+        }),
+        output_schema: json!({ "type": "string" }),
         capabilities: CapabilitySet::default(),
         policy: CallablePolicy {
             requires_permission: false,

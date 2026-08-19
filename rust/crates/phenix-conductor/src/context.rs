@@ -1,10 +1,12 @@
 use phenix_core::{SkillDescriptor, SkillId, SkillInvocationPolicy};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+const MAX_TEXT_RESOURCE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ContextDocumentKind {
@@ -25,8 +27,14 @@ struct SkillDefinition {
     descriptor: SkillDescriptor,
     instructions: String,
     root: PathBuf,
-    resources: Vec<PathBuf>,
+    resources: BTreeMap<PathBuf, SkillResourceContent>,
     allowed_tools: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SkillResourceContent {
+    Text(String),
+    Unavailable,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -41,6 +49,10 @@ pub enum ContextError {
     InvalidSkill { path: PathBuf, message: String },
     UnknownSkill(SkillId),
     ManualOnlySkill(SkillId),
+    InactiveSkill(SkillId),
+    InvalidSkillResourcePath { skill: SkillId, path: String },
+    UnknownSkillResource { skill: SkillId, path: String },
+    UnsupportedSkillResource { skill: SkillId, path: String },
 }
 
 impl Display for ContextError {
@@ -54,6 +66,17 @@ impl Display for ContextError {
             }
             Self::UnknownSkill(id) => write!(f, "unknown skill: {id}"),
             Self::ManualOnlySkill(id) => write!(f, "skill is manual-only: {id}"),
+            Self::InactiveSkill(id) => write!(f, "skill is not active for this execution: {id}"),
+            Self::InvalidSkillResourcePath { skill, path } => {
+                write!(f, "invalid resource path {path:?} for skill {skill}")
+            }
+            Self::UnknownSkillResource { skill, path } => {
+                write!(f, "unknown resource {path:?} for skill {skill}")
+            }
+            Self::UnsupportedSkillResource { skill, path } => write!(
+                f,
+                "resource {path:?} for skill {skill} is binary or exceeds the text resource limit"
+            ),
         }
     }
 }
@@ -112,7 +135,19 @@ impl ContextRegistry {
             .any(|skill| skill.descriptor.invocation == SkillInvocationPolicy::ModelEligible)
     }
 
+    pub fn has_skills(&self) -> bool {
+        !self.skills.is_empty()
+    }
+
     pub fn compose_prompt(&self, input: &str) -> Result<String, ContextError> {
+        self.compose_prompt_with_activations(input)
+            .map(|(prompt, _)| prompt)
+    }
+
+    pub fn compose_prompt_with_activations(
+        &self,
+        input: &str,
+    ) -> Result<(String, BTreeSet<SkillId>), ContextError> {
         let (user_prompt, explicit_skill) = self.resolve_manual_activation(input)?;
         let model_skills = self
             .skills
@@ -122,7 +157,7 @@ impl ContextRegistry {
         let active_skill = explicit_skill.as_ref().and_then(|id| self.skills.get(id));
 
         if self.base_documents.is_empty() && model_skills.is_empty() && active_skill.is_none() {
-            return Ok(user_prompt.to_owned());
+            return Ok((user_prompt.to_owned(), BTreeSet::new()));
         }
 
         let mut output = String::from("<phenix_context>\n");
@@ -159,7 +194,8 @@ impl ContextRegistry {
         output.push_str("</phenix_context>\n\n<user_request>\n");
         output.push_str(user_prompt.trim_start());
         output.push_str("\n</user_request>");
-        Ok(output)
+        let active_skills = explicit_skill.into_iter().collect();
+        Ok((output, active_skills))
     }
 
     pub fn model_skill_payload(&self, id: &SkillId) -> Result<String, ContextError> {
@@ -171,6 +207,34 @@ impl ContextRegistry {
             return Err(ContextError::ManualOnlySkill(id.clone()));
         }
         Ok(render_skill(skill))
+    }
+
+    pub fn skill_resource_payload(&self, id: &SkillId, path: &str) -> Result<String, ContextError> {
+        let skill = self
+            .skills
+            .get(id)
+            .ok_or_else(|| ContextError::UnknownSkill(id.clone()))?;
+        let relative = normalized_resource_path(id, path)?;
+        let resource =
+            skill
+                .resources
+                .get(&relative)
+                .ok_or_else(|| ContextError::UnknownSkillResource {
+                    skill: id.clone(),
+                    path: path.to_owned(),
+                })?;
+        match resource {
+            SkillResourceContent::Text(content) => Ok(format!(
+                "<skill_resource skill=\"{}\" path=\"{}\">\n{}\n</skill_resource>",
+                id,
+                relative.display(),
+                content
+            )),
+            SkillResourceContent::Unavailable => Err(ContextError::UnsupportedSkillResource {
+                skill: id.clone(),
+                path: path.to_owned(),
+            }),
+        }
     }
 
     fn resolve_manual_activation<'a>(
@@ -387,22 +451,21 @@ fn parse_inline_list(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn collect_resources(root: &Path) -> Result<Vec<PathBuf>, ContextError> {
-    let mut resources = Vec::new();
+fn collect_resources(root: &Path) -> Result<BTreeMap<PathBuf, SkillResourceContent>, ContextError> {
+    let mut resources = BTreeMap::new();
     for directory in ["scripts", "references", "assets"] {
         let path = root.join(directory);
         if path.is_dir() {
             collect_files(root, &path, &mut resources)?;
         }
     }
-    resources.sort();
     Ok(resources)
 }
 
 fn collect_files(
     root: &Path,
     directory: &Path,
-    output: &mut Vec<PathBuf>,
+    output: &mut BTreeMap<PathBuf, SkillResourceContent>,
 ) -> Result<(), ContextError> {
     let mut entries = fs::read_dir(directory)
         .map_err(|error| io_error(directory, error))?
@@ -411,13 +474,44 @@ fn collect_files(
     entries.sort_by_key(|entry| entry.path());
     for entry in entries {
         let path = entry.path();
-        if path.is_dir() {
+        let file_type = entry.file_type().map_err(|error| io_error(&path, error))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             collect_files(root, &path, output)?;
-        } else if path.is_file() {
-            output.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
+        } else if file_type.is_file() {
+            let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+            let metadata = entry.metadata().map_err(|error| io_error(&path, error))?;
+            let content = if metadata.len() > MAX_TEXT_RESOURCE_BYTES {
+                SkillResourceContent::Unavailable
+            } else {
+                let bytes = fs::read(&path).map_err(|error| io_error(&path, error))?;
+                match String::from_utf8(bytes) {
+                    Ok(text) => SkillResourceContent::Text(text),
+                    Err(_) => SkillResourceContent::Unavailable,
+                }
+            };
+            output.insert(relative, content);
         }
     }
     Ok(())
+}
+
+fn normalized_resource_path(id: &SkillId, value: &str) -> Result<PathBuf, ContextError> {
+    let path = Path::new(value);
+    if value.trim().is_empty()
+        || path.is_absolute()
+        || !path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(ContextError::InvalidSkillResourcePath {
+            skill: id.clone(),
+            path: value.to_owned(),
+        });
+    }
+    Ok(path.to_path_buf())
 }
 
 fn render_skill(skill: &SkillDefinition) -> String {
@@ -429,7 +523,7 @@ fn render_skill(skill: &SkillDefinition) -> String {
     );
     if !skill.resources.is_empty() {
         output.push_str("\nResources relative to the skill root:\n");
-        for resource in &skill.resources {
+        for resource in skill.resources.keys() {
             output.push_str(&format!("- {}\n", resource.display()));
         }
     }
@@ -511,8 +605,11 @@ mod tests {
             root.join(".agents/skills/tdd/SKILL.md"),
             "---\nname: tdd\ndescription: Use when explicitly requested.\ndisable-model-invocation: true\n---\n# TDD\nWrite a failing regression first.",
         );
+        let resource_path = root.join(".cursor/skills/unslop/references/style.md");
+        write(&resource_path, "frozen resource v1");
 
         let registry = ContextRegistry::discover(&nested).unwrap();
+        write(&resource_path, "mutated resource v2");
         let catalog = registry.skill_descriptors();
         assert_eq!(catalog.len(), 2);
         assert_eq!(
@@ -549,6 +646,16 @@ mod tests {
             .unwrap();
         assert!(payload.contains("Remove generic AI patterns"));
         assert!(payload.contains("root=\""));
+        assert!(payload.contains("references/style.md"));
+        let resource = registry
+            .skill_resource_payload(&SkillId::parse("unslop").unwrap(), "references/style.md")
+            .unwrap();
+        assert!(resource.contains("frozen resource v1"));
+        assert!(!resource.contains("mutated resource v2"));
+        assert!(matches!(
+            registry.skill_resource_payload(&SkillId::parse("unslop").unwrap(), "../outside",),
+            Err(ContextError::InvalidSkillResourcePath { .. })
+        ));
         assert!(matches!(
             registry.model_skill_payload(&SkillId::parse("tdd").unwrap()),
             Err(ContextError::ManualOnlySkill(_))

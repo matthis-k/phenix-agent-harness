@@ -69,7 +69,7 @@ Project context is ambient instruction material. At startup the conductor resolv
 
 Skills use the `SKILL.md` directory convention. Portable `.agents/skills`, Phenix `.phenix/skills` / `~/.config/phenix/skills`, and Cursor/Claude/Codex compatibility roots are discovered with project-local definitions taking precedence over user definitions. `PHENIX_SKILL_PATH` can add explicit roots. The conductor exposes only skill name and description to models until `phenix_skill_load` is called. `disable-model-invocation: true` is normalized as a manual-only policy and is enforced by the loader, while the complete catalog remains available to frontends through `get_skill_catalog`. A user can activate any known skill explicitly for one turn with `/skill <name> ...` or `/<name> ...`.
 
-Skill `allowed-tools` metadata is advisory only and never expands conductor tool permissions. Skill resources under `scripts/`, `references/`, and `assets/` are inventoried relative to the skill root; executing scripts remains subject to the ordinary workspace/tool permission model.
+Skill `allowed-tools` metadata is advisory only and never expands conductor tool permissions. Skill resources under `scripts/`, `references/`, and `assets/` are snapshotted at discovery and inventoried relative to the skill root. After a skill is active, `phenix_skill_resource_read` progressively exposes listed text resources without allowing path traversal or symlink escape; binary or oversized assets remain inventory-only. Executing scripts remains subject to the ordinary workspace/tool permission model.
 
 ## Packages
 

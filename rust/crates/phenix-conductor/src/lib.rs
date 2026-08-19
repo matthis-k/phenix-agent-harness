@@ -204,6 +204,7 @@ pub struct ConductorRuntime {
     callables: CallableRegistry,
     routing: RoutingRegistry,
     context: ContextRegistry,
+    skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
     policy: InvocationPolicy,
     event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
     next_session: u64,
@@ -232,6 +233,7 @@ impl ConductorRuntime {
             callables: CallableRegistry::default(),
             routing: RoutingRegistry::default(),
             context: ContextRegistry::default(),
+            skill_activations: BTreeMap::new(),
             policy: InvocationPolicy::new(),
             event_sink: None,
             next_session: 0,
@@ -350,8 +352,38 @@ impl ConductorRuntime {
         self.context.has_model_invocable_skills()
     }
 
-    pub fn load_skill(&self, id: &SkillId) -> Result<String, ConductorError> {
-        Ok(self.context.model_skill_payload(id)?)
+    #[must_use]
+    pub fn has_skills(&self) -> bool {
+        self.context.has_skills()
+    }
+
+    pub fn load_skill(
+        &mut self,
+        execution_id: &ExecutionId,
+        id: &SkillId,
+    ) -> Result<String, ConductorError> {
+        let payload = self.context.model_skill_payload(id)?;
+        self.skill_activations
+            .entry(execution_id.clone())
+            .or_default()
+            .insert(id.clone());
+        Ok(payload)
+    }
+
+    pub fn read_skill_resource(
+        &self,
+        execution_id: &ExecutionId,
+        id: &SkillId,
+        path: &str,
+    ) -> Result<String, ConductorError> {
+        if !self
+            .skill_activations
+            .get(execution_id)
+            .is_some_and(|skills| skills.contains(id))
+        {
+            return Err(ContextError::InactiveSkill(id.clone()).into());
+        }
+        Ok(self.context.skill_resource_payload(id, path)?)
     }
 
     #[must_use]
@@ -652,7 +684,13 @@ impl ConductorRuntime {
             route
         };
 
-        let prompt = self.context.compose_prompt(&input)?;
+        let (prompt, explicit_skills) = self.context.compose_prompt_with_activations(&input)?;
+        if !explicit_skills.is_empty() {
+            self.skill_activations
+                .entry(execution_id.clone())
+                .or_default()
+                .extend(explicit_skills);
+        }
 
         Ok(ResolvedInvocation {
             execution_id: execution_id.clone(),
@@ -878,6 +916,7 @@ impl ConductorRuntime {
             },
         )?;
         if is_terminal(&state) {
+            self.skill_activations.remove(execution_id);
             if let Some(parent) = parent {
                 self.push_event(
                     &parent,
