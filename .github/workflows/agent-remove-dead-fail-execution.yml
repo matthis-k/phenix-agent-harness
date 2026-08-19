@@ -21,22 +21,14 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
           path = Path('rust/crates/phenix-conductor/src/server.rs')
           content = path.read_text()
-          old = '''    fn fail_execution(
-              &self,
-              execution_id: &ExecutionId,
-              error: ProtocolError,
-          ) -> Result<(), ServerError> {
-              let mut runtime = self.lock_runtime()?;
-              fail_runtime_execution(&mut runtime, execution_id, error)?;
-              Ok(())
-          }
-
-          '''
-          if content.count(old) != 1:
-              raise SystemExit(f'expected one obsolete fail_execution method, found {content.count(old)}')
-          path.write_text(content.replace(old, '', 1))
+          pattern = r'''\n    fn fail_execution\(\n        &self,\n        execution_id: &ExecutionId,\n        error: ProtocolError,\n    \) -> Result<\(\), ServerError> \{\n        let mut runtime = self\.lock_runtime\(\)\?;\n        fail_runtime_execution\(&mut runtime, execution_id, error\)\?;\n        Ok\(\(\)\)\n    \}\n'''
+          updated, count = re.subn(pattern, '\n', content, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one obsolete fail_execution method, found {count}')
+          path.write_text(updated)
           PY
           cargo fmt --manifest-path rust/Cargo.toml --all
           git diff --check
