@@ -108,6 +108,55 @@ impl BackendSession for ToolSession {
     }
 }
 
+struct RecoveringToolBackend;
+struct RecoveringToolSession;
+
+impl Backend for RecoveringToolBackend {
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            tool_presentations: BTreeSet::from([ToolPresentation::Native]),
+            images: false,
+            persistent_sessions: false,
+        }
+    }
+
+    fn open_session(
+        &mut self,
+        request: BackendSessionRequest,
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
+        assert_eq!(request.tools.presentation(), Some(ToolPresentation::Native));
+        Ok(Arc::new(RecoveringToolSession))
+    }
+}
+
+impl BackendSession for RecoveringToolSession {
+    fn execute(
+        &self,
+        _request: BackendExecutionRequest,
+        host: &mut dyn BackendHost,
+    ) -> Result<(), BackendError> {
+        let failed = host.invoke_tool(ToolInvocation {
+            callable: CallableId::parse("flaky").unwrap(),
+            arguments_json: r#"{"attempt":1}"#.to_owned(),
+        })?;
+        assert!(!failed.success);
+        assert!(failed.output.contains("first attempt failed"));
+
+        let recovered = host.invoke_tool(ToolInvocation {
+            callable: CallableId::parse("flaky").unwrap(),
+            arguments_json: r#"{"attempt":2}"#.to_owned(),
+        })?;
+        assert!(recovered.success);
+        assert_eq!(recovered.output, r#"{"attempt":2}"#);
+        host.emit(BackendEvent::ContentDelta("recovered".to_owned()))?;
+        Ok(())
+    }
+
+    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+        Ok(())
+    }
+}
+
 struct UnsupportedBackend {
     opened: Arc<AtomicBool>,
 }
@@ -409,6 +458,52 @@ fn conductor_provisions_and_executes_tools_without_child_execution() {
         .unwrap();
 
     assert!(before < started && started < arguments && arguments < finished && finished < after);
+}
+
+#[test]
+fn failed_tool_call_does_not_poison_later_calls_in_same_execution() {
+    use std::sync::atomic::AtomicUsize;
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let marker = attempts.clone();
+    let mut runtime = ConductorRuntime::new();
+    runtime
+        .register_tool(descriptor("flaky", CallableKind::Tool), move |arguments| {
+            let attempt = marker.fetch_add(1, Ordering::SeqCst);
+            if attempt == 0 {
+                Err("first attempt failed".to_owned())
+            } else {
+                Ok(arguments.to_owned())
+            }
+        })
+        .unwrap();
+    let session = runtime.create_session(None, None, fixed()).unwrap();
+    let execution = runtime
+        .submit(&session.id, "recover after tool failure")
+        .unwrap();
+    let mut backend = RecoveringToolBackend;
+
+    runtime
+        .drive_execution(&execution.id, &mut backend)
+        .unwrap();
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        runtime
+            .snapshot()
+            .executions
+            .into_iter()
+            .find(|item| item.id == execution.id)
+            .unwrap()
+            .state,
+        ExecutionState::Completed
+    );
+    assert!(runtime.events_since(0).iter().any(|event| {
+        matches!(
+            event.kind,
+            ExecutionEventKind::ToolCallFinished { success: false, .. }
+        )
+    }));
 }
 
 #[test]

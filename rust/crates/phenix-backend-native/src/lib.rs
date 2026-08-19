@@ -263,7 +263,9 @@ impl Backend for PhenixBackend {
         }
         let mut any_authenticated = false;
         for provider in &auth_providers {
-            if provider_has_valid_auth(&self.credentials, provider)? {
+            let provider_id = ProviderId::parse(*provider)
+                .map_err(|error| BackendError::Protocol(error.to_string()))?;
+            if provider_has_valid_auth(&self.credentials, &provider_id)? {
                 any_authenticated = true;
                 break;
             }
@@ -728,14 +730,14 @@ mod tests {
 
     #[test]
     fn reasoning_effort_is_canonical_core_domain() {
-        assert_eq!(
+        assert!(matches!(
             provider_reasoning_effort(&InferenceEffort::High),
             ReasoningEffort::High
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             provider_reasoning_effort(&InferenceEffort::ExtraHigh),
             ReasoningEffort::XHigh
-        );
+        ));
     }
 
     fn test_tool_surface() -> PreparedToolSurface {
