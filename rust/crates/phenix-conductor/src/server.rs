@@ -14,13 +14,13 @@ use phenix_core::{
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self, BufRead, Write};
 use std::sync::{
-    mpsc::{self, Receiver, SyncSender},
-    Arc, Mutex, MutexGuard,
+    mpsc::{self, SyncSender},
+    Arc, Condvar, Mutex, MutexGuard,
 };
 use std::thread;
 
@@ -29,7 +29,6 @@ mod semantic_tools;
 
 const EVENT_BUFFER: usize = 256;
 const OUTPUT_BUFFER: usize = 256;
-const EXECUTION_BUFFER: usize = 64;
 const EXECUTION_WORKERS: usize = 4;
 
 type SharedBackend = Arc<Mutex<Box<dyn Backend>>>;
@@ -38,6 +37,81 @@ type ActiveScopes = Arc<Mutex<BTreeMap<ExecutionId, LiveExecutionScope>>>;
 
 struct ExecutionJob {
     execution_id: ExecutionId,
+    session_id: SessionId,
+}
+
+#[derive(Default)]
+struct ExecutionQueueState {
+    pending: VecDeque<ExecutionJob>,
+    active_sessions: BTreeSet<SessionId>,
+    closed: bool,
+}
+
+#[derive(Clone, Default)]
+struct ExecutionQueue {
+    state: Arc<(Mutex<ExecutionQueueState>, Condvar)>,
+}
+
+impl ExecutionQueue {
+    fn enqueue(&self, job: ExecutionJob) -> Result<(), ServerError> {
+        let (lock, ready) = &*self.state;
+        let mut state = lock
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
+        if state.closed {
+            return Err(ServerError::StatePoisoned("closed execution queue"));
+        }
+        state.pending.push_back(job);
+        ready.notify_one();
+        Ok(())
+    }
+
+    fn next(&self) -> Result<Option<ExecutionJob>, ServerError> {
+        let (lock, ready) = &*self.state;
+        let mut state = lock
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
+        loop {
+            if let Some(index) = state
+                .pending
+                .iter()
+                .position(|job| !state.active_sessions.contains(&job.session_id))
+            {
+                let job = state
+                    .pending
+                    .remove(index)
+                    .expect("pending execution index was selected");
+                state.active_sessions.insert(job.session_id.clone());
+                return Ok(Some(job));
+            }
+            if state.closed && state.pending.is_empty() {
+                return Ok(None);
+            }
+            state = ready
+                .wait(state)
+                .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
+        }
+    }
+
+    fn complete(&self, session_id: &SessionId) -> Result<(), ServerError> {
+        let (lock, ready) = &*self.state;
+        let mut state = lock
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
+        state.active_sessions.remove(session_id);
+        ready.notify_all();
+        Ok(())
+    }
+
+    fn close(&self) -> Result<(), ServerError> {
+        let (lock, ready) = &*self.state;
+        let mut state = lock
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
+        state.closed = true;
+        ready.notify_all();
+        Ok(())
+    }
 }
 
 /// Process-local resources owned by one live execution. Durable execution state
@@ -153,7 +227,7 @@ impl ConductorServer {
             runtime.subscribe_events(EVENT_BUFFER)
         };
         let (output_sender, output_receiver) = mpsc::sync_channel(OUTPUT_BUFFER);
-        let (execution_sender, execution_receiver) = mpsc::sync_channel(EXECUTION_BUFFER);
+        let executions = ExecutionQueue::default();
 
         let runtime = self.runtime.clone();
         let backends = self.backends.clone();
@@ -181,10 +255,9 @@ impl ConductorServer {
                 }
             });
 
-            let execution_receiver = Arc::new(Mutex::new(execution_receiver));
             let executors = (0..EXECUTION_WORKERS)
                 .map(|_| {
-                    let execution_receiver = Arc::clone(&execution_receiver);
+                    let executions = executions.clone();
                     let runtime = runtime.clone();
                     let backends = backends.clone();
                     let active_scopes = active_scopes.clone();
@@ -192,7 +265,7 @@ impl ConductorServer {
                     let persist_lock = persist_lock.clone();
                     scope.spawn(move || {
                         execution_loop(
-                            execution_receiver,
+                            executions,
                             runtime,
                             backends,
                             active_scopes,
@@ -203,8 +276,8 @@ impl ConductorServer {
                 })
                 .collect::<Vec<_>>();
 
-            let result = self.read_requests(input, &output_sender, &execution_sender);
-            drop(execution_sender);
+            let result = self.read_requests(input, &output_sender, &executions);
+            executions.close()?;
             let mut executor_result = Ok(());
             for executor in executors {
                 let worker_result = executor.join().map_err(|_| ServerError::WorkerPanicked)?;
@@ -229,7 +302,7 @@ impl ConductorServer {
         &mut self,
         input: R,
         output: &SyncSender<ServerMessage>,
-        executions: &SyncSender<ExecutionJob>,
+        executions: &ExecutionQueue,
     ) -> Result<(), ServerError> {
         for line in input.lines() {
             let line = line?;
@@ -255,7 +328,7 @@ impl ConductorServer {
         &mut self,
         message: ClientMessage,
         output: &SyncSender<ServerMessage>,
-        executions: &SyncSender<ExecutionJob>,
+        executions: &ExecutionQueue,
     ) -> Result<(), ServerError> {
         let id = message.id;
         match &message.command {
@@ -382,7 +455,7 @@ impl ConductorServer {
         session_id: SessionId,
         text: String,
         output: &SyncSender<ServerMessage>,
-        executions: &SyncSender<ExecutionJob>,
+        executions: &ExecutionQueue,
     ) -> Result<(), ServerError> {
         let execution = match self.lock_runtime()?.submit(&session_id, text) {
             Ok(execution) => execution,
@@ -392,9 +465,10 @@ impl ConductorServer {
             }
         };
         let execution_id = execution.id.clone();
+        let execution_session = execution.session_id.clone();
         self.persist()?;
         self.respond(output, request_id, Ok(Reply::Execution { execution }))?;
-        self.enqueue_execution(execution_id, executions)
+        self.enqueue_execution(execution_id, execution_session, executions)
     }
 
     fn start_callable(
@@ -404,7 +478,7 @@ impl ConductorServer {
         callable: CallableId,
         objective: String,
         output: &SyncSender<ServerMessage>,
-        executions: &SyncSender<ExecutionJob>,
+        executions: &ExecutionQueue,
     ) -> Result<(), ServerError> {
         let execution =
             match self
@@ -439,39 +513,28 @@ impl ConductorServer {
                         candidate.parent_execution.as_ref() == Some(&execution_id)
                             && candidate.state == ExecutionState::Pending
                     })
-                    .map(|candidate| candidate.id)
+                    .map(|candidate| (candidate.id, candidate.session_id))
                     .collect::<Vec<_>>()
             };
-            for child in pending {
-                self.enqueue_execution(child, executions)?;
+            for (child, session_id) in pending {
+                self.enqueue_execution(child, session_id, executions)?;
             }
             Ok(())
         } else {
-            self.enqueue_execution(execution_id, executions)
+            self.enqueue_execution(execution_id, execution.session_id, executions)
         }
     }
 
     fn enqueue_execution(
         &self,
         execution_id: ExecutionId,
-        executions: &SyncSender<ExecutionJob>,
+        session_id: SessionId,
+        executions: &ExecutionQueue,
     ) -> Result<(), ServerError> {
-        if executions
-            .send(ExecutionJob {
-                execution_id: execution_id.clone(),
-            })
-            .is_err()
-        {
-            self.fail_execution(
-                &execution_id,
-                protocol_error(
-                    ErrorCode::BackendTransport,
-                    "conductor execution worker is unavailable",
-                ),
-            )?;
-            self.persist()?;
-        }
-        Ok(())
+        executions.enqueue(ExecutionJob {
+            execution_id,
+            session_id,
+        })
     }
 
     fn cancel_execution(&self, root: &ExecutionId) -> Result<Reply, ProtocolError> {
@@ -627,31 +690,24 @@ impl ConductorServer {
 }
 
 fn execution_loop(
-    executions: Arc<Mutex<Receiver<ExecutionJob>>>,
+    executions: ExecutionQueue,
     runtime: SharedRuntime,
     backends: BTreeMap<BackendId, SharedBackend>,
     active_scopes: ActiveScopes,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
-    loop {
-        let job = {
-            let receiver = executions
-                .lock()
-                .map_err(|_| ServerError::StatePoisoned("execution receiver"))?;
-            receiver.recv()
-        };
-        let Ok(job) = job else {
-            break;
-        };
-        execute_job_chain(
+    while let Some(job) = executions.next()? {
+        let result = execute_job_chain(
             job.execution_id,
             &runtime,
             &backends,
             &active_scopes,
             store.as_ref(),
             &persist_lock,
-        )?;
+        );
+        executions.complete(&job.session_id)?;
+        result?;
     }
     Ok(())
 }
@@ -1665,6 +1721,53 @@ mod tests {
         fn cancel(&self, _execution_id: &ExecutionId) -> Result<(), BackendError> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn execution_queue_serializes_each_session_without_blocking_independent_sessions() {
+        let queue = ExecutionQueue::default();
+        let first_session = SessionId::parse("session-1").unwrap();
+        let second_session = SessionId::parse("session-2").unwrap();
+        queue
+            .enqueue(ExecutionJob {
+                execution_id: ExecutionId::parse("execution-1").unwrap(),
+                session_id: first_session.clone(),
+            })
+            .unwrap();
+        queue
+            .enqueue(ExecutionJob {
+                execution_id: ExecutionId::parse("execution-2").unwrap(),
+                session_id: first_session.clone(),
+            })
+            .unwrap();
+        queue
+            .enqueue(ExecutionJob {
+                execution_id: ExecutionId::parse("execution-3").unwrap(),
+                session_id: second_session.clone(),
+            })
+            .unwrap();
+
+        let first = queue.next().unwrap().unwrap();
+        assert_eq!(
+            first.execution_id,
+            ExecutionId::parse("execution-1").unwrap()
+        );
+        let independent = queue.next().unwrap().unwrap();
+        assert_eq!(
+            independent.execution_id,
+            ExecutionId::parse("execution-3").unwrap()
+        );
+
+        queue.complete(&first_session).unwrap();
+        let second = queue.next().unwrap().unwrap();
+        assert_eq!(
+            second.execution_id,
+            ExecutionId::parse("execution-2").unwrap()
+        );
+        queue.complete(&first_session).unwrap();
+        queue.complete(&second_session).unwrap();
+        queue.close().unwrap();
+        assert!(queue.next().unwrap().is_none());
     }
 
     #[test]

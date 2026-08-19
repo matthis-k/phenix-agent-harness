@@ -171,22 +171,42 @@ fn fixed_target_turns_reuse_one_native_conversation_per_phenix_session() {
         .map(|line| serde_json::from_str::<ServerMessage>(line).unwrap())
         .filter_map(|message| match message {
             ServerMessage::Event { event } => match event.kind {
-                ExecutionEventKind::AssistantContentDelta { text } => Some(text),
+                ExecutionEventKind::AssistantContentDelta { text } => {
+                    Some((event.execution_id, text))
+                }
                 _ => None,
             },
             _ => None,
         })
-        .collect::<Vec<_>>();
+        .collect::<BTreeMap<_, _>>();
 
-    assert_eq!(content, ["turn:1", "turn:2", "turn:1"]);
+    assert_eq!(
+        content.get(&ExecutionId::parse("execution-1").unwrap()),
+        Some(&"turn:1".to_owned())
+    );
+    assert_eq!(
+        content.get(&ExecutionId::parse("execution-2").unwrap()),
+        Some(&"turn:2".to_owned())
+    );
+    assert_eq!(
+        content.get(&ExecutionId::parse("execution-3").unwrap()),
+        Some(&"turn:1".to_owned())
+    );
     assert_eq!(state.ephemeral_opens.load(Ordering::SeqCst), 0);
     assert_eq!(state.native_sessions_created.load(Ordering::SeqCst), 2);
+    let persistent_opens = state.persistent_opens.lock().unwrap();
     assert_eq!(
-        *state.persistent_opens.lock().unwrap(),
-        [
-            SessionId::parse("session-1").unwrap(),
-            SessionId::parse("session-1").unwrap(),
-            SessionId::parse("session-2").unwrap(),
-        ]
+        persistent_opens
+            .iter()
+            .filter(|session_id| session_id.as_str() == "session-1")
+            .count(),
+        2
+    );
+    assert_eq!(
+        persistent_opens
+            .iter()
+            .filter(|session_id| session_id.as_str() == "session-2")
+            .count(),
+        1
     );
 }
