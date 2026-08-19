@@ -1,0 +1,30 @@
+name: Agent concurrency lint fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Apply lint fix
+        run: |
+          python3 .github/agent-clippy-constant.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Commit product change
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust/crates/phenix-conductor/src/server.rs
+          git commit -m 'fix: rely on behavioral concurrency regression'
+          git push
