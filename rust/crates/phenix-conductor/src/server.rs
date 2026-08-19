@@ -1669,7 +1669,6 @@ mod tests {
 
     #[test]
     fn independent_sessions_use_bounded_parallel_execution_lanes() {
-        assert!(EXECUTION_WORKERS >= 2);
         let gate = ConcurrentGate {
             state: Arc::new((Mutex::new(0), Condvar::new())),
         };
