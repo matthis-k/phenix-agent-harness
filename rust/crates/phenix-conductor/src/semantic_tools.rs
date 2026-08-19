@@ -95,75 +95,39 @@ pub(super) fn invoke(
         )
         .map_err(conductor_protocol_error)?;
 
-    let result = match invocation.callable.as_str() {
-        ORCHESTRATION_LIST_ID => match parse_list(&invocation.arguments_json) {
-            Ok(()) => ToolResult {
-                output: list_output(
-                    runtime
-                        .callable_descriptors()
-                        .into_iter()
-                        .filter(|descriptor| descriptor.kind == CallableKind::Orchestration)
-                        .collect(),
-                ),
-                success: true,
-            },
-            Err(error) => ToolResult {
-                output: error,
-                success: false,
-            },
-        },
-        SKILL_LOAD_ID => match parse_skill_load(&invocation.arguments_json) {
-            Ok(skill) => match runtime.load_skill(execution_id, &skill) {
-                Ok(output) => ToolResult {
-                    output,
-                    success: true,
-                },
-                Err(error) => ToolResult {
-                    output: error.to_string(),
-                    success: false,
-                },
-            },
-            Err(error) => ToolResult {
-                output: error,
-                success: false,
-            },
-        },
-        SKILL_RESOURCE_READ_ID => match parse_skill_resource_read(&invocation.arguments_json) {
-            Ok((skill, path)) => match runtime.read_skill_resource(execution_id, &skill, &path) {
-                Ok(output) => ToolResult {
-                    output,
-                    success: true,
-                },
-                Err(error) => ToolResult {
-                    output: error.to_string(),
-                    success: false,
-                },
-            },
-            Err(error) => ToolResult {
-                output: error,
-                success: false,
-            },
-        },
-        ORCHESTRATION_START_ID => match parse_start(&invocation.arguments_json) {
-            Ok((orchestration, objective)) => {
-                match runtime.start_orchestration(execution_id, &orchestration, objective) {
-                    Ok(execution) => ToolResult {
-                        output: start_output(&execution),
-                        success: true,
-                    },
-                    Err(error) => ToolResult {
-                        output: error.to_string(),
-                        success: false,
-                    },
-                }
-            }
-            Err(error) => ToolResult {
-                output: error,
-                success: false,
-            },
-        },
+    let outcome = match invocation.callable.as_str() {
+        ORCHESTRATION_LIST_ID => parse_list(&invocation.arguments_json).map(|()| {
+            list_output(
+                runtime
+                    .callable_descriptors()
+                    .into_iter()
+                    .filter(|descriptor| descriptor.kind == CallableKind::Orchestration)
+                    .collect(),
+            )
+        }),
+        SKILL_LOAD_ID => parse_skill_load(&invocation.arguments_json).and_then(|skill| {
+            runtime
+                .load_skill(execution_id, &skill)
+                .map_err(|error| error.to_string())
+        }),
+        SKILL_RESOURCE_READ_ID => {
+            parse_skill_resource_read(&invocation.arguments_json).and_then(|(skill, path)| {
+                runtime
+                    .read_skill_resource(execution_id, &skill, &path)
+                    .map_err(|error| error.to_string())
+            })
+        }
+        ORCHESTRATION_START_ID => {
+            parse_start(&invocation.arguments_json).and_then(|(orchestration, objective)| {
+                runtime
+                    .start_orchestration(execution_id, &orchestration, objective)
+                    .map(|execution| start_output(&execution))
+                    .map_err(|error| error.to_string())
+            })
+        }
         _ => unreachable!("semantic tool was checked before dispatch"),
     };
+    let result = tool_result(outcome);
 
     runtime
         .push_event(
@@ -176,6 +140,19 @@ pub(super) fn invoke(
         )
         .map_err(conductor_protocol_error)?;
     Ok(result)
+}
+
+fn tool_result(outcome: Result<String, String>) -> ToolResult {
+    match outcome {
+        Ok(output) => ToolResult {
+            output,
+            success: true,
+        },
+        Err(output) => ToolResult {
+            output,
+            success: false,
+        },
+    }
 }
 
 fn orchestration_descriptors() -> Vec<CallableDescriptor> {
