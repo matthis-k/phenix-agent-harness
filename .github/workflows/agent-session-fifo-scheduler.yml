@@ -19,36 +19,8 @@ jobs:
       - name: Apply scheduler fix
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('.github/agent-session-fifo-scheduler.py')
-          content = path.read_text()
-          old = '''replace(
-              server,
-              "        executions: &SyncSender<ExecutionJob>,",
-              "        executions: &ExecutionQueue,",
-              count=4,
-          )'''
-          new = '''content = (ROOT / server).read_text()
-          old_execution_parameter = "        executions: &SyncSender<ExecutionJob>,"
-          if content.count(old_execution_parameter) != 5:
-              raise RuntimeError(
-                  f"{server}: expected 5 execution sender parameters, found "
-                  f"{content.count(old_execution_parameter)}"
-              )
-          (ROOT / server).write_text(
-              content.replace(
-                  old_execution_parameter,
-                  "        executions: &ExecutionQueue,",
-                  4,
-              )
-          )'''
-          if content.count(old) != 1:
-              raise SystemExit(f'expected one four-parameter migration block, found {content.count(old)}')
-          path.write_text(content.replace(old, new, 1))
-          PY
-          python3 -m py_compile .github/agent-session-fifo-scheduler.py
-          python3 .github/agent-session-fifo-scheduler.py
+          python3 -m py_compile .github/agent-session-fifo-scheduler-v2.py
+          python3 .github/agent-session-fifo-scheduler-v2.py
           cargo fmt --manifest-path rust/Cargo.toml --all
           git diff --check
       - name: Commit product changes
