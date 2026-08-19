@@ -359,6 +359,11 @@ impl ConductorServer {
                 self.respond(output, id, Ok(Reply::RoutingCatalog { profiles }))?;
                 return Ok(());
             }
+            Command::GetSkillCatalog => {
+                let skills = self.lock_runtime()?.skill_descriptors();
+                self.respond(output, id, Ok(Reply::SkillCatalog { skills }))?;
+                return Ok(());
+            }
             _ => {}
         }
         let persist = matches!(
@@ -439,6 +444,9 @@ impl ConductorServer {
             }
             Command::GetRoutingCatalog => {
                 unreachable!("routing catalog handled before dispatch")
+            }
+            Command::GetSkillCatalog => {
+                unreachable!("skill catalog handled before dispatch")
             }
         };
 
@@ -785,7 +793,7 @@ fn execute_model_execution(
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
         let mut resolved = runtime_guard.resolve_invocation(execution_id);
         if let Ok(resolved) = &mut resolved {
-            semantic_tools::extend_root_workflow_tools(&runtime_guard, resolved);
+            semantic_tools::extend_semantic_tools(&runtime_guard, resolved);
         }
         resolved
     };
@@ -1499,6 +1507,9 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         }
         ConductorError::Routing(error) => {
             protocol_error(ErrorCode::RoutingFailure, error.to_string())
+        }
+        ConductorError::Context(error) => {
+            protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }
         ConductorError::Backend(error) => map_backend_error(error),
     }

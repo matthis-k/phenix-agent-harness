@@ -1,7 +1,7 @@
 use clap::Parser;
 use phenix_backend_acp::{AcpBackend, AcpBackendConfig};
 use phenix_backend_native::{PhenixBackend, BACKEND_ID as PHENIX_BACKEND_ID};
-use phenix_conductor::{ConductorRuntime, ConductorServer, JsonFileStore};
+use phenix_conductor::{ConductorRuntime, ConductorServer, ContextRegistry, JsonFileStore};
 use phenix_core::{BackendId, ProviderId};
 use std::error::Error;
 use std::io;
@@ -67,7 +67,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     {
+        let context = ContextRegistry::discover(&cwd)?;
         let mut runtime = server.runtime();
+        runtime.install_context_registry(context);
         workspace_tools::register(&mut runtime, cwd.clone())?;
     }
 

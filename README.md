@@ -60,6 +60,17 @@ The example authoring configuration under `config/phenix-harness/` is retained a
 
 The conductor is mechanism, not policy. It validates and executes supplied backends, routing tables, workflows, and tool policy; it does not silently install preferred models, roles, or workflows.
 
+
+### Project context and skills
+
+The conductor loads project context and skills as separate mechanisms for the working directory supplied with `--cwd`.
+
+Project context is ambient instruction material. At startup the conductor resolves the repository root, loads `AGENTS.override.md` or `AGENTS.md` from the root through the selected working directory, and also loads root `CONTRIBUTING.md` and `DEVELOPMENT.md` when present. The resulting snapshot is frozen into the running conductor process rather than reread during a turn.
+
+Skills use the `SKILL.md` directory convention. Portable `.agents/skills`, Phenix `.phenix/skills` / `~/.config/phenix/skills`, and Cursor/Claude/Codex compatibility roots are discovered with project-local definitions taking precedence over user definitions. `PHENIX_SKILL_PATH` can add explicit roots. The conductor exposes only skill name and description to models until `phenix_skill_load` is called. `disable-model-invocation: true` is normalized as a manual-only policy and is enforced by the loader, while the complete catalog remains available to frontends through `get_skill_catalog`. A user can activate any known skill explicitly for one turn with `/skill <name> ...` or `/<name> ...`.
+
+Skill `allowed-tools` metadata is advisory only and never expands conductor tool permissions. Skill resources under `scripts/`, `references/`, and `assets/` are snapshotted at discovery and inventoried relative to the skill root. After a skill is active, `phenix_skill_resource_read` progressively exposes listed text resources without allowing path traversal or symlink escape; binary or oversized assets remain inventory-only. Executing scripts remains subject to the ordinary workspace/tool permission model.
+
 ## Packages
 
 The flake exposes the headless ACP products directly:

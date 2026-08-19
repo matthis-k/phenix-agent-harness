@@ -52,6 +52,22 @@ id_type!(ProviderId);
 id_type!(ModelId);
 id_type!(RoutingProfileId);
 id_type!(AuthenticationMethodId);
+id_type!(SkillId);
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillInvocationPolicy {
+    ModelEligible,
+    ManualOnly,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SkillDescriptor {
+    pub id: SkillId,
+    pub name: String,
+    pub description: String,
+    pub invocation: SkillInvocationPolicy,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
