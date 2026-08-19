@@ -52,6 +52,11 @@ jobs:
           PY
           python3 -m py_compile .github/agent-runtime-qa-cleanup.py
           python3 .github/agent-runtime-qa-cleanup.py
+          if [ -f rust/crates/phenix-conductor/tests/black_box_orchestration_callables.rs ]; then
+            mv rust/crates/phenix-conductor/tests/black_box_orchestration_callables.rs rust/crates/phenix-conductor/tests/black_box_workflow_callables.rs
+          fi
+          git checkout -- .github/workflows/ci.yml modules/development.nix .github/workflows/agent-runtime-qa-cleanup.yml
+          rm -rf .github/__pycache__
           cargo fmt --manifest-path rust/Cargo.toml --all
           git diff --check
       - name: Commit cleanup
