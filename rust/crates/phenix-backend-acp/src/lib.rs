@@ -18,8 +18,8 @@ use phenix_backend::{
 };
 use phenix_core::{
     AuthenticationMethodDescriptor, AuthenticationMethodId, AuthenticationMethodKind,
-    AuthenticationState, BackendCatalog, BackendId, InferenceEffort, InferenceOptions,
-    ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
+    AuthenticationState, BackendCatalog, BackendId, InferenceOptions, ModelDescriptor, ModelId,
+    ModelTarget, ProviderId, SessionId,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1116,6 +1116,7 @@ fn block_on<F: Future>(future: F) -> F::Output {
 mod tests {
     use super::*;
     use phenix_backend::ToolProvision;
+    use phenix_core::InferenceEffort;
     use serde_json::json;
 
     fn config() -> AcpBackendConfig {
