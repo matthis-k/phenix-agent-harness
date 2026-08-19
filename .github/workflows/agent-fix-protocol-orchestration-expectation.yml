@@ -1,0 +1,42 @@
+name: Agent protocol orchestration expectation fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Fix stale protocol expectation
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-conductor/tests/protocol_e2e.rs')
+          content = path.read_text()
+          old = 'Workflow objective:'
+          count = content.count(old)
+          if count != 2:
+              raise SystemExit(f'expected exactly 2 stale protocol objective strings, found {count}')
+          path.write_text(content.replace(old, 'Orchestration objective:'))
+          PY
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Commit product change
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust/crates/phenix-conductor/tests/protocol_e2e.rs
+          git commit -m 'test: expect canonical orchestration objective in protocol e2e'
+          git pull --rebase origin "${GITHUB_HEAD_REF}"
+          git push origin HEAD:"${GITHUB_HEAD_REF}"
