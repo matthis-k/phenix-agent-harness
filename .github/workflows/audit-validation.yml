@@ -1,0 +1,48 @@
+name: Audit validation
+
+on:
+  push:
+    branches:
+      - agent/simplify-semantic-results
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - name: Correct upstream lock metadata in runner
+        run: |
+          python3 - <<'PY'
+          import json
+          path = "flake.lock"
+          with open(path) as f:
+              lock = json.load(f)
+          for node in lock["nodes"].values():
+              locked = node.get("locked", {})
+              if locked.get("rev") == "c6605da679d1d4f4f17ccdb1e40090297c8ed24a":
+                  locked["lastModified"] = 1787172797
+          with open(path, "w") as f:
+              json.dump(lock, f, indent=2)
+              f.write("\n")
+          PY
+      - name: Rust formatting
+        run: nix run .#phenix-maintenance -- check source rust-format
+      - name: Clippy
+        run: nix run .#phenix-maintenance -- check rust
+      - name: Unit tests
+        run: nix run .#phenix-maintenance -- test unit
+      - name: Model tool loop
+        run: nix run .#phenix-maintenance -- test system conductor-model-tool-loop
+      - name: Orchestration callables
+        run: nix run .#phenix-maintenance -- test system conductor-workflow-callables
