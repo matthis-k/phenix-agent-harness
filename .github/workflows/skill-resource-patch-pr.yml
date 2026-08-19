@@ -1,0 +1,26 @@
+name: skill-resource-patch-pr
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/context-and-skills' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/context-and-skills
+          fetch-depth: 0
+      - run: python3 .github/skill-resource-patch.py
+      - run: cargo fmt --manifest-path rust/Cargo.toml --all
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md rust
+          git commit -m 'feat: load active skill resources progressively'
+          git push origin HEAD:agent/context-and-skills
