@@ -1508,6 +1508,9 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         ConductorError::Routing(error) => {
             protocol_error(ErrorCode::RoutingFailure, error.to_string())
         }
+        ConductorError::Context(error) => {
+            protocol_error(ErrorCode::InvalidRequest, error.to_string())
+        }
         ConductorError::Backend(error) => map_backend_error(error),
     }
 }
