@@ -610,16 +610,6 @@ impl ConductorServer {
         Ok(Reply::Session { session })
     }
 
-    fn fail_execution(
-        &self,
-        execution_id: &ExecutionId,
-        error: ProtocolError,
-    ) -> Result<(), ServerError> {
-        let mut runtime = self.lock_runtime()?;
-        fail_runtime_execution(&mut runtime, execution_id, error)?;
-        Ok(())
-    }
-
     fn refresh_all_catalogs(&mut self) -> Result<(), BackendError> {
         let backend_ids = self.backends.keys().cloned().collect::<Vec<_>>();
         for backend_id in backend_ids {
