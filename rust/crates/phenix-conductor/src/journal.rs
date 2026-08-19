@@ -14,8 +14,14 @@ pub const JOURNAL_FORMAT_VERSION: u64 = 1;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JournalExecutionPayload {
-    Invocation { input: String },
-    Orchestration { objective: String, next_node: usize },
+    Invocation {
+        input: String,
+    },
+    #[serde(alias = "workflow")]
+    Orchestration {
+        objective: String,
+        next_node: usize,
+    },
 }
 
 impl From<&ExecutionPayload> for JournalExecutionPayload {
@@ -82,6 +88,7 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         state: ExecutionState,
     },
+    #[serde(alias = "workflow_advanced")]
     OrchestrationAdvanced {
         execution_id: ExecutionId,
         next_node: usize,
@@ -538,4 +545,46 @@ fn is_terminal(state: &ExecutionState) -> bool {
             | ExecutionState::Cancelled
             | ExecutionState::Interrupted
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_workflow_tags_decode_but_current_journals_emit_orchestration() {
+        let payload: JournalExecutionPayload = serde_json::from_value(json!({
+            "kind": "workflow",
+            "objective": "legacy",
+            "next_node": 2
+        }))
+        .unwrap();
+        assert!(matches!(
+            payload,
+            JournalExecutionPayload::Orchestration {
+                ref objective,
+                next_node: 2
+            } if objective == "legacy"
+        ));
+        assert_eq!(
+            serde_json::to_value(&payload).unwrap()["kind"],
+            "orchestration"
+        );
+
+        let event: DomainEvent = serde_json::from_value(json!({
+            "type": "workflow_advanced",
+            "execution_id": "execution-1",
+            "next_node": 3
+        }))
+        .unwrap();
+        assert!(matches!(
+            event,
+            DomainEvent::OrchestrationAdvanced { next_node: 3, .. }
+        ));
+        assert_eq!(
+            serde_json::to_value(&event).unwrap()["type"],
+            "orchestration_advanced"
+        );
+    }
 }

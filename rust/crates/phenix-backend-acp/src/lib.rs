@@ -18,8 +18,8 @@ use phenix_backend::{
 };
 use phenix_core::{
     AuthenticationMethodDescriptor, AuthenticationMethodId, AuthenticationMethodKind,
-    AuthenticationState, BackendCatalog, BackendId, InferenceOptions, ModelDescriptor, ModelId,
-    ModelTarget, ProviderId, SessionId,
+    AuthenticationState, BackendCatalog, BackendId, InferenceEffort, InferenceOptions,
+    ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1225,7 +1225,7 @@ mod tests {
     fn backend_rejects_non_exact_target_features_before_spawning() {
         let mut backend = AcpBackend::new(config());
         let mut target = model();
-        target.inference.effort = Some("high".to_owned());
+        target.inference.effort = Some(InferenceEffort::High);
         let tools = ToolProvision::default()
             .prepare(&backend.capabilities())
             .unwrap();

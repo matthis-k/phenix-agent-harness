@@ -201,7 +201,8 @@ pub struct AgentNode {
 /// Canonical parsed orchestration definition.
 ///
 /// Source adapters such as Markdown, Lua values, JSON, or RON produce this type
-/// directly. There is no intermediate orchestration-definition domain model.
+/// directly. There is no intermediate source-definition DTO between those adapters
+/// and this canonical domain type.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OrchestrationDefinition {

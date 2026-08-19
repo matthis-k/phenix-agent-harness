@@ -792,9 +792,21 @@ mod tests {
         );
         assert_eq!(host.calls, 1);
 
+        host.result = Ok(ToolResult {
+            output: "recovered".to_owned(),
+            success: true,
+        });
+        let recovered =
+            dispatch_tool_call(&tools, &mut host, "read", &json!({"path": "valid"})).unwrap();
+        assert_eq!(recovered, "recovered");
+        assert_eq!(
+            host.calls, 2,
+            "a failed tool call must not poison later calls"
+        );
+
         let unknown = dispatch_tool_call(&tools, &mut host, "made_up_tool", &json!({})).unwrap();
         assert!(unknown.contains("unknown or unavailable Phenix tool"));
-        assert_eq!(host.calls, 1, "unknown tools must not reach the host");
+        assert_eq!(host.calls, 2, "unknown tools must not reach the host");
 
         let mut protocol_host = TestToolHost {
             result: Err(BackendError::Protocol("bad tool request".to_owned())),
