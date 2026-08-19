@@ -793,7 +793,7 @@ fn execute_model_execution(
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
         let mut resolved = runtime_guard.resolve_invocation(execution_id);
         if let Ok(resolved) = &mut resolved {
-            semantic_tools::extend_root_workflow_tools(&runtime_guard, resolved);
+            semantic_tools::extend_semantic_tools(&runtime_guard, resolved);
         }
         resolved
     };

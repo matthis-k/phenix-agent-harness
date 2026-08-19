@@ -40,6 +40,7 @@ pub enum ContextError {
     Io { path: PathBuf, message: String },
     InvalidSkill { path: PathBuf, message: String },
     UnknownSkill(SkillId),
+    ManualOnlySkill(SkillId),
 }
 
 impl Display for ContextError {
@@ -52,6 +53,7 @@ impl Display for ContextError {
                 write!(f, "invalid skill {}: {message}", path.display())
             }
             Self::UnknownSkill(id) => write!(f, "unknown skill: {id}"),
+            Self::ManualOnlySkill(id) => write!(f, "skill is manual-only: {id}"),
         }
     }
 }
@@ -158,11 +160,15 @@ impl ContextRegistry {
         Ok(output)
     }
 
-    pub fn skill_payload(&self, id: &SkillId) -> Result<String, ContextError> {
-        self.skills
+    pub fn model_skill_payload(&self, id: &SkillId) -> Result<String, ContextError> {
+        let skill = self
+            .skills
             .get(id)
-            .map(render_skill)
-            .ok_or_else(|| ContextError::UnknownSkill(id.clone()))
+            .ok_or_else(|| ContextError::UnknownSkill(id.clone()))?;
+        if skill.descriptor.invocation != SkillInvocationPolicy::ModelEligible {
+            return Err(ContextError::ManualOnlySkill(id.clone()));
+        }
+        Ok(render_skill(skill))
     }
 
     fn resolve_manual_activation<'a>(
@@ -537,10 +543,14 @@ mod tests {
         assert!(manual.contains("<user_request>\nfix the bug"));
 
         let payload = registry
-            .skill_payload(&SkillId::parse("unslop").unwrap())
+            .model_skill_payload(&SkillId::parse("unslop").unwrap())
             .unwrap();
         assert!(payload.contains("Remove generic AI patterns"));
         assert!(payload.contains("root=\""));
+        assert!(matches!(
+            registry.model_skill_payload(&SkillId::parse("tdd").unwrap()),
+            Err(ContextError::ManualOnlySkill(_))
+        ));
 
         fs::remove_dir_all(root).unwrap();
     }

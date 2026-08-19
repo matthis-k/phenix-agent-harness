@@ -351,7 +351,7 @@ impl ConductorRuntime {
     }
 
     pub fn load_skill(&self, id: &SkillId) -> Result<String, ConductorError> {
-        Ok(self.context.skill_payload(id)?)
+        Ok(self.context.model_skill_payload(id)?)
     }
 
     #[must_use]

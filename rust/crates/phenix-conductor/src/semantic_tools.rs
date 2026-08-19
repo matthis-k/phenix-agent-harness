@@ -25,10 +25,7 @@ struct SkillLoadInput {
     skill: String,
 }
 
-pub(super) fn extend_root_workflow_tools(
-    runtime: &ConductorRuntime,
-    resolved: &mut ResolvedInvocation,
-) {
+pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut ResolvedInvocation) {
     let is_root = runtime.snapshot().executions.iter().any(|execution| {
         execution.id == resolved.execution_id && execution.kind == ExecutionKind::Root
     });
