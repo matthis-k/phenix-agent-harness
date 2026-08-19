@@ -150,7 +150,7 @@
         "sops-nix": "sops-nix"
       },
       "locked": {
-        "lastModified": 1786402137,
+        "lastModified": 1787172797,
         "narHash": "sha256-HKXu/kiuVhyQknSf3hUEBbfSlhyiLbAT9tyLVWC0Os0=",
         "owner": "matthis-k",
         "repo": "phenix-pins",
