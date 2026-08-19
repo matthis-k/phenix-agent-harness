@@ -1,0 +1,29 @@
+name: Agent ACP test import fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Apply fix
+        run: |
+          python3 .github/agent-acp-test-import.py
+          git diff --check
+      - name: Commit product change
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust/crates/phenix-backend-acp/src/lib.rs
+          git commit -m 'fix: scope typed effort import to ACP tests'
+          git push
