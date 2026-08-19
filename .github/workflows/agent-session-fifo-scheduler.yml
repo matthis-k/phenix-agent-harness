@@ -1,0 +1,36 @@
+name: Agent session FIFO scheduler fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Apply scheduler fix
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/agent-session-fifo-scheduler.py
+          python3 .github/agent-session-fifo-scheduler.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Commit product changes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust/crates/phenix-conductor/src/server.rs \
+                  rust/crates/phenix-conductor/tests/fixed_target_continuity.rs
+          git diff --cached --stat
+          git commit -m 'fix: serialize execution per session while preserving parallelism'
+          git pull --rebase origin "${GITHUB_HEAD_REF}"
+          git push origin HEAD:"${GITHUB_HEAD_REF}"
