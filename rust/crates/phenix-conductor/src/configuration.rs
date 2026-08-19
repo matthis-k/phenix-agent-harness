@@ -221,7 +221,7 @@ mod tests {
 
         assert_eq!(
             runtime.resolve_invocation(&child.id).unwrap().prompt,
-            "Implement the bounded change.\n\nWorkflow objective:\nFix routing selection"
+            "Implement the bounded change.\n\nOrchestration objective:\nFix routing selection"
         );
     }
 
