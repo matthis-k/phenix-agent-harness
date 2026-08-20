@@ -25,6 +25,7 @@ futures = "0.3"
 genai = "0.6.0"
 getrandom = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls"] }
+rmcp = { version = "3.1.2", default-features = false, features = ["server"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
