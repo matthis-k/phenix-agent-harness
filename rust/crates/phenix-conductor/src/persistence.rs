@@ -152,10 +152,10 @@ mod tests {
     use super::*;
     use crate::DomainEvent;
     use phenix_core::{
-        AgentNode, BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy,
-        CapabilitySet, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
-        ModelTarget, OrchestrationDefinition, OrchestrationPolicy, ProviderId, RoutingProfile,
-        RoutingProfileId, SessionId,
+        BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+        ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
+        OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
+        RoutingProfile, RoutingProfileId, SessionId,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -182,6 +182,23 @@ mod tests {
         }
     }
 
+    fn node(
+        id: &str,
+        callable: &str,
+        depends_on: &[&str],
+        objective: Option<&str>,
+    ) -> OrchestrationNode {
+        OrchestrationNode {
+            id: OrchestrationNodeId::parse(id).unwrap(),
+            callable: CallableId::parse(callable).unwrap(),
+            depends_on: depends_on
+                .iter()
+                .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+                .collect(),
+            objective: objective.map(str::to_owned),
+        }
+    }
+
     fn bind_workflow_config(runtime: &mut ConductorRuntime) {
         runtime
             .register_agent(descriptor("agent.first", CallableKind::Agent))
@@ -192,16 +209,9 @@ mod tests {
         runtime
             .register_orchestration(OrchestrationDefinition {
                 descriptor: descriptor("orchestration.test", CallableKind::Orchestration),
-                policy: OrchestrationPolicy::Sequential,
                 nodes: vec![
-                    AgentNode {
-                        callable: CallableId::parse("agent.first").unwrap(),
-                        objective: Some("first".to_owned()),
-                    },
-                    AgentNode {
-                        callable: CallableId::parse("agent.second").unwrap(),
-                        objective: None,
-                    },
+                    node("first", "agent.first", &[], Some("first")),
+                    node("second", "agent.second", &["first"], None),
                 ],
             })
             .unwrap();

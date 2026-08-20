@@ -2,8 +2,8 @@ use super::{descriptor, fixed_target, protocol_harness, session_id};
 use phenix_backend::ToolPresentation;
 use phenix_conductor::ConductorRuntime;
 use phenix_core::{
-    AgentNode, BackendId, CallableId, CallableKind, ExecutionEventKind, ExecutionState,
-    ExecutionTarget, OrchestrationDefinition, OrchestrationPolicy, RoutingProfile,
+    BackendId, CallableId, CallableKind, ExecutionEventKind, ExecutionState, ExecutionTarget,
+    OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, RoutingProfile,
     RoutingProfileId,
 };
 use phenix_protocol::{Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage};
@@ -27,6 +27,23 @@ fn response_error(run: &protocol_harness::ProtocolRun, id: u64) -> &ProtocolErro
         .unwrap_or_else(|| panic!("request {id} did not return a protocol error"))
 }
 
+fn workflow_node(
+    id: &str,
+    callable: &str,
+    depends_on: &[&str],
+    objective: Option<&str>,
+) -> OrchestrationNode {
+    OrchestrationNode {
+        id: OrchestrationNodeId::parse(id).unwrap(),
+        callable: CallableId::parse(callable).unwrap(),
+        depends_on: depends_on
+            .iter()
+            .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+            .collect(),
+        objective: objective.map(str::to_owned),
+    }
+}
+
 fn bind_two_step_workflow(runtime: &mut ConductorRuntime) {
     runtime
         .register_agent(descriptor("agent.first", CallableKind::Agent))
@@ -37,16 +54,9 @@ fn bind_two_step_workflow(runtime: &mut ConductorRuntime) {
     runtime
         .register_orchestration(OrchestrationDefinition {
             descriptor: descriptor("orchestration.two-step", CallableKind::Orchestration),
-            policy: OrchestrationPolicy::Sequential,
             nodes: vec![
-                AgentNode {
-                    callable: CallableId::parse("agent.first").unwrap(),
-                    objective: Some("first".to_owned()),
-                },
-                AgentNode {
-                    callable: CallableId::parse("agent.second").unwrap(),
-                    objective: Some("second".to_owned()),
-                },
+                workflow_node("first", "agent.first", &[], Some("first")),
+                workflow_node("second", "agent.second", &["first"], Some("second")),
             ],
         })
         .unwrap();
