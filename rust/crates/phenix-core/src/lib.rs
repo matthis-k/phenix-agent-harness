@@ -1,5 +1,11 @@
 #![forbid(unsafe_code)]
 
+mod attempts;
+mod workspace;
+
+pub use attempts::*;
+pub use workspace::*;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,6 +59,8 @@ id_type!(ModelId);
 id_type!(RoutingProfileId);
 id_type!(AuthenticationMethodId);
 id_type!(SkillId);
+id_type!(WorkspaceId);
+id_type!(AttemptGroupId);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
