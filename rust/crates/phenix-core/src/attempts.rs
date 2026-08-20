@@ -87,7 +87,12 @@ mod tests {
             ExecutionId::parse("parent").unwrap(),
             CallableId::parse("agent.implement").unwrap(),
             "Implement provider-neutral auth",
-            failure("attempt-1", 1, "provider discovery", "duplicated auth authority"),
+            failure(
+                "attempt-1",
+                1,
+                "provider discovery",
+                "duplicated auth authority",
+            ),
         );
         group.record_failure(failure(
             "attempt-2",
