@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           ref: agent/rmcp-mcp-bridge
-          fetch-depth: 0
+          fetch-depth: 1
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
