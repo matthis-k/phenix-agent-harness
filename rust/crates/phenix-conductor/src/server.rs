@@ -1520,9 +1520,8 @@ mod tests {
     use super::*;
     use phenix_backend::{BackendExecutionRequest, BackendSessionRequest};
     use phenix_core::{
-        AgentNode, CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet,
-        InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition, OrchestrationPolicy,
-        ProviderId,
+        CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet, InferenceOptions, ModelId,
+        ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
     };
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1580,9 +1579,10 @@ mod tests {
         runtime
             .register_orchestration(OrchestrationDefinition {
                 descriptor: descriptor("orchestration.tree", CallableKind::Orchestration),
-                policy: OrchestrationPolicy::Sequential,
-                nodes: vec![AgentNode {
+                nodes: vec![OrchestrationNode {
+                    id: OrchestrationNodeId::parse("child").unwrap(),
                     callable: CallableId::parse("agent.child").unwrap(),
+                    depends_on: Vec::new(),
                     objective: Some("child".to_owned()),
                 }],
             })
