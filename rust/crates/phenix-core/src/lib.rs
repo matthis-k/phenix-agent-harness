@@ -53,6 +53,7 @@ macro_rules! id_type {
 id_type!(SessionId);
 id_type!(ExecutionId);
 id_type!(CallableId);
+id_type!(OrchestrationNodeId);
 id_type!(ToolCallId);
 id_type!(ConfigRevisionId);
 id_type!(BackendId);
@@ -211,16 +212,13 @@ pub struct RoutingProfileDescriptor {
     pub providers: Vec<ProviderId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OrchestrationPolicy {
-    Sequential,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AgentNode {
+pub struct OrchestrationNode {
+    pub id: OrchestrationNodeId,
     pub callable: CallableId,
+    #[serde(default)]
+    pub depends_on: Vec<OrchestrationNodeId>,
     pub objective: Option<String>,
 }
 
@@ -233,8 +231,7 @@ pub struct AgentNode {
 #[serde(deny_unknown_fields)]
 pub struct OrchestrationDefinition {
     pub descriptor: CallableDescriptor,
-    pub policy: OrchestrationPolicy,
-    pub nodes: Vec<AgentNode>,
+    pub nodes: Vec<OrchestrationNode>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -377,16 +374,27 @@ mod tests {
     fn orchestration_definition_is_the_direct_source_shape() {
         let definition = OrchestrationDefinition {
             descriptor: orchestration_descriptor(),
-            policy: OrchestrationPolicy::Sequential,
-            nodes: vec![AgentNode {
-                callable: CallableId::parse("agent.scout").unwrap(),
-                objective: Some("Inspect the repository".to_owned()),
-            }],
+            nodes: vec![
+                OrchestrationNode {
+                    id: OrchestrationNodeId::parse("scout").unwrap(),
+                    callable: CallableId::parse("agent.scout").unwrap(),
+                    depends_on: Vec::new(),
+                    objective: Some("Inspect the repository".to_owned()),
+                },
+                OrchestrationNode {
+                    id: OrchestrationNodeId::parse("plan").unwrap(),
+                    callable: CallableId::parse("agent.plan").unwrap(),
+                    depends_on: vec![OrchestrationNodeId::parse("scout").unwrap()],
+                    objective: Some("Plan the change".to_owned()),
+                },
+            ],
         };
 
         let value = serde_json::to_value(&definition).unwrap();
         assert_eq!(value["descriptor"]["kind"], "orchestration");
-        assert!(value.get("nodes").is_some());
+        assert_eq!(value["nodes"][0]["id"], "scout");
+        assert_eq!(value["nodes"][1]["depends_on"][0], "scout");
+        assert!(value.get("policy").is_none());
         assert!(value.get("steps").is_none());
         assert_eq!(
             serde_json::from_value::<OrchestrationDefinition>(value).unwrap(),

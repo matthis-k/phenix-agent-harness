@@ -105,8 +105,8 @@ impl From<ConductorError> for ConfigurationError {
 mod tests {
     use super::*;
     use phenix_core::{
-        AgentNode, BackendId, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-        ExecutionTarget, InferenceOptions, ModelId, ModelTarget, OrchestrationPolicy, ProviderId,
+        BackendId, CallableId, CallableKind, CallablePolicy, CapabilitySet, ExecutionTarget,
+        InferenceOptions, ModelId, ModelTarget, OrchestrationNode, OrchestrationNodeId, ProviderId,
         RoutingProfileId,
     };
     use serde_json::json;
@@ -124,6 +124,15 @@ mod tests {
         }
     }
 
+    fn node(id: &str, callable: CallableId, objective: Option<&str>) -> OrchestrationNode {
+        OrchestrationNode {
+            id: OrchestrationNodeId::parse(id).unwrap(),
+            callable,
+            depends_on: Vec::new(),
+            objective: objective.map(str::to_owned),
+        }
+    }
+
     fn target(model: &str) -> ModelTarget {
         ModelTarget {
             backend: BackendId::parse("phenix").unwrap(),
@@ -138,11 +147,11 @@ mod tests {
         let agent = descriptor("agent.fixture", CallableKind::Agent);
         let orchestration = OrchestrationDefinition {
             descriptor: descriptor("orchestration.fixture", CallableKind::Orchestration),
-            policy: OrchestrationPolicy::Sequential,
-            nodes: vec![AgentNode {
-                callable: agent.id.clone(),
-                objective: Some("inspect the objective".to_owned()),
-            }],
+            nodes: vec![node(
+                "fixture",
+                agent.id.clone(),
+                Some("inspect the objective"),
+            )],
         };
         let route = RoutingProfile {
             id: RoutingProfileId::parse("router.fixture").unwrap(),
@@ -194,11 +203,11 @@ mod tests {
             agents: vec![agent.clone()],
             orchestrations: vec![OrchestrationDefinition {
                 descriptor: descriptor(workflow_id.as_str(), CallableKind::Orchestration),
-                policy: OrchestrationPolicy::Sequential,
-                nodes: vec![AgentNode {
-                    callable: agent.id,
-                    objective: Some("Implement the bounded change.".to_owned()),
-                }],
+                nodes: vec![node(
+                    "implement",
+                    agent.id,
+                    Some("Implement the bounded change."),
+                )],
             }],
             ..RuntimeConfiguration::default()
         };
