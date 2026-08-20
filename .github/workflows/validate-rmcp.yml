@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/rmcp-mcp-bridge
+  pull_request:
+    branches:
+      - agent/reduce-rust-boilerplate-run
 
 permissions:
   contents: write
