@@ -8,18 +8,14 @@ use oauth2::basic::{
     BasicTokenType,
 };
 use oauth2::{
-    AccessToken, AsyncHttpClient, AuthUrl, AuthorizationCode, Client as OAuthClient, ClientId,
-    CsrfToken, EndpointNotSet, EndpointSet, PkceCodeChallenge, RedirectUrl, RefreshToken,
-    RequestTokenError, Scope, StandardRevocableToken, TokenResponse, TokenUrl,
+    AccessToken, AuthUrl, AuthorizationCode, Client as OAuthClient, ClientId, CsrfToken,
+    EndpointNotSet, EndpointSet, PkceCodeChallenge, RedirectUrl, RefreshToken, RequestTokenError,
+    Scope, StandardRevocableToken, TokenResponse, TokenUrl,
 };
-use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -45,8 +41,6 @@ type CodexOAuthClient = OAuthClient<
     EndpointNotSet,
     EndpointSet,
 >;
-
-type CodexTokenRequestError = RequestTokenError<OAuthHttpError, BasicErrorResponse>;
 
 #[derive(Clone)]
 pub(crate) struct CodexOAuth {
@@ -113,7 +107,7 @@ pub(crate) async fn login(store: &CredentialStore) -> Result<(), String> {
         .port();
     let redirect_uri = format!("http://localhost:{port}/auth/callback");
     let client = oauth_client(Some(&redirect_uri))?;
-    let http_client = OAuthHttpClient::new()?;
+    let http_client = oauth_http_client()?;
     let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
     let (authorization_url, state) = client
         .authorize_url(CsrfToken::new_random)
@@ -262,7 +256,7 @@ async fn refresh(
         return Err("cannot refresh a non-OAuth credential".to_owned());
     };
     let client = oauth_client(None)?;
-    let http_client = OAuthHttpClient::new()?;
+    let http_client = oauth_http_client()?;
     let refresh_token_request = RefreshToken::new(refresh_token.clone());
     let response = client
         .exchange_refresh_token(&refresh_token_request)
@@ -315,6 +309,13 @@ fn oauth_client(redirect_uri: Option<&str>) -> Result<CodexOAuthClient, String> 
     }
 }
 
+fn oauth_http_client() -> Result<oauth2::reqwest::Client, String> {
+    oauth2::reqwest::ClientBuilder::new()
+        .redirect(oauth2::reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("cannot build OAuth HTTP client: {error}"))
+}
+
 fn credential_from_tokens(tokens: CodexTokenResponse) -> Result<StoredCredential, String> {
     let access_token = tokens.access_token().secret().to_owned();
     let refresh_token = tokens
@@ -349,7 +350,10 @@ fn response_expiry(tokens: &CodexTokenResponse, access_token: &str) -> Result<u6
         .unwrap_or_else(|| now.saturating_add(3600)))
 }
 
-fn token_request_error(error: CodexTokenRequestError) -> String {
+fn token_request_error<E>(error: RequestTokenError<E, BasicErrorResponse>) -> String
+where
+    E: std::error::Error + 'static,
+{
     match error {
         RequestTokenError::ServerResponse(error) => {
             format!("OAuth token endpoint rejected request: {error}")
@@ -360,53 +364,6 @@ fn token_request_error(error: CodexTokenRequestError) -> String {
             String::from_utf8_lossy(&body)
         ),
         RequestTokenError::Other(error) => format!("OAuth token request failed: {error}"),
-    }
-}
-
-#[derive(Clone)]
-struct OAuthHttpClient {
-    client: reqwest::Client,
-}
-
-impl OAuthHttpClient {
-    fn new() -> Result<Self, String> {
-        reqwest::Client::builder()
-            .redirect(Policy::none())
-            .build()
-            .map(|client| Self { client })
-            .map_err(|error| format!("cannot build OAuth HTTP client: {error}"))
-    }
-}
-
-#[derive(Debug, Error)]
-enum OAuthHttpError {
-    #[error(transparent)]
-    Request(#[from] reqwest::Error),
-}
-
-impl<'c> AsyncHttpClient<'c> for OAuthHttpClient {
-    type Error = OAuthHttpError;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<oauth2::HttpResponse, Self::Error>> + Send + 'c>>;
-
-    fn call(&'c self, request: oauth2::HttpRequest) -> Self::Future {
-        Box::pin(async move {
-            let (parts, body) = request.into_parts();
-            let response = self
-                .client
-                .request(parts.method, parts.uri.to_string())
-                .headers(parts.headers)
-                .body(body)
-                .send()
-                .await?;
-            let status = response.status();
-            let headers = response.headers().clone();
-            let body = response.bytes().await?.to_vec();
-            let mut response = oauth2::HttpResponse::new(body);
-            *response.status_mut() = status;
-            *response.headers_mut() = headers;
-            Ok(response)
-        })
     }
 }
 
