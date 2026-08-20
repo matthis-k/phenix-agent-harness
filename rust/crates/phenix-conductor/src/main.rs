@@ -10,6 +10,7 @@ use std::path::PathBuf;
 mod configuration;
 #[cfg(unix)]
 mod local_service;
+mod workspace;
 mod workspace_tools;
 
 #[derive(Debug, Parser)]
@@ -61,16 +62,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cwd = arguments
         .cwd
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let workspace = workspace::Workspace::discover(&cwd)?;
     let mut server = match arguments.state {
         Some(path) => ConductorServer::load_or_new(JsonFileStore::new(path))?,
         None => ConductorServer::new(ConductorRuntime::new()),
     };
 
     {
-        let context = ContextRegistry::discover(&cwd)?;
+        let context = ContextRegistry::discover(workspace.root())?;
         let mut runtime = server.runtime();
         runtime.install_context_registry(context);
-        workspace_tools::register(&mut runtime, cwd.clone())?;
+        workspace_tools::register(&mut runtime, workspace.root().to_path_buf())?;
     }
 
     if let Some(path) = arguments.configuration {
@@ -90,8 +92,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(command) = arguments.acp_command {
         let backend_id = BackendId::parse(arguments.acp_backend)?;
         let provider_id = ProviderId::parse(arguments.acp_provider)?;
-        let config = AcpBackendConfig::new(backend_id.clone(), provider_id, command, cwd)
-            .args(arguments.acp_args);
+        let config = AcpBackendConfig::new(
+            backend_id.clone(),
+            provider_id,
+            command,
+            workspace.root().to_path_buf(),
+        )
+        .args(arguments.acp_args);
         server.register_backend(backend_id, Box::new(AcpBackend::new(config)))?;
     }
 
