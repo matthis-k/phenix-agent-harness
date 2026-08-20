@@ -1,7 +1,8 @@
 use crate::{CallableOperation, ConductorError, ConductorRuntime, ExecutionPayload};
 use phenix_core::{CallableId, ConfigRevisionId, ExecutionId, ExecutionState, SessionId};
-use std::fmt::{self, Debug, Display, Formatter};
+use std::fmt::{self, Debug, Formatter};
 use std::sync::Arc;
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutionProviderKind {
@@ -27,26 +28,15 @@ pub enum ExecutionProviderEvent {
     ContentDelta(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum ExecutionProviderError {
+    #[error("unsupported execution provider capability: {0}")]
     Unsupported(String),
+    #[error("execution provider failed: {0}")]
     Failed(String),
+    #[error("execution provider protocol error: {0}")]
     Protocol(String),
 }
-
-impl Display for ExecutionProviderError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unsupported(message) => {
-                write!(f, "unsupported execution provider capability: {message}")
-            }
-            Self::Failed(message) => write!(f, "execution provider failed: {message}"),
-            Self::Protocol(message) => write!(f, "execution provider protocol error: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for ExecutionProviderError {}
 
 pub trait ExecutionProviderHost {
     fn emit(&mut self, event: ExecutionProviderEvent) -> Result<(), ExecutionProviderError>;

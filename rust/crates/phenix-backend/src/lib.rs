@@ -5,9 +5,8 @@ use phenix_core::{
     ExecutionId, ModelTarget, SessionId,
 };
 use std::collections::BTreeSet;
-use std::error::Error;
-use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
+use thiserror::Error;
 
 /// Concrete representation used to materialize conductor-owned callables for a
 /// backend session. This is intentionally distinct from callable semantics:
@@ -209,23 +208,15 @@ pub trait Backend: Send {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum BackendError {
+    #[error("unsupported backend capability: {0}")]
     Unsupported(String),
+    #[error("backend transport error: {0}")]
     Transport(String),
+    #[error("backend protocol error: {0}")]
     Protocol(String),
 }
-
-impl Display for BackendError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unsupported(v) => write!(f, "unsupported backend capability: {v}"),
-            Self::Transport(v) => write!(f, "backend transport error: {v}"),
-            Self::Protocol(v) => write!(f, "backend protocol error: {v}"),
-        }
-    }
-}
-impl Error for BackendError {}
 
 #[cfg(test)]
 mod tests {
