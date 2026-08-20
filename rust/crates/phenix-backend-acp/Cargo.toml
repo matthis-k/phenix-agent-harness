@@ -19,4 +19,6 @@ bench = false
 agent-client-protocol.workspace = true
 phenix-backend = { path = "../phenix-backend" }
 phenix-core = { path = "../phenix-core" }
+rmcp.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
