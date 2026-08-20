@@ -62,7 +62,11 @@ impl Display for WorkspaceError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Resolve { path, source } => {
-                write!(f, "failed to resolve workspace {}: {source}", path.display())
+                write!(
+                    f,
+                    "failed to resolve workspace {}: {source}",
+                    path.display()
+                )
             }
             Self::ReadGitignore { path, source } => {
                 write!(f, "failed to read {}: {source}", path.display())
@@ -149,12 +153,14 @@ fn normalize_scratch_pattern(
     raw: &str,
 ) -> Result<PathBuf, WorkspaceError> {
     if raw.starts_with('!') {
-        return invalid_pattern(gitignore, line, raw, "negated patterns are not scratch roots");
+        return invalid_pattern(
+            gitignore,
+            line,
+            raw,
+            "negated patterns are not scratch roots",
+        );
     }
-    if raw
-        .chars()
-        .any(|ch| matches!(ch, '*' | '?' | '[' | ']'))
-    {
+    if raw.chars().any(|ch| matches!(ch, '*' | '?' | '[' | ']')) {
         return invalid_pattern(
             gitignore,
             line,
