@@ -1493,6 +1493,7 @@ name = "phenix-backend"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "thiserror",
 ]
 
 [[package]]
@@ -1533,8 +1534,10 @@ dependencies = [
  "phenix-backend-native",
  "phenix-core",
  "phenix-protocol",
+ "schemars 1.2.2",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]

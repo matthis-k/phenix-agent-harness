@@ -1,5 +1,6 @@
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet};
+use schemars::{schema_for, JsonSchema};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::ffi::OsString;
@@ -11,41 +12,63 @@ const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 const DEFAULT_READ_LINES: usize = 400;
 const MAX_READ_LINES: usize = 2000;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct BashInput {
+    /// Bash program to execute in the current Phenix workspace.
+    #[schemars(length(min = 1))]
     command: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ReadInput {
+    /// Workspace-relative file path.
+    #[schemars(length(min = 1))]
     path: String,
+    /// 1-based first line to return. Defaults to 1.
+    #[schemars(range(min = 1))]
     offset: Option<usize>,
+    /// Maximum number of lines to return. Defaults to 400.
+    #[schemars(range(min = 1, max = 2000))]
     limit: Option<usize>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct WriteInput {
+    /// Workspace-relative file path.
+    #[schemars(length(min = 1))]
     path: String,
+    /// Complete UTF-8 file contents.
     content: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EditInput {
+    /// Workspace-relative file path.
+    #[schemars(length(min = 1))]
     path: String,
+    /// Exact text to replace.
+    #[schemars(length(min = 1))]
     old_text: String,
+    /// Replacement text.
     new_text: String,
+    /// Replace every exact match. Defaults to false and otherwise requires a unique match.
     replace_all: Option<bool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct GrepInput {
+    /// Regular expression to search for.
+    #[schemars(length(min = 1))]
     pattern: String,
+    /// Workspace-relative, home-relative, or absolute path resolving inside the workspace.
+    #[schemars(length(min = 1))]
     path: Option<String>,
+    /// Whether matching is case-sensitive. Defaults to true.
     case_sensitive: Option<bool>,
 }
 
@@ -58,18 +81,7 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                 "Execute a Bash command in the current Phenix workspace ({}). Use this for shell commands, builds, tests, and operations not covered by the dedicated workspace tools.",
                 workspace.display()
             ),
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["command"],
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Bash program to execute in the current Phenix workspace"
-                    }
-                }
-            }),
+            input_schema::<BashInput>(),
             json!({
                 "type": "object",
                 "required": ["exit_code", "stdout", "stderr"],
@@ -91,29 +103,7 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                 "Read a UTF-8 text file from the current Phenix workspace ({}). Paths are workspace-relative. Use offset and limit for large files.",
                 workspace.display()
             ),
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["path"],
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Workspace-relative file path"
-                    },
-                    "offset": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "1-based first line to return; defaults to 1"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": MAX_READ_LINES,
-                        "description": "Maximum number of lines to return; defaults to 400"
-                    }
-                }
-            }),
+            input_schema::<ReadInput>(),
             json!({
                 "type": "object",
                 "required": ["path", "content", "start_line", "end_line", "total_lines", "truncated"],
@@ -138,22 +128,7 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                 "Create or replace a UTF-8 text file in the current Phenix workspace ({}). Paths are workspace-relative and missing parent directories are created.",
                 workspace.display()
             ),
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["path", "content"],
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Workspace-relative file path"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Complete UTF-8 file contents"
-                    }
-                }
-            }),
+            input_schema::<WriteInput>(),
             json!({
                 "type": "object",
                 "required": ["path", "bytes_written"],
@@ -174,31 +149,7 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                 "Edit a UTF-8 text file in the current Phenix workspace ({}). The old_text match must be unique unless replace_all is explicitly true.",
                 workspace.display()
             ),
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["path", "old_text", "new_text"],
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Workspace-relative file path"
-                    },
-                    "old_text": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Exact text to replace"
-                    },
-                    "new_text": {
-                        "type": "string",
-                        "description": "Replacement text"
-                    },
-                    "replace_all": {
-                        "type": "boolean",
-                        "description": "Replace every exact match; defaults to false and requires a unique match"
-                    }
-                }
-            }),
+            input_schema::<EditInput>(),
             json!({
                 "type": "object",
                 "required": ["path", "replacements", "bytes_written"],
@@ -219,27 +170,7 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                 "Search text recursively in the current Phenix workspace ({}). The pattern uses ripgrep regular-expression syntax; .git is excluded.",
                 workspace.display()
             ),
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["pattern"],
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Regular expression to search for"
-                    },
-                    "path": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Workspace-relative, home-relative, or absolute file/directory path that resolves inside the workspace; defaults to ."
-                    },
-                    "case_sensitive": {
-                        "type": "boolean",
-                        "description": "Whether matching is case-sensitive; defaults to true"
-                    }
-                }
-            }),
+            input_schema::<GrepInput>(),
             json!({
                 "type": "object",
                 "required": ["pattern", "path", "matches", "stderr"],
@@ -255,6 +186,10 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
     )?;
 
     Ok(())
+}
+
+fn input_schema<T: JsonSchema>() -> Value {
+    serde_json::to_value(schema_for!(T)).expect("derived input schema must serialize")
 }
 
 fn tool_descriptor(
@@ -612,6 +547,17 @@ mod tests {
         fn cancel(&self, _execution_id: &ExecutionId) -> Result<(), BackendError> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn derived_workspace_input_schemas_preserve_parser_constraints() {
+        let bash = input_schema::<BashInput>();
+        assert_eq!(bash["additionalProperties"], false);
+        assert_eq!(bash["properties"]["command"]["minLength"], 1);
+
+        let read = input_schema::<ReadInput>();
+        assert_eq!(read["properties"]["offset"]["minimum"], 1);
+        assert_eq!(read["properties"]["limit"]["maximum"], MAX_READ_LINES);
     }
 
     fn fixture_descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
