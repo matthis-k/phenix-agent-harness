@@ -26,6 +26,19 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
             max-jobs = auto
+      - name: Apply source fix
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("rust/crates/phenix-backend-acp/src/mcp_bridge.rs")
+          source = path.read_text()
+          old = "                    match McpToolServer { host }.serve(transport).await {"
+          new = "                    let server = McpToolServer { host };\n                    match server.serve(transport).await {"
+          if old not in source:
+              raise SystemExit("rmcp server match anchor not found")
+          path.write_text(source.replace(old, new, 1))
+          PY
       - name: Refresh Cargo lock and compile
         run: |
           set -euo pipefail
