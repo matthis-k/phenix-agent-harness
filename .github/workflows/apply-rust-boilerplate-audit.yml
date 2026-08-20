@@ -1,46 +1,41 @@
-name: Apply Rust boilerplate audit
+name: Rust boilerplate audit source
 
 on:
-  push:
-    branches:
-      - agent/reduce-rust-boilerplate
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  source:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          ref: agent/reduce-rust-boilerplate
-
-      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-            accept-flake-config = true
-            max-jobs = auto
-
-      - name: Apply source changes
-        run: |
-          set -euo pipefail
+      - run: |
           python3 <<'PY'
+          import re
           from pathlib import Path
 
+          def read(path):
+              return Path(path).read_text()
+
+          def write(path, text):
+              Path(path).write_text(text)
+
           def replace_once(path, old, new):
-              p = Path(path)
-              text = p.read_text()
+              text = read(path)
               if old not in text:
-                  raise SystemExit(f"missing replacement anchor in {path}: {old[:80]!r}")
-              p.write_text(text.replace(old, new, 1))
+                  raise SystemExit(f"missing anchor in {path}: {old[:100]!r}")
+              write(path, text.replace(old, new, 1))
+
+          def replace_re(path, pattern, replacement):
+              text = read(path)
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"expected one regex match in {path}: {pattern!r}; got {count}")
+              write(path, updated)
 
           def replace_json_after(path, marker, replacement):
-              p = Path(path)
-              text = p.read_text()
+              text = read(path)
               marker_at = text.index(marker)
               start = text.index("json!(", marker_at)
               open_paren = start + len("json!")
@@ -68,8 +63,8 @@ jobs:
                           end = index + 1
                           break
               if end is None:
-                  raise SystemExit(f"unterminated json! block after {marker!r} in {path}")
-              p.write_text(text[:start] + replacement + text[end:])
+                  raise SystemExit(f"unterminated json! after {marker!r} in {path}")
+              write(path, text[:start] + replacement + text[end:])
 
           replace_once(
               "rust/Cargo.toml",
@@ -98,36 +93,19 @@ jobs:
               'use std::collections::BTreeSet;\nuse std::error::Error;\nuse std::fmt::{self, Display, Formatter};\nuse std::sync::Arc;\n',
               'use std::collections::BTreeSet;\nuse std::sync::Arc;\nuse thiserror::Error;\n',
           )
-          replace_once(
+          replace_re(
               backend,
-              '''#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum BackendError {
-    Unsupported(String),
-    Transport(String),
-    Protocol(String),
-}
-
-impl Display for BackendError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unsupported(v) => write!(f, "unsupported backend capability: {v}"),
-            Self::Transport(v) => write!(f, "backend transport error: {v}"),
-            Self::Protocol(v) => write!(f, "backend protocol error: {v}"),
-        }
-    }
-}
-impl Error for BackendError {}
-''',
+              r'#\[derive\(Clone, Debug, Eq, PartialEq\)\]\npub enum BackendError \{.*?\nimpl Error for BackendError \{\}\n',
               '''#[derive(Clone, Debug, Eq, Error, PartialEq)]
-pub enum BackendError {
-    #[error("unsupported backend capability: {0}")]
-    Unsupported(String),
-    #[error("backend transport error: {0}")]
-    Transport(String),
-    #[error("backend protocol error: {0}")]
-    Protocol(String),
-}
-''',
+          pub enum BackendError {
+              #[error("unsupported backend capability: {0}")]
+              Unsupported(String),
+              #[error("backend transport error: {0}")]
+              Transport(String),
+              #[error("backend protocol error: {0}")]
+              Protocol(String),
+          }
+          ''',
           )
 
           provider = "rust/crates/phenix-conductor/src/execution_provider.rs"
@@ -136,39 +114,19 @@ pub enum BackendError {
               'use std::fmt::{self, Debug, Display, Formatter};\nuse std::sync::Arc;\n',
               'use std::fmt::{self, Debug, Formatter};\nuse std::sync::Arc;\nuse thiserror::Error;\n',
           )
-          replace_once(
+          replace_re(
               provider,
-              '''#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ExecutionProviderError {
-    Unsupported(String),
-    Failed(String),
-    Protocol(String),
-}
-
-impl Display for ExecutionProviderError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unsupported(message) => {
-                write!(f, "unsupported execution provider capability: {message}")
-            }
-            Self::Failed(message) => write!(f, "execution provider failed: {message}"),
-            Self::Protocol(message) => write!(f, "execution provider protocol error: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for ExecutionProviderError {}
-''',
+              r'#\[derive\(Clone, Debug, Eq, PartialEq\)\]\npub enum ExecutionProviderError \{.*?\nimpl std::error::Error for ExecutionProviderError \{\}\n',
               '''#[derive(Clone, Debug, Eq, Error, PartialEq)]
-pub enum ExecutionProviderError {
-    #[error("unsupported execution provider capability: {0}")]
-    Unsupported(String),
-    #[error("execution provider failed: {0}")]
-    Failed(String),
-    #[error("execution provider protocol error: {0}")]
-    Protocol(String),
-}
-''',
+          pub enum ExecutionProviderError {
+              #[error("unsupported execution provider capability: {0}")]
+              Unsupported(String),
+              #[error("execution provider failed: {0}")]
+              Failed(String),
+              #[error("execution provider protocol error: {0}")]
+              Protocol(String),
+          }
+          ''',
           )
 
           conductor = "rust/crates/phenix-conductor/src/lib.rs"
@@ -177,156 +135,118 @@ pub enum ExecutionProviderError {
               'use serde_json::Value;\nuse std::collections::{BTreeMap, BTreeSet};\nuse std::error::Error;\nuse std::fmt::{self, Display, Formatter};\n',
               'use serde_json::Value;\nuse std::collections::{BTreeMap, BTreeSet};\nuse thiserror::Error;\n',
           )
-          start = Path(conductor).read_text().index('#[derive(Clone, Debug, Eq, PartialEq)]\npub enum ConductorError')
-          end_marker = '#[derive(Clone, Debug)]\nstruct SessionRecord'
-          text = Path(conductor).read_text()
-          end = text.index(end_marker, start)
-          replacement = '''#[derive(Clone, Debug, Eq, Error, PartialEq)]
-pub enum ConductorError {
-    #[error("unknown session: {0}")]
-    UnknownSession(SessionId),
-    #[error("session is closed: {0}")]
-    ClosedSession(SessionId),
-    #[error("session has active executions and cannot close: {0}")]
-    SessionHasActiveExecutions(SessionId),
-    #[error("unknown execution: {0}")]
-    UnknownExecution(ExecutionId),
-    #[error("input must not be empty")]
-    EmptyInput,
-    #[error("execution is not runnable: {0}")]
-    InvalidLifecycle(ExecutionId),
-    #[error("execution is not model-provider backed: {0}")]
-    NonModelExecution(ExecutionId),
-    #[error("execution is not non-model-provider backed: {0}")]
-    NonProviderExecution(ExecutionId),
-    #[error("{denial}")]
-    PolicyDenied {
-        execution_id: ExecutionId,
-        denial: PolicyDenial,
-    },
-    #[error(transparent)]
-    CallableRegistry(#[from] CallableRegistryError),
-    #[error(transparent)]
-    ExecutionProvider(#[from] ExecutionProviderError),
-    #[error(transparent)]
-    Journal(#[from] JournalError),
-    #[error(transparent)]
-    Routing(#[from] RoutingRegistryError),
-    #[error(transparent)]
-    Context(#[from] ContextError),
-    #[error(transparent)]
-    Backend(#[from] BackendError),
-}
+          replace_re(
+              conductor,
+              r'#\[derive\(Clone, Debug, Eq, PartialEq\)\]\npub enum ConductorError \{.*?\n(?=#\[derive\(Clone, Debug\)\]\nstruct SessionRecord)',
+              '''#[derive(Clone, Debug, Eq, Error, PartialEq)]
+          pub enum ConductorError {
+              #[error("unknown session: {0}")]
+              UnknownSession(SessionId),
+              #[error("session is closed: {0}")]
+              ClosedSession(SessionId),
+              #[error("session has active executions and cannot close: {0}")]
+              SessionHasActiveExecutions(SessionId),
+              #[error("unknown execution: {0}")]
+              UnknownExecution(ExecutionId),
+              #[error("input must not be empty")]
+              EmptyInput,
+              #[error("execution is not runnable: {0}")]
+              InvalidLifecycle(ExecutionId),
+              #[error("execution is not model-provider backed: {0}")]
+              NonModelExecution(ExecutionId),
+              #[error("execution is not non-model-provider backed: {0}")]
+              NonProviderExecution(ExecutionId),
+              #[error("{denial}")]
+              PolicyDenied {
+                  execution_id: ExecutionId,
+                  denial: PolicyDenial,
+              },
+              #[error(transparent)]
+              CallableRegistry(#[from] CallableRegistryError),
+              #[error(transparent)]
+              ExecutionProvider(#[from] ExecutionProviderError),
+              #[error(transparent)]
+              Journal(#[from] JournalError),
+              #[error(transparent)]
+              Routing(#[from] RoutingRegistryError),
+              #[error(transparent)]
+              Context(#[from] ContextError),
+              #[error(transparent)]
+              Backend(#[from] BackendError),
+          }
 
-'''
-          Path(conductor).write_text(text[:start] + replacement + text[end:])
+          ''',
+          )
 
-          workspace_tools = "rust/crates/phenix-conductor/src/workspace_tools.rs"
+          workspace = "rust/crates/phenix-conductor/src/workspace_tools.rs"
           replace_once(
-              workspace_tools,
+              workspace,
               'use phenix_core::{CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet};\nuse serde::Deserialize;\nuse serde_json::{json, Value};\n',
               'use phenix_core::{CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet};\nuse schemars::{schema_for, JsonSchema};\nuse serde::Deserialize;\nuse serde_json::{json, Value};\n',
           )
-          replace_once(
-              workspace_tools,
-              '''#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BashInput {
-    command: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReadInput {
-    path: String,
-    offset: Option<usize>,
-    limit: Option<usize>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WriteInput {
-    path: String,
-    content: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EditInput {
-    path: String,
-    old_text: String,
-    new_text: String,
-    replace_all: Option<bool>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GrepInput {
-    pattern: String,
-    path: Option<String>,
-    case_sensitive: Option<bool>,
-}
-''',
+          replace_re(
+              workspace,
+              r'#\[derive\(Deserialize\)\]\n#\[serde\(deny_unknown_fields\)\]\nstruct BashInput \{.*?\nstruct GrepInput \{.*?\n\}\n',
               '''#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct BashInput {
-    /// Bash program to execute in the current Phenix workspace.
-    #[schemars(length(min = 1))]
-    command: String,
-}
+          #[serde(deny_unknown_fields)]
+          struct BashInput {
+              /// Bash program to execute in the current Phenix workspace.
+              #[schemars(length(min = 1))]
+              command: String,
+          }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ReadInput {
-    /// Workspace-relative file path.
-    #[schemars(length(min = 1))]
-    path: String,
-    /// 1-based first line to return. Defaults to 1.
-    #[schemars(range(min = 1))]
-    offset: Option<usize>,
-    /// Maximum number of lines to return. Defaults to 400.
-    #[schemars(range(min = 1, max = 2000))]
-    limit: Option<usize>,
-}
+          #[derive(Deserialize, JsonSchema)]
+          #[serde(deny_unknown_fields)]
+          struct ReadInput {
+              /// Workspace-relative file path.
+              #[schemars(length(min = 1))]
+              path: String,
+              /// 1-based first line to return. Defaults to 1.
+              #[schemars(range(min = 1))]
+              offset: Option<usize>,
+              /// Maximum number of lines to return. Defaults to 400.
+              #[schemars(range(min = 1, max = 2000))]
+              limit: Option<usize>,
+          }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct WriteInput {
-    /// Workspace-relative file path.
-    #[schemars(length(min = 1))]
-    path: String,
-    /// Complete UTF-8 file contents.
-    content: String,
-}
+          #[derive(Deserialize, JsonSchema)]
+          #[serde(deny_unknown_fields)]
+          struct WriteInput {
+              /// Workspace-relative file path.
+              #[schemars(length(min = 1))]
+              path: String,
+              /// Complete UTF-8 file contents.
+              content: String,
+          }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct EditInput {
-    /// Workspace-relative file path.
-    #[schemars(length(min = 1))]
-    path: String,
-    /// Exact text to replace.
-    #[schemars(length(min = 1))]
-    old_text: String,
-    /// Replacement text.
-    new_text: String,
-    /// Replace every exact match. Defaults to false and otherwise requires a unique match.
-    replace_all: Option<bool>,
-}
+          #[derive(Deserialize, JsonSchema)]
+          #[serde(deny_unknown_fields)]
+          struct EditInput {
+              /// Workspace-relative file path.
+              #[schemars(length(min = 1))]
+              path: String,
+              /// Exact text to replace.
+              #[schemars(length(min = 1))]
+              old_text: String,
+              /// Replacement text.
+              new_text: String,
+              /// Replace every exact match. Defaults to false and otherwise requires a unique match.
+              replace_all: Option<bool>,
+          }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct GrepInput {
-    /// Regular expression to search for.
-    #[schemars(length(min = 1))]
-    pattern: String,
-    /// Workspace-relative, home-relative, or absolute path resolving inside the workspace.
-    #[schemars(length(min = 1))]
-    path: Option<String>,
-    /// Whether matching is case-sensitive. Defaults to true.
-    case_sensitive: Option<bool>,
-}
-''',
+          #[derive(Deserialize, JsonSchema)]
+          #[serde(deny_unknown_fields)]
+          struct GrepInput {
+              /// Regular expression to search for.
+              #[schemars(length(min = 1))]
+              pattern: String,
+              /// Workspace-relative, home-relative, or absolute path resolving inside the workspace.
+              #[schemars(length(min = 1))]
+              path: Option<String>,
+              /// Whether matching is case-sensitive. Defaults to true.
+              case_sensitive: Option<bool>,
+          }
+          ''',
           )
           for marker, typ in [
               ('            "bash",', 'BashInput'),
@@ -335,38 +255,33 @@ struct GrepInput {
               ('            "edit",', 'EditInput'),
               ('            "grep",', 'GrepInput'),
           ]:
-              replace_json_after(workspace_tools, marker, f'input_schema::<{typ}>()')
+              replace_json_after(workspace, marker, f'input_schema::<{typ}>()')
           replace_once(
-              workspace_tools,
+              workspace,
               '\nfn tool_descriptor(\n',
               '''
-fn input_schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schema_for!(T)).expect("derived input schema must serialize")
-}
+          fn input_schema<T: JsonSchema>() -> Value {
+              serde_json::to_value(schema_for!(T)).expect("derived input schema must serialize")
+          }
 
-fn tool_descriptor(
-''',
+          fn tool_descriptor(
+          ''',
           )
           replace_once(
-              workspace_tools,
-              '    use std::time::{SystemTime, UNIX_EPOCH};\n\n',
-              '''    use std::time::{SystemTime, UNIX_EPOCH};
+              workspace,
+              '    fn fixture_descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {',
+              '''    #[test]
+              fn derived_workspace_input_schemas_preserve_parser_constraints() {
+                  let bash = input_schema::<BashInput>();
+                  assert_eq!(bash["additionalProperties"], false);
+                  assert_eq!(bash["properties"]["command"]["minLength"], 1);
 
-    #[test]
-    fn derived_workspace_input_schemas_preserve_parser_constraints() {
-        let bash = input_schema::<BashInput>();
-        assert_eq!(bash["additionalProperties"], false);
-        assert_eq!(bash["properties"]["command"]["minLength"], 1);
+                  let read = input_schema::<ReadInput>();
+                  assert_eq!(read["properties"]["offset"]["minimum"], 1);
+                  assert_eq!(read["properties"]["limit"]["maximum"], MAX_READ_LINES);
+              }
 
-        let read = input_schema::<ReadInput>();
-        assert_eq!(read["properties"]["offset"]["minimum"], 1);
-        assert_eq!(
-            read["properties"]["limit"]["maximum"],
-            serde_json::json!(MAX_READ_LINES)
-        );
-    }
-
-''',
+              fn fixture_descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {''',
           )
 
           semantic = "rust/crates/phenix-conductor/src/semantic_tools.rs"
@@ -375,83 +290,53 @@ fn tool_descriptor(
               'use phenix_core::{\n    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,\n    ExecutionEventKind, ExecutionKind, ExecutionSummary, SkillId,\n};\nuse serde::Deserialize;\n',
               'use phenix_core::{\n    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,\n    ExecutionEventKind, ExecutionKind, ExecutionSummary, SkillId,\n};\nuse schemars::{schema_for, JsonSchema};\nuse serde::Deserialize;\n',
           )
-          replace_once(
+          replace_re(
               semantic,
-              '''#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct OrchestrationStartInput {
-    orchestration: String,
-    objective: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SkillLoadInput {
-    skill: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SkillResourceReadInput {
-    skill: String,
-    path: String,
-}
-''',
+              r'#\[derive\(Debug, Deserialize\)\]\n#\[serde\(deny_unknown_fields\)\]\nstruct OrchestrationStartInput \{.*?\nstruct SkillResourceReadInput \{.*?\n\}\n',
               '''#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct EmptyInput {}
+          #[serde(deny_unknown_fields)]
+          struct EmptyInput {}
 
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct OrchestrationStartInput {
-    /// Orchestration id returned by phenix_orchestration_list.
-    #[schemars(length(min = 1))]
-    orchestration: String,
-    /// Objective for the orchestration.
-    #[schemars(length(min = 1))]
-    objective: String,
-}
+          #[derive(Debug, Deserialize, JsonSchema)]
+          #[serde(deny_unknown_fields)]
+          struct OrchestrationStartInput {
+              /// Orchestration id returned by phenix_orchestration_list.
+              #[schemars(length(min = 1))]
+              orchestration: String,
+              /// Objective for the orchestration.
+              #[schemars(length(min = 1))]
+              objective: String,
+          }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct SkillLoadInput {
-    /// Skill id from the available-skills catalog.
-    #[schemars(length(min = 1))]
-    skill: String,
-}
+          #[derive(Debug, Deserialize, JsonSchema)]
+          #[serde(deny_unknown_fields)]
+          struct SkillLoadInput {
+              /// Skill id from the available-skills catalog.
+              #[schemars(length(min = 1))]
+              skill: String,
+          }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct SkillResourceReadInput {
-    /// Active skill id.
-    #[schemars(length(min = 1))]
-    skill: String,
-    /// Relative resource path exactly as listed by the active skill.
-    #[schemars(length(min = 1))]
-    path: String,
-}
-''',
+          #[derive(Debug, Deserialize, JsonSchema)]
+          #[serde(deny_unknown_fields)]
+          struct SkillResourceReadInput {
+              /// Active skill id.
+              #[schemars(length(min = 1))]
+              skill: String,
+              /// Relative resource path exactly as listed by the active skill.
+              #[schemars(length(min = 1))]
+              path: String,
+          }
+          ''',
           )
-          replace_once(
+          replace_re(
               semantic,
+              r'fn parse_list\(arguments_json: &str\) -> Result<\(\), String> \{.*?\n\}\n',
               '''fn parse_list(arguments_json: &str) -> Result<(), String> {
-    let value: Value = serde_json::from_str(arguments_json)
-        .map_err(|error| format!("invalid orchestration list arguments: {error}"))?;
-    let Some(object) = value.as_object() else {
-        return Err("orchestration list arguments must be an object".to_owned());
-    };
-    if !object.is_empty() {
-        return Err("orchestration list arguments must be empty".to_owned());
-    }
-    Ok(())
-}
-''',
-              '''fn parse_list(arguments_json: &str) -> Result<(), String> {
-    serde_json::from_str::<EmptyInput>(arguments_json)
-        .map(|_| ())
-        .map_err(|error| format!("invalid orchestration list arguments: {error}"))
-}
-''',
+              serde_json::from_str::<EmptyInput>(arguments_json)
+                  .map(|_| ())
+                  .map_err(|error| format!("invalid orchestration list arguments: {error}"))
+          }
+          ''',
           )
           for marker, typ in [
               ('fn skill_load_descriptor()', 'SkillLoadInput'),
@@ -459,80 +344,40 @@ struct SkillResourceReadInput {
               ('fn orchestration_list_descriptor()', 'EmptyInput'),
               ('fn orchestration_start_descriptor()', 'OrchestrationStartInput'),
           ]:
-              text = Path(semantic).read_text()
-              marker_at = text.index(marker)
-              input_at = text.index('input_schema: json!(', marker_at)
-              json_at = input_at + len('input_schema: ')
-              Path(semantic).write_text(text)
-              replace_json_after(semantic, text[marker_at:input_at], f'input_schema::<{typ}>()')
+              replace_json_after(semantic, marker, f'input_schema::<{typ}>()')
           replace_once(
               semantic,
               '\nfn skill_load_descriptor() -> CallableDescriptor {\n',
               '''
-fn input_schema<T: JsonSchema>() -> Value {
-    serde_json::to_value(schema_for!(T)).expect("derived input schema must serialize")
-}
+          fn input_schema<T: JsonSchema>() -> Value {
+              serde_json::to_value(schema_for!(T)).expect("derived input schema must serialize")
+          }
 
-fn skill_load_descriptor() -> CallableDescriptor {
-''',
+          fn skill_load_descriptor() -> CallableDescriptor {
+          ''',
           )
-          Path(semantic).write_text(
-              Path(semantic).read_text()
+          write(
+              semantic,
+              read(semantic)
               + '''
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+          #[cfg(test)]
+          mod schema_tests {
+              use super::*;
 
-    #[test]
-    fn derived_semantic_input_schemas_preserve_parser_constraints() {
-        let empty = input_schema::<EmptyInput>();
-        assert_eq!(empty["additionalProperties"], false);
+              #[test]
+              fn derived_semantic_input_schemas_preserve_parser_constraints() {
+                  let empty = input_schema::<EmptyInput>();
+                  assert_eq!(empty["additionalProperties"], false);
 
-        let start = input_schema::<OrchestrationStartInput>();
-        assert_eq!(start["properties"]["orchestration"]["minLength"], 1);
-        assert_eq!(start["properties"]["objective"]["minLength"], 1);
+                  let start = input_schema::<OrchestrationStartInput>();
+                  assert_eq!(start["properties"]["orchestration"]["minLength"], 1);
+                  assert_eq!(start["properties"]["objective"]["minLength"], 1);
 
-        let resource = input_schema::<SkillResourceReadInput>();
-        assert_eq!(resource["properties"]["path"]["minLength"], 1);
-    }
-}
-'''
+                  let resource = input_schema::<SkillResourceReadInput>();
+                  assert_eq!(resource["properties"]["path"]["minLength"], 1);
+              }
+          }
+          '''
           )
           PY
-
-      - name: Refresh Cargo lock
-        env:
-          CARGO_HOME: ${{ runner.temp }}/phenix-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/phenix-cargo-target
-        run: nix develop -c bash -lc 'cd rust && cargo check --workspace'
-
-      - name: Apply deterministic maintenance fixes
-        run: nix run .#phenix-maintenance -- fix
-
-      - name: Validate repository
-        env:
-          CARGO_HOME: ${{ runner.temp }}/phenix-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/phenix-cargo-target
-        run: nix run .#phenix-maintenance -- all
-
-      - name: Commit validated change
-        run: |
-          set -euo pipefail
-          rm .github/workflows/apply-rust-boilerplate-audit.yml
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- \
-            .github/workflows/apply-rust-boilerplate-audit.yml \
-            rust/Cargo.toml \
-            rust/Cargo.lock \
-            rust/crates/phenix-backend/Cargo.toml \
-            rust/crates/phenix-backend/src/lib.rs \
-            rust/crates/phenix-conductor/Cargo.toml \
-            rust/crates/phenix-conductor/src/execution_provider.rs \
-            rust/crates/phenix-conductor/src/lib.rs \
-            rust/crates/phenix-conductor/src/semantic_tools.rs \
-            rust/crates/phenix-conductor/src/workspace_tools.rs
-          git commit -m "refactor: derive tool schemas and central errors"
-          git push origin HEAD:agent/reduce-rust-boilerplate
