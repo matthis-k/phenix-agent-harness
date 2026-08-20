@@ -11,9 +11,7 @@ genai.workspace = true
 oauth2.workspace = true
 phenix-backend = { path = "../phenix-backend" }
 phenix-core = { path = "../phenix-core" }
-reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
 tokio.workspace = true
 url.workspace = true
