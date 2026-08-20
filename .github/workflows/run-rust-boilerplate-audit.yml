@@ -1,0 +1,85 @@
+name: Run Rust boilerplate audit
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.base.ref == 'agent/reduce-rust-boilerplate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: Apply source changes
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/apply-rust-boilerplate-audit.yml').read_text()
+          marker = "          python3 <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY\n", start)
+          script = workflow[start:end]
+          script = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in script.splitlines()
+          )
+          exec(compile(script, 'rust-boilerplate-audit', 'exec'))
+          PY
+
+      - name: Refresh Cargo lock
+        env:
+          CARGO_HOME: ${{ runner.temp }}/phenix-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/phenix-cargo-target
+        run: nix develop -c bash -lc 'cd rust && cargo check --workspace'
+
+      - name: Apply deterministic maintenance fixes
+        run: nix run .#phenix-maintenance -- fix
+
+      - name: Validate repository
+        env:
+          CARGO_HOME: ${{ runner.temp }}/phenix-cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/phenix-cargo-target
+        run: nix run .#phenix-maintenance -- all
+
+      - name: Commit validated change
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          rm .github/workflows/apply-rust-boilerplate-audit.yml
+          rm .github/workflows/run-rust-boilerplate-audit.yml
+          rm .github/rust-boilerplate-audit-trigger
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            .github/workflows/apply-rust-boilerplate-audit.yml \
+            .github/workflows/run-rust-boilerplate-audit.yml \
+            .github/rust-boilerplate-audit-trigger \
+            rust/Cargo.toml \
+            rust/Cargo.lock \
+            rust/crates/phenix-backend/Cargo.toml \
+            rust/crates/phenix-backend/src/lib.rs \
+            rust/crates/phenix-conductor/Cargo.toml \
+            rust/crates/phenix-conductor/src/execution_provider.rs \
+            rust/crates/phenix-conductor/src/lib.rs \
+            rust/crates/phenix-conductor/src/semantic_tools.rs \
+            rust/crates/phenix-conductor/src/workspace_tools.rs
+          git commit -m "refactor: derive tool schemas and central errors"
+          git push origin "HEAD:$HEAD_REF"
