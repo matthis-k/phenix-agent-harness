@@ -386,7 +386,8 @@ enum OAuthHttpError {
 
 impl<'c> AsyncHttpClient<'c> for OAuthHttpClient {
     type Error = OAuthHttpError;
-    type Future = Pin<Box<dyn Future<Output = Result<oauth2::HttpResponse, Self::Error>> + 'c>>;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<oauth2::HttpResponse, Self::Error>> + Send + 'c>>;
 
     fn call(&'c self, request: oauth2::HttpRequest) -> Self::Future {
         Box::pin(async move {
