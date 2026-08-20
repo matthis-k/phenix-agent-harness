@@ -4,10 +4,10 @@ use phenix_backend::{
 };
 use phenix_conductor::{ConductorRuntime, ConductorServer};
 use phenix_core::{
-    AgentNode, BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy,
-    CapabilitySet, ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget,
-    InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition, OrchestrationPolicy,
-    ProviderId, RoutingProfile, RoutingProfileId,
+    BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
+    ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
+    RoutingProfile, RoutingProfileId,
 };
 use phenix_protocol::{ClientMessage, Command, Reply, ResponsePayload, ServerMessage};
 use serde_json::{json, Value};
@@ -155,6 +155,23 @@ fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
     }
 }
 
+fn node(
+    id: &str,
+    callable: CallableId,
+    depends_on: &[&str],
+    objective: Option<&str>,
+) -> OrchestrationNode {
+    OrchestrationNode {
+        id: OrchestrationNodeId::parse(id).unwrap(),
+        callable,
+        depends_on: depends_on
+            .iter()
+            .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+            .collect(),
+        objective: objective.map(str::to_owned),
+    }
+}
+
 fn model(name: &str) -> ModelTarget {
     ModelTarget {
         backend: BackendId::parse("fixture").unwrap(),
@@ -196,16 +213,14 @@ fn root_model_discovers_and_starts_orchestration_then_worker_runs_mock_agents() 
     runtime
         .register_orchestration(OrchestrationDefinition {
             descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
-            policy: OrchestrationPolicy::Sequential,
             nodes: vec![
-                AgentNode {
-                    callable: scout.clone(),
-                    objective: Some("inspect the repository".to_owned()),
-                },
-                AgentNode {
-                    callable: verifier.clone(),
-                    objective: Some("verify the change".to_owned()),
-                },
+                node("scout", scout.clone(), &[], Some("inspect the repository")),
+                node(
+                    "verify",
+                    verifier.clone(),
+                    &["scout"],
+                    Some("verify the change"),
+                ),
             ],
         })
         .unwrap();
