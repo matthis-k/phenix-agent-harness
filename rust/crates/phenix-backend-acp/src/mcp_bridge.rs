@@ -163,13 +163,10 @@ impl ToolBridge {
         notification: MessageMcpNotification,
     ) -> Result<(), agent_client_protocol::Error> {
         let connection = self.connection(&notification.connection_id)?;
-        connection
-            .lock()
-            .map_err(|_| {
-                agent_client_protocol::Error::internal_error()
-                    .data("ACP MCP connection lock poisoned")
-            })?
-            .notify(&notification.method, notification.params)
+        let mut connection = connection.lock().map_err(|_| {
+            agent_client_protocol::Error::internal_error().data("ACP MCP connection lock poisoned")
+        })?;
+        connection.notify(&notification.method, notification.params)
     }
 
     fn connection(
@@ -212,7 +209,8 @@ impl McpConnection {
             .name(thread_name)
             .spawn(move || {
                 runtime.block_on(async move {
-                    match McpToolServer { host }.serve(transport).await {
+                    let server = McpToolServer { host };
+                    match server.serve(transport).await {
                         Ok(service) => {
                             let _ = service.waiting().await;
                         }
@@ -315,9 +313,9 @@ impl Transport<RoleServer> for AcpMcpTransport {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
         let outgoing = self.outgoing.clone();
         async move {
-            outgoing.send(item).map_err(|_| {
-                io::Error::new(io::ErrorKind::BrokenPipe, "ACP MCP connection closed")
-            })
+            outgoing
+                .send(item)
+                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "ACP MCP connection closed"))
         }
     }
 
@@ -374,7 +372,10 @@ impl ServerHandler for McpToolServer {
             let callable = host.callables.get(request.name.as_ref()).ok_or_else(|| {
                 ErrorData::new(
                     ErrorCode::METHOD_NOT_FOUND,
-                    format!("tool is not provisioned for this execution: {}", request.name),
+                    format!(
+                        "tool is not provisioned for this execution: {}",
+                        request.name
+                    ),
                     None,
                 )
             })?;
