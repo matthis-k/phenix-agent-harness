@@ -9,8 +9,8 @@ use oauth2::basic::{
 };
 use oauth2::{
     AccessToken, AsyncHttpClient, AuthUrl, AuthorizationCode, Client as OAuthClient, ClientId,
-    CsrfToken, EndpointNotSet, EndpointSet, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl,
-    RefreshToken, RequestTokenError, Scope, StandardRevocableToken, TokenResponse, TokenUrl,
+    CsrfToken, EndpointNotSet, EndpointSet, PkceCodeChallenge, RedirectUrl, RefreshToken,
+    RequestTokenError, Scope, StandardRevocableToken, TokenResponse, TokenUrl,
 };
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
@@ -274,11 +274,11 @@ async fn refresh(
         .refresh_token()
         .map(|token| token.secret().to_owned())
         .unwrap_or(refresh_token);
-    let id_token = response.id_token.unwrap_or(id_token);
+    let expires_at = response_expiry(&response, &access_token)?;
+    let id_token = response.id_token.clone().unwrap_or(id_token);
     let account_id = account_id_from_token(&id_token)
         .or_else(|| account_id_from_token(&access_token))
         .unwrap_or(account_id);
-    let expires_at = response_expiry(&response, &access_token)?;
     let refreshed = StoredCredential::OAuth {
         access_token,
         refresh_token,
@@ -382,8 +382,6 @@ impl OAuthHttpClient {
 enum OAuthHttpError {
     #[error(transparent)]
     Request(#[from] reqwest::Error),
-    #[error(transparent)]
-    Response(#[from] oauth2::http::Error),
 }
 
 impl<'c> AsyncHttpClient<'c> for OAuthHttpClient {
@@ -403,7 +401,8 @@ impl<'c> AsyncHttpClient<'c> for OAuthHttpClient {
             let status = response.status();
             let headers = response.headers().clone();
             let body = response.bytes().await?.to_vec();
-            let mut response = oauth2::HttpResponse::builder().status(status).body(body)?;
+            let mut response = oauth2::HttpResponse::new(body);
+            *response.status_mut() = status;
             *response.headers_mut() = headers;
             Ok(response)
         })
