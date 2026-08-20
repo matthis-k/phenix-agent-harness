@@ -6,7 +6,7 @@ on:
       - agent/rmcp-mcp-bridge
   pull_request:
     branches:
-      - agent/reduce-rust-boilerplate-run
+      - agent/rmcp-mcp-validation
 
 permissions:
   contents: write
