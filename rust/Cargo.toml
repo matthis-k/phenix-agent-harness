@@ -23,8 +23,7 @@ base64 = "0.22"
 clap = { version = "4.5.47", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
 futures = "0.3"
 genai = "0.6.0"
-oauth2 = { version = "5", default-features = false, features = ["timing-resistant-secret-traits"] }
-reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls"] }
+oauth2 = { version = "5", default-features = false, features = ["reqwest", "rustls-tls", "timing-resistant-secret-traits"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
