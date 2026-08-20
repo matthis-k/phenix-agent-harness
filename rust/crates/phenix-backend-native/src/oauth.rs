@@ -148,7 +148,10 @@ pub(crate) async fn login(store: &CredentialStore) -> Result<(), String> {
     Ok(())
 }
 
-async fn receive_callback(listener: TcpListener, expected_state: &CsrfToken) -> Result<String, String> {
+async fn receive_callback(
+    listener: TcpListener,
+    expected_state: &CsrfToken,
+) -> Result<String, String> {
     let (mut stream, _) = listener
         .accept()
         .await
@@ -295,8 +298,14 @@ fn oauth_client(redirect_uri: Option<&str>) -> Result<CodexOAuthClient, String> 
         StandardRevocableToken,
         BasicRevocationErrorResponse,
     >::new(ClientId::new(CLIENT_ID.to_owned()))
-    .set_auth_uri(AuthUrl::new(AUTH_URL.to_owned()).map_err(|error| format!("invalid OAuth authorization URL: {error}"))?)
-    .set_token_uri(TokenUrl::new(TOKEN_URL.to_owned()).map_err(|error| format!("invalid OAuth token URL: {error}"))?);
+    .set_auth_uri(
+        AuthUrl::new(AUTH_URL.to_owned())
+            .map_err(|error| format!("invalid OAuth authorization URL: {error}"))?,
+    )
+    .set_token_uri(
+        TokenUrl::new(TOKEN_URL.to_owned())
+            .map_err(|error| format!("invalid OAuth token URL: {error}"))?,
+    );
     match redirect_uri {
         Some(redirect_uri) => Ok(client.set_redirect_uri(
             RedirectUrl::new(redirect_uri.to_owned())
@@ -332,7 +341,11 @@ fn credential_from_tokens(tokens: CodexTokenResponse) -> Result<StoredCredential
 fn response_expiry(tokens: &CodexTokenResponse, access_token: &str) -> Result<u64, String> {
     let now = unix_time()?;
     Ok(token_expiry(access_token)
-        .or_else(|| tokens.expires_in().map(|duration| now.saturating_add(duration.as_secs())))
+        .or_else(|| {
+            tokens
+                .expires_in()
+                .map(|duration| now.saturating_add(duration.as_secs()))
+        })
         .unwrap_or_else(|| now.saturating_add(3600)))
 }
 
