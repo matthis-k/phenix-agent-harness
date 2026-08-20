@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 mod attempts;
+mod debug;
 mod workspace;
 
 pub use attempts::*;
+pub use debug::*;
 pub use workspace::*;
 
 use serde::{Deserialize, Serialize};
