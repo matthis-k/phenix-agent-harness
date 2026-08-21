@@ -5,34 +5,12 @@ use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SANDBOX_TRANSACTION_ROOT: &str = "/tmp/phenix-transaction";
-const SNAPSHOT_SCRIPT: &str = r#"
-bash_path=$1
-user_command=$2
-rsync_path=$3
-workspace=$4
-snapshot=$5
-status_file=$6
-exclude_file=$7
-
-"$bash_path" -c "$user_command"
-command_status=$?
-
-"$rsync_path" -rlpt --delete --delete-delay --delay-updates --quiet \
-  --exclude-from="$exclude_file" \
-  "$workspace/." "$snapshot/"
-snapshot_status=$?
-if [ "$snapshot_status" -ne 0 ]; then
-  exit "$snapshot_status"
-fi
-
-printf '%s\n' "$command_status" > "$status_file" || exit 125
-exit 0
-"#;
+const SANDBOX_SNAPSHOT: &str = "/tmp/phenix-transaction-snapshot";
+const SANDBOX_EXCLUDES: &str = "/tmp/phenix-transaction-excludes";
 
 static NEXT_TRANSACTION_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -74,61 +52,26 @@ impl WorkspaceTransaction {
         command: &str,
     ) -> Result<TransactionOutput, TransactionError> {
         let bwrap = std::env::var_os("PHENIX_BWRAP").unwrap_or_else(|| OsString::from("bwrap"));
-        let sandbox_snapshot = Path::new(SANDBOX_TRANSACTION_ROOT).join("snapshot");
-        let sandbox_status = Path::new(SANDBOX_TRANSACTION_ROOT).join("status");
-        let sandbox_excludes = Path::new(SANDBOX_TRANSACTION_ROOT).join("excludes");
-
-        let mut process = Command::new(&bwrap);
-        process
-            .arg("--die-with-parent")
-            .arg("--ro-bind")
-            .arg("/")
-            .arg("/")
-            .arg("--dev-bind")
-            .arg("/dev")
-            .arg("/dev")
-            .arg("--proc")
-            .arg("/proc")
-            .arg("--tmpfs")
-            .arg("/tmp")
-            .arg("--overlay-src")
-            .arg(self.consistency.root())
-            .arg("--overlay")
-            .arg(&self.paths.upper)
-            .arg(&self.paths.work)
-            .arg(self.consistency.root());
-
-        for (_, absolute) in &self.scratch_mounts {
-            process.arg("--bind").arg(absolute).arg(absolute);
-        }
-
-        process
-            .arg("--bind")
-            .arg(&self.paths.root)
-            .arg(SANDBOX_TRANSACTION_ROOT)
-            .arg("--chdir")
-            .arg(self.consistency.root())
-            .arg("--setenv")
-            .arg("TMPDIR")
-            .arg("/tmp")
+        let output = self
+            .sandbox_command(&bwrap, &self.paths.command_work)
             .arg("--")
             .arg(bash)
             .arg("-c")
-            .arg(SNAPSHOT_SCRIPT)
-            .arg("phenix-transaction")
-            .arg(bash)
             .arg(command)
-            .arg(&self.rsync)
-            .arg(self.consistency.root())
-            .arg(&sandbox_snapshot)
-            .arg(&sandbox_status)
-            .arg(&sandbox_excludes);
+            .output()
+            .map_err(|source| TransactionError::Spawn {
+                program: PathBuf::from(&bwrap),
+                source,
+            })?;
+        let exit_code = output.status.code().unwrap_or(-1);
 
-        let output = process.output().map_err(|source| TransactionError::Spawn {
-            program: PathBuf::from(&bwrap),
-            source,
-        })?;
-        self.finish_execution(output)
+        self.snapshot(&bwrap)?;
+
+        Ok(TransactionOutput {
+            exit_code,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        })
     }
 
     pub fn commit(&self) -> Result<(), TransactionError> {
@@ -163,31 +106,74 @@ impl WorkspaceTransaction {
         Ok(())
     }
 
-    fn finish_execution(&self, output: Output) -> Result<TransactionOutput, TransactionError> {
+    fn sandbox_command(&self, bwrap: &OsStr, work: &Path) -> Command {
+        let mut process = Command::new(bwrap);
+        process
+            .arg("--die-with-parent")
+            .arg("--ro-bind")
+            .arg("/")
+            .arg("/")
+            .arg("--dev-bind")
+            .arg("/dev")
+            .arg("/dev")
+            .arg("--proc")
+            .arg("/proc")
+            .arg("--tmpfs")
+            .arg("/tmp")
+            .arg("--tmpfs")
+            .arg(&self.paths.root)
+            .arg("--overlay-src")
+            .arg(self.consistency.root())
+            .arg("--overlay")
+            .arg(&self.paths.upper)
+            .arg(work)
+            .arg(self.consistency.root());
+
+        for (_, absolute) in &self.scratch_mounts {
+            process.arg("--bind").arg(absolute).arg(absolute);
+        }
+
+        process
+            .arg("--chdir")
+            .arg(self.consistency.root())
+            .arg("--setenv")
+            .arg("TMPDIR")
+            .arg("/tmp");
+        process
+    }
+
+    fn snapshot(&self, bwrap: &OsStr) -> Result<(), TransactionError> {
+        let output = self
+            .sandbox_command(bwrap, &self.paths.snapshot_work)
+            .arg("--bind")
+            .arg(&self.paths.snapshot)
+            .arg(SANDBOX_SNAPSHOT)
+            .arg("--ro-bind")
+            .arg(&self.paths.excludes)
+            .arg(SANDBOX_EXCLUDES)
+            .arg("--")
+            .arg(&self.rsync)
+            .arg("-rlpt")
+            .arg("--delete")
+            .arg("--delete-delay")
+            .arg("--delay-updates")
+            .arg("--quiet")
+            .arg("--exclude-from")
+            .arg(SANDBOX_EXCLUDES)
+            .arg(self.consistency.root().join("."))
+            .arg(Path::new(SANDBOX_SNAPSHOT).join("."))
+            .output()
+            .map_err(|source| TransactionError::Spawn {
+                program: PathBuf::from(bwrap),
+                source,
+            })?;
         if !output.status.success() {
             return Err(TransactionError::SandboxFailed {
                 exit_code: output.status.code().unwrap_or(-1),
                 stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             });
         }
-        let status_source =
-            fs::read_to_string(&self.paths.status).map_err(|source| TransactionError::Io {
-                path: self.paths.status.clone(),
-                source,
-            })?;
-        let exit_code =
-            status_source
-                .trim()
-                .parse::<i32>()
-                .map_err(|_| TransactionError::InvalidStatus {
-                    path: self.paths.status.clone(),
-                    value: status_source,
-                })?;
-        Ok(TransactionOutput {
-            exit_code,
-            stdout: output.stdout,
-            stderr: output.stderr,
-        })
+        Ok(())
     }
 }
 
@@ -195,9 +181,9 @@ impl WorkspaceTransaction {
 struct TransactionPaths {
     root: PathBuf,
     upper: PathBuf,
-    work: PathBuf,
+    command_work: PathBuf,
+    snapshot_work: PathBuf,
     snapshot: PathBuf,
-    status: PathBuf,
     excludes: PathBuf,
 }
 
@@ -226,20 +212,21 @@ impl TransactionPaths {
             match fs::create_dir(&root) {
                 Ok(()) => {
                     let upper = root.join("upper");
-                    let work = root.join("work");
+                    let command_work = root.join("command-work");
+                    let snapshot_work = root.join("snapshot-work");
                     let snapshot = root.join("snapshot");
-                    for path in [&upper, &work, &snapshot] {
+                    for path in [&upper, &command_work, &snapshot_work, &snapshot] {
                         fs::create_dir(path).map_err(|source| TransactionError::Io {
                             path: path.clone(),
                             source,
                         })?;
                     }
                     return Ok(Self {
-                        status: root.join("status"),
                         excludes: root.join("excludes"),
                         root,
                         upper,
-                        work,
+                        command_work,
+                        snapshot_work,
                         snapshot,
                     });
                 }
@@ -294,10 +281,6 @@ pub(super) enum TransactionError {
         exit_code: i32,
         stderr: String,
     },
-    InvalidStatus {
-        path: PathBuf,
-        value: String,
-    },
     Io {
         path: PathBuf,
         source: std::io::Error,
@@ -331,12 +314,6 @@ impl Display for TransactionError {
                 "workspace transaction apply failed with exit code {exit_code}: {}",
                 stderr.trim()
             ),
-            Self::InvalidStatus { path, value } => write!(
-                f,
-                "workspace transaction wrote invalid command status {:?} to {}",
-                value.trim(),
-                path.display()
-            ),
             Self::Io { path, source } => {
                 write!(
                     f,
@@ -356,8 +333,7 @@ impl Error for TransactionError {
             Self::TempInsideWorkspace(_)
             | Self::CreateTempExhausted(_)
             | Self::SandboxFailed { .. }
-            | Self::ApplyFailed { .. }
-            | Self::InvalidStatus { .. } => None,
+            | Self::ApplyFailed { .. } => None,
         }
     }
 }
@@ -459,6 +435,28 @@ mod tests {
         assert_eq!(
             fs::read_to_string(fixture.root.join("target/cache")).unwrap(),
             "scratch-new"
+        );
+    }
+
+    #[test]
+    fn user_command_cannot_access_transaction_control_mounts() {
+        let fixture = Fixture::new("controls");
+        fs::write(fixture.root.join("source.txt"), "old").unwrap();
+        let transaction =
+            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+
+        let output = transaction
+            .execute(
+                &bash(),
+                "test ! -e /tmp/phenix-transaction; test ! -e /tmp/phenix-transaction-snapshot; test ! -e /tmp/phenix-transaction-excludes; printf new > source.txt",
+            )
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        transaction.commit().unwrap();
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("source.txt")).unwrap(),
+            "new"
         );
     }
 
