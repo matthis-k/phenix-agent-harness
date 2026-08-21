@@ -20,8 +20,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sed -n "/^          python3 <<'PY'$/,/^          PY$/p" .github/workflows/grill-10-apply.yml \
-            | sed '1d;$d;s/^          //' > /tmp/grill-10-apply.py
+          python3 <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/grill-10-apply.yml').read_text().splitlines()
+          start = source.index("          python3 <<'PY'") + 1
+          end = source.index('          PY', start)
+          inside_string = False
+          extracted = []
+          for raw_line in source[start:end]:
+              line = raw_line
+              if not inside_string and line.startswith('          '):
+                  line = line[10:]
+              extracted.append(line)
+              if line.count("'''") % 2:
+                  inside_string = not inside_string
+          Path('/tmp/grill-10-apply.py').write_text('\n'.join(extracted) + '\n')
+          PY
           python3 /tmp/grill-10-apply.py
           rm .github/workflows/grill-10-apply.yml
       - name: Commit implementation
