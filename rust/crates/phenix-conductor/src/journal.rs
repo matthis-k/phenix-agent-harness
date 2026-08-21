@@ -424,16 +424,16 @@ pub(crate) fn apply_domain_event(
                     execution.id
                 )));
             }
-            if let Some(parent) = &execution.parent_execution {
-                let parent = state.executions.get(parent).ok_or_else(|| {
+            if let Some(parent_id) = &execution.parent_execution {
+                let parent = state.executions.get(parent_id).ok_or_else(|| {
                     JournalError::InvalidEvent(format!(
-                        "execution {} references unknown parent {parent}",
+                        "execution {} references unknown parent {parent_id}",
                         execution.id
                     ))
                 })?;
                 if !parent.authority.permits(payload.authority()) {
                     return Err(JournalError::InvalidEvent(format!(
-                        "execution {} authority exceeds parent {parent}",
+                        "execution {} authority exceeds parent {parent_id}",
                         execution.id
                     )));
                 }
