@@ -346,6 +346,20 @@ impl ConductorRuntime {
         Ok(())
     }
 
+    pub(crate) fn register_contextual_tool<F, O>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        handler: F,
+    ) -> Result<(), ConductorError>
+    where
+        F: Fn(&callables::ToolExecutionContext, &str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
+    {
+        self.callables
+            .register_contextual_tool(descriptor, handler)?;
+        Ok(())
+    }
+
     pub fn register_agent<D>(&mut self, definition: D) -> Result<(), ConductorError>
     where
         D: Into<AgentDefinition>,
@@ -1373,9 +1387,14 @@ impl ConductorRuntime {
         ) {
             Ok(()) => match serde_json::from_str::<Value>(&invocation.arguments_json) {
                 Ok(_) => {
+                    let context = callables::ToolExecutionContext {
+                        authority: self
+                            .execution_authority(execution_id)
+                            .map_err(conductor_protocol_error)?,
+                    };
                     let outcome = self
                         .callables
-                        .invoke_tool(&invocation.callable, &invocation.arguments_json)
+                        .invoke_tool(&context, &invocation.callable, &invocation.arguments_json)
                         .map_err(|error| BackendError::Protocol(error.to_string()))?;
                     if outcome.success {
                         for observation in outcome.file_observations.iter().cloned() {

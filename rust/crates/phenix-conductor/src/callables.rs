@@ -5,16 +5,21 @@ use crate::{
 };
 use phenix_backend::ToolResult;
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, FileObservation, OrchestrationDefinition,
-    OrchestrationNodeId, SessionId,
+    CallableDescriptor, CallableId, CallableKind, ExecutionAuthority, ExecutionEventKind,
+    ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary, FileObservation,
+    OrchestrationDefinition, OrchestrationNodeId, SessionId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
 
-type ToolHandler = dyn Fn(&str) -> Result<ToolOutcome, String> + Send + Sync;
+#[derive(Clone, Debug)]
+pub(crate) struct ToolExecutionContext {
+    pub authority: ExecutionAuthority,
+}
+
+type ToolHandler = dyn Fn(&ToolExecutionContext, &str) -> Result<ToolOutcome, String> + Send + Sync;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolOutcome {
@@ -186,7 +191,21 @@ impl CallableRegistry {
         F: Fn(&str) -> Result<O, String> + Send + Sync + 'static,
         O: Into<ToolOutcome> + 'static,
     {
-        let handler = move |arguments: &str| handler(arguments).map(Into::into);
+        self.register_contextual_tool(descriptor, move |_context, arguments| handler(arguments))
+    }
+
+    pub(crate) fn register_contextual_tool<F, O>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        handler: F,
+    ) -> Result<(), CallableRegistryError>
+    where
+        F: Fn(&ToolExecutionContext, &str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
+    {
+        let handler = move |context: &ToolExecutionContext, arguments: &str| {
+            handler(context, arguments).map(Into::into)
+        };
         self.register(
             descriptor,
             CallableKind::Tool,
@@ -424,8 +443,9 @@ impl CallableRegistry {
         self.entries.contains_key(id)
     }
 
-    pub fn invoke_tool(
+    pub(crate) fn invoke_tool(
         &self,
+        context: &ToolExecutionContext,
         id: &CallableId,
         arguments_json: &str,
     ) -> Result<ToolOutcome, CallableRegistryError> {
@@ -440,7 +460,7 @@ impl CallableRegistry {
                 actual: entry.descriptor.kind.clone(),
             });
         };
-        Ok(match handler(arguments_json) {
+        Ok(match handler(context, arguments_json) {
             Ok(outcome) => outcome,
             Err(output) => ToolOutcome::failure(output),
         })
@@ -824,8 +844,15 @@ mod tests {
                 Ok(arguments.to_owned())
             })
             .unwrap();
+        let context = ToolExecutionContext {
+            authority: ExecutionAuthority::read_only(),
+        };
         let result = registry
-            .invoke_tool(&CallableId::parse("echo").unwrap(), r#"{"value":1}"#)
+            .invoke_tool(
+                &context,
+                &CallableId::parse("echo").unwrap(),
+                r#"{"value":1}"#,
+            )
             .unwrap();
         assert!(result.success);
         assert_eq!(result.output, r#"{"value":1}"#);
