@@ -290,6 +290,7 @@ pub struct SessionSummary {
     pub id: SessionId,
     pub parent_session: Option<SessionId>,
     pub name: Option<String>,
+    pub workspace_id: WorkspaceId,
     pub config_revision: ConfigRevisionId,
     pub default_target: ExecutionTarget,
     #[serde(default)]
@@ -414,6 +415,7 @@ mod tests {
             "id": "session-1",
             "parent_session": null,
             "name": null,
+            "workspace_id": "workspace:test",
             "config_revision": "config-1",
             "default_target": {
                 "kind": "routed",
