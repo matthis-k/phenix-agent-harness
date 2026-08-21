@@ -355,3 +355,117 @@ fn root_model_discovers_and_starts_orchestration_then_worker_runs_mock_agents() 
         ]
     );
 }
+
+fn child_states(
+    runtime: &ConductorRuntime,
+    orchestration: &phenix_core::ExecutionId,
+) -> Vec<(String, ExecutionState)> {
+    let mut children = runtime
+        .snapshot()
+        .executions
+        .into_iter()
+        .filter(|execution| execution.parent_execution.as_ref() == Some(orchestration))
+        .filter(|execution| execution.kind == ExecutionKind::Agent)
+        .map(|execution| {
+            (
+                execution
+                    .callable
+                    .expect("agent child has callable")
+                    .to_string(),
+                execution.state,
+            )
+        })
+        .collect::<Vec<_>>();
+    children.sort_by(|left, right| left.0.cmp(&right.0));
+    children
+}
+
+#[test]
+fn dag_runtime_starts_all_ready_nodes_and_waits_for_join_dependencies() {
+    let mut runtime = ConductorRuntime::new();
+    let alpha = CallableId::parse("agent.alpha").unwrap();
+    let beta = CallableId::parse("agent.beta").unwrap();
+    let join = CallableId::parse("agent.join").unwrap();
+    for callable in [&alpha, &beta, &join] {
+        runtime
+            .register_agent(descriptor(callable.as_str(), CallableKind::Agent))
+            .unwrap();
+    }
+
+    runtime
+        .register_orchestration(OrchestrationDefinition {
+            descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
+            nodes: vec![
+                node("alpha", alpha.clone(), &[], None),
+                node("beta", beta.clone(), &[], None),
+                node("join", join.clone(), &["alpha", "beta"], None),
+            ],
+        })
+        .unwrap();
+
+    let session = runtime
+        .create_session(None, None, ExecutionTarget::Fixed(model("fixed")))
+        .unwrap();
+    let root = runtime.submit(&session.id, "run the DAG").unwrap();
+    let orchestration = runtime
+        .start_orchestration(
+            &root.id,
+            &CallableId::parse("orchestration.parallel").unwrap(),
+            "parallel work",
+        )
+        .unwrap();
+
+    assert_eq!(
+        child_states(&runtime, &orchestration.id),
+        vec![
+            (alpha.to_string(), ExecutionState::Pending),
+            (beta.to_string(), ExecutionState::Pending),
+        ],
+        "all dependency-free nodes must become runnable together"
+    );
+
+    let alpha_execution = runtime
+        .snapshot()
+        .executions
+        .into_iter()
+        .find(|execution| {
+            execution.parent_execution.as_ref() == Some(&orchestration.id)
+                && execution.callable.as_ref() == Some(&alpha)
+        })
+        .unwrap();
+    runtime
+        .set_state(&alpha_execution.id, ExecutionState::Completed)
+        .unwrap();
+
+    assert_eq!(
+        child_states(&runtime, &orchestration.id),
+        vec![
+            (alpha.to_string(), ExecutionState::Completed),
+            (beta.to_string(), ExecutionState::Pending),
+        ],
+        "join must stay blocked while one dependency is unfinished"
+    );
+
+    let beta_execution = runtime
+        .snapshot()
+        .executions
+        .into_iter()
+        .find(|execution| {
+            execution.parent_execution.as_ref() == Some(&orchestration.id)
+                && execution.callable.as_ref() == Some(&beta)
+        })
+        .unwrap();
+    runtime
+        .set_state(&beta_execution.id, ExecutionState::Completed)
+        .unwrap();
+
+    assert_eq!(
+        child_states(&runtime, &orchestration.id),
+        vec![
+            (alpha.to_string(), ExecutionState::Completed),
+            (beta.to_string(), ExecutionState::Completed),
+            (join.to_string(), ExecutionState::Pending),
+        ],
+        "join becomes runnable only after every declared dependency completes"
+    );
+}
