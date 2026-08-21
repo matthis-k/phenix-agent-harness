@@ -1,5 +1,5 @@
 use phenix_core::{FileKind, FileObservation, FileVersion, WorkspaceConflict, WorkspaceDescriptor};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
@@ -37,6 +37,14 @@ impl WorkspaceConsistency {
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn checkpoint_baseline(
+        &self,
+    ) -> Result<BTreeMap<PathBuf, FileVersion>, WorkspaceConsistencyError> {
+        let mut files = BTreeMap::new();
+        self.collect_checkpoint_versions(&self.root, Path::new(""), &mut files)?;
+        Ok(files)
     }
 
     pub fn read_utf8(
@@ -147,6 +155,52 @@ impl WorkspaceConsistency {
             },
         };
         Ok(Some(observation))
+    }
+
+    fn collect_checkpoint_versions(
+        &self,
+        directory: &Path,
+        relative_directory: &Path,
+        files: &mut BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<(), WorkspaceConsistencyError> {
+        let mut entries = fs::read_dir(directory)
+            .map_err(|source| WorkspaceConsistencyError::Io {
+                path: directory.to_path_buf(),
+                source,
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| WorkspaceConsistencyError::Io {
+                path: directory.to_path_buf(),
+                source,
+            })?;
+        entries.sort_by_key(fs::DirEntry::file_name);
+
+        for entry in entries {
+            let relative = relative_directory.join(entry.file_name());
+            if is_repository_metadata(&relative) || self.is_scratch(&relative) {
+                continue;
+            }
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|source| {
+                WorkspaceConsistencyError::Io {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+            if metadata.is_dir() {
+                let canonical = fs::canonicalize(&path).map_err(|source| {
+                    WorkspaceConsistencyError::Io {
+                        path: path.clone(),
+                        source,
+                    }
+                })?;
+                self.ensure_canonical_inside(&canonical)?;
+                self.collect_checkpoint_versions(&canonical, &relative, files)?;
+            } else {
+                files.insert(relative.clone(), self.version_at(&relative)?);
+            }
+        }
+        Ok(())
     }
 
     fn is_scratch(&self, relative: &Path) -> bool {
@@ -370,6 +424,11 @@ fn normalize_relative(path: &Path) -> Result<PathBuf, WorkspaceConsistencyError>
     Ok(relative)
 }
 
+fn is_repository_metadata(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, Component::Normal(part) if part == ".git"))
+}
+
 fn file_kind(metadata: &fs::Metadata) -> FileKind {
     let file_type = metadata.file_type();
     if file_type.is_file() {
@@ -448,6 +507,33 @@ mod tests {
                 kind: FileKind::Regular,
             }
         );
+    }
+
+    #[test]
+    fn checkpoint_baseline_tracks_source_and_excludes_scratch_and_git_metadata() {
+        let fixture = Fixture::new();
+        fs::create_dir_all(fixture.root.join("src")).unwrap();
+        fs::create_dir_all(fixture.root.join("target")).unwrap();
+        fs::create_dir_all(fixture.root.join(".git")).unwrap();
+        fs::write(fixture.root.join("src/lib.rs"), "source").unwrap();
+        fs::write(fixture.root.join("target/cache"), "scratch").unwrap();
+        fs::write(fixture.root.join(".git/index"), "metadata").unwrap();
+        let guard = WorkspaceConsistency::new(
+            &fixture.descriptor(BTreeSet::from([PathBuf::from("target")])),
+        )
+        .unwrap();
+
+        let baseline = guard.checkpoint_baseline().unwrap();
+
+        assert_eq!(
+            baseline.get(Path::new("src/lib.rs")),
+            Some(&FileVersion::Present {
+                content_hash: fingerprint(b"source"),
+                kind: FileKind::Regular,
+            })
+        );
+        assert!(!baseline.contains_key(Path::new("target/cache")));
+        assert!(!baseline.contains_key(Path::new(".git/index")));
     }
 
     #[test]

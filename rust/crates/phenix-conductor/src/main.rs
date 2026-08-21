@@ -74,6 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             ConductorServer::new(runtime)
         }
     };
+    server.install_workspace_consistency(workspace.descriptor().clone())?;
 
     {
         let context = ContextRegistry::discover(workspace.root())?;
