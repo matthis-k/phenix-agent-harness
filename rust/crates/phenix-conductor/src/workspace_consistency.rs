@@ -60,12 +60,11 @@ impl WorkspaceConsistency {
         &self,
         snapshot_root: &Path,
     ) -> Result<BTreeMap<PathBuf, FileVersion>, WorkspaceConsistencyError> {
-        let snapshot_root = fs::canonicalize(snapshot_root).map_err(|source| {
-            WorkspaceConsistencyError::Io {
+        let snapshot_root =
+            fs::canonicalize(snapshot_root).map_err(|source| WorkspaceConsistencyError::Io {
                 path: snapshot_root.to_path_buf(),
                 source,
-            }
-        })?;
+            })?;
         let mut files = BTreeMap::new();
         self.collect_snapshot_versions(&snapshot_root, Path::new(""), &mut files)?;
         Ok(files)
@@ -106,9 +105,11 @@ impl WorkspaceConsistency {
                     }
                 }
                 Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-                    fs::create_dir_all(&target).map_err(|source| WorkspaceConsistencyError::Io {
-                        path: target.clone(),
-                        source,
+                    fs::create_dir_all(&target).map_err(|source| {
+                        WorkspaceConsistencyError::Io {
+                            path: target.clone(),
+                            source,
+                        }
                     })?;
                     let canonical = fs::canonicalize(&target).map_err(|source| {
                         WorkspaceConsistencyError::Io {
@@ -303,12 +304,11 @@ impl WorkspaceConsistency {
                 },
                 FileKind::Directory => directory_version(),
                 FileKind::Symlink => {
-                    let target = fs::read_link(&path).map_err(|source| {
-                        WorkspaceConsistencyError::Io {
+                    let target =
+                        fs::read_link(&path).map_err(|source| WorkspaceConsistencyError::Io {
                             path: path.clone(),
                             source,
-                        }
-                    })?;
+                        })?;
                     self.ensure_snapshot_link_inside(&relative, &target)?;
                     FileVersion::Present {
                         content_hash: fingerprint(target.to_string_lossy().as_bytes()),
@@ -447,9 +447,8 @@ impl WorkspaceConsistency {
                 .join(relative.parent().unwrap_or_else(|| Path::new("")))
                 .join(link)
         };
-        let normalized = lexical_normalize(&candidate).ok_or_else(|| {
-            WorkspaceConsistencyError::EscapesWorkspace(self.root.join(relative))
-        })?;
+        let normalized = lexical_normalize(&candidate)
+            .ok_or_else(|| WorkspaceConsistencyError::EscapesWorkspace(self.root.join(relative)))?;
         if normalized == self.root || normalized.starts_with(&self.root) {
             Ok(())
         } else {
@@ -722,7 +721,10 @@ mod tests {
         let baseline = guard.checkpoint_baseline().unwrap();
 
         assert_eq!(baseline.get(Path::new("src")), Some(&directory_version()));
-        assert_eq!(baseline.get(Path::new("src/nested")), Some(&directory_version()));
+        assert_eq!(
+            baseline.get(Path::new("src/nested")),
+            Some(&directory_version())
+        );
         assert_eq!(
             baseline.get(Path::new("src/lib.rs")),
             Some(&FileVersion::Present {

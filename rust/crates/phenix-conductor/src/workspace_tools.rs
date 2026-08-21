@@ -343,10 +343,7 @@ fn nullable_file_version_schema() -> Value {
     })
 }
 
-fn execute_bash(
-    consistency: &WorkspaceConsistency,
-    arguments: &str,
-) -> Result<String, String> {
+fn execute_bash(consistency: &WorkspaceConsistency, arguments: &str) -> Result<String, String> {
     let input: BashInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid bash arguments: {error}"))?;
     if input.command.trim().is_empty() {
@@ -781,11 +778,8 @@ mod tests {
     fn nonzero_exit_is_reported_without_failing_the_tool_call() {
         let workspace = temp_workspace("bash-nonzero");
         let consistency = consistency(&workspace, BTreeSet::new());
-        let output = execute_bash(
-            &consistency,
-            r#"{"command":"printf failure >&2; exit 7"}"#,
-        )
-        .unwrap();
+        let output =
+            execute_bash(&consistency, r#"{"command":"printf failure >&2; exit 7"}"#).unwrap();
         let output: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(output["exit_code"], 7);
         assert_eq!(output["stderr"], "failure");

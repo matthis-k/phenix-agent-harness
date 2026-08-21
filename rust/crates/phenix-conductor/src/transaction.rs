@@ -73,8 +73,7 @@ impl WorkspaceTransaction {
         bash: &OsStr,
         command: &str,
     ) -> Result<TransactionOutput, TransactionError> {
-        let bwrap =
-            std::env::var_os("PHENIX_BWRAP").unwrap_or_else(|| OsString::from("bwrap"));
+        let bwrap = std::env::var_os("PHENIX_BWRAP").unwrap_or_else(|| OsString::from("bwrap"));
         let sandbox_snapshot = Path::new(SANDBOX_TRANSACTION_ROOT).join("snapshot");
         let sandbox_status = Path::new(SANDBOX_TRANSACTION_ROOT).join("status");
         let sandbox_excludes = Path::new(SANDBOX_TRANSACTION_ROOT).join("excludes");
@@ -171,18 +170,19 @@ impl WorkspaceTransaction {
                 stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             });
         }
-        let status_source = fs::read_to_string(&self.paths.status).map_err(|source| {
-            TransactionError::Io {
+        let status_source =
+            fs::read_to_string(&self.paths.status).map_err(|source| TransactionError::Io {
                 path: self.paths.status.clone(),
                 source,
-            }
-        })?;
-        let exit_code = status_source.trim().parse::<i32>().map_err(|_| {
-            TransactionError::InvalidStatus {
-                path: self.paths.status.clone(),
-                value: status_source,
-            }
-        })?;
+            })?;
+        let exit_code =
+            status_source
+                .trim()
+                .parse::<i32>()
+                .map_err(|_| TransactionError::InvalidStatus {
+                    path: self.paths.status.clone(),
+                    value: status_source,
+                })?;
         Ok(TransactionOutput {
             exit_code,
             stdout: output.stdout,
@@ -204,10 +204,11 @@ struct TransactionPaths {
 impl TransactionPaths {
     fn create(workspace: &Path) -> Result<Self, TransactionError> {
         let parent = std::env::temp_dir();
-        let canonical_parent = fs::canonicalize(&parent).map_err(|source| TransactionError::Io {
-            path: parent.clone(),
-            source,
-        })?;
+        let canonical_parent =
+            fs::canonicalize(&parent).map_err(|source| TransactionError::Io {
+                path: parent.clone(),
+                source,
+            })?;
         if canonical_parent == workspace || canonical_parent.starts_with(workspace) {
             return Err(TransactionError::TempInsideWorkspace(canonical_parent));
         }
@@ -337,7 +338,11 @@ impl Display for TransactionError {
                 path.display()
             ),
             Self::Io { path, source } => {
-                write!(f, "workspace transaction I/O failed for {}: {source}", path.display())
+                write!(
+                    f,
+                    "workspace transaction I/O failed for {}: {source}",
+                    path.display()
+                )
             }
         }
     }
@@ -428,7 +433,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(output.exit_code, 0);
-        assert_eq!(fs::read_to_string(fixture.root.join("source.txt")).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("source.txt")).unwrap(),
+            "old"
+        );
         assert_eq!(
             fs::read_to_string(fixture.root.join(".git/index")).unwrap(),
             "git-old"
@@ -440,7 +448,10 @@ mod tests {
 
         transaction.commit().unwrap();
 
-        assert_eq!(fs::read_to_string(fixture.root.join("source.txt")).unwrap(), "new");
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("source.txt")).unwrap(),
+            "new"
+        );
         assert_eq!(
             fs::read_to_string(fixture.root.join(".git/index")).unwrap(),
             "git-old"
@@ -455,7 +466,8 @@ mod tests {
     fn nonzero_user_command_still_commits_its_protected_result() {
         let fixture = Fixture::new("nonzero");
         fs::write(fixture.root.join("source.txt"), "old").unwrap();
-        let transaction = WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+        let transaction =
+            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
 
         let output = transaction
             .execute(
@@ -467,14 +479,18 @@ mod tests {
         assert!(String::from_utf8_lossy(&output.stderr).contains("failure"));
 
         transaction.commit().unwrap();
-        assert_eq!(fs::read_to_string(fixture.root.join("source.txt")).unwrap(), "new");
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("source.txt")).unwrap(),
+            "new"
+        );
     }
 
     #[test]
     fn concurrent_protected_path_creation_rejects_the_overlay_result() {
         let fixture = Fixture::new("conflict");
         fs::write(fixture.root.join("source.txt"), "old").unwrap();
-        let transaction = WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+        let transaction =
+            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
         transaction
             .execute(&bash(), "printf agent > source.txt")
             .unwrap();
@@ -486,7 +502,10 @@ mod tests {
             error,
             TransactionError::Workspace(WorkspaceConsistencyError::Conflict(_))
         ));
-        assert_eq!(fs::read_to_string(fixture.root.join("source.txt")).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("source.txt")).unwrap(),
+            "old"
+        );
         assert_eq!(
             fs::read_to_string(fixture.root.join("external.txt")).unwrap(),
             "external"
