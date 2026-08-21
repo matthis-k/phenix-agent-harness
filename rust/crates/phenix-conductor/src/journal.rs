@@ -1,13 +1,15 @@
 use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
 use phenix_core::{
     ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
-    ExecutionKind, ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget,
-    OrchestrationNodeId, SessionId, SessionState, SessionSummary, ToolCallId,
+    ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
+    FileObservation, FileVersion, FilesystemAuthority, ModelTarget, OrchestrationNodeId, SessionId,
+    SessionState, SessionSummary, ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::path::PathBuf;
 
 pub const JOURNAL_FORMAT_VERSION: u64 = 1;
 
@@ -129,6 +131,16 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         route: ResolvedRoute,
     },
+    WorkspaceCheckpointCaptured {
+        execution_id: ExecutionId,
+        workspace_id: WorkspaceId,
+        #[serde(default)]
+        files: BTreeMap<PathBuf, FileVersion>,
+    },
+    WorkspaceFileObserved {
+        execution_id: ExecutionId,
+        observation: FileObservation,
+    },
     FrontendEvent {
         event: ExecutionEvent,
     },
@@ -209,6 +221,7 @@ pub(crate) struct DurableProjection<'a> {
     pub executions: &'a mut BTreeMap<ExecutionId, ExecutionRecord>,
     pub orchestration_nodes: &'a mut BTreeMap<ExecutionId, OrchestrationNodeId>,
     pub resolved_routes: &'a mut BTreeMap<ExecutionId, ResolvedRoute>,
+    pub read_sets: &'a mut BTreeMap<ExecutionId, ExecutionReadSet>,
     pub events: &'a mut Vec<ExecutionEvent>,
     pub next_session: &'a mut u64,
     pub next_execution: &'a mut u64,
@@ -603,6 +616,62 @@ pub(crate) fn apply_domain_event(
                     )));
                 }
             }
+        }
+        DomainEvent::WorkspaceCheckpointCaptured {
+            execution_id,
+            workspace_id,
+            files: _,
+        } => {
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.state != ExecutionState::Pending {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references non-pending execution {execution_id}"
+                )));
+            }
+            if execution.authority.filesystem != FilesystemAuthority::Write {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references non-writer execution {execution_id}"
+                )));
+            }
+            let session = state
+                .sessions
+                .get(&execution.summary.session_id)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                    "workspace checkpoint execution {execution_id} references unknown session {}",
+                    execution.summary.session_id
+                ))
+                })?;
+            if session.summary.workspace_id != *workspace_id {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint for {execution_id} uses workspace {workspace_id} instead of {}",
+                    session.summary.workspace_id
+                )));
+            }
+        }
+        DomainEvent::WorkspaceFileObserved {
+            execution_id,
+            observation,
+        } => {
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "workspace observation references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.state != ExecutionState::Running {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace observation references non-running execution {execution_id}"
+                )));
+            }
+            state
+                .read_sets
+                .entry(execution_id.clone())
+                .or_insert_with(|| ExecutionReadSet::new(execution_id.clone()))
+                .observe(observation.clone());
         }
         DomainEvent::FrontendEvent { event } => {
             let expected = *state.next_event + 1;

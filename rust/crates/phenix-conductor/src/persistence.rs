@@ -133,6 +133,7 @@ impl ConductorRuntime {
                 executions: &mut runtime.executions,
                 orchestration_nodes: &mut runtime.orchestration_nodes,
                 resolved_routes: &mut runtime.resolved_routes,
+                read_sets: &mut runtime.read_sets,
                 events: &mut runtime.events,
                 next_session: &mut runtime.next_session,
                 next_execution: &mut runtime.next_execution,

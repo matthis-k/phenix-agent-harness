@@ -457,7 +457,7 @@ fn tool_handler_failure_is_contained_and_model_can_continue() {
     .configure_runtime(|runtime| {
         runtime
             .register_tool(descriptor("unstable", CallableKind::Tool), |_| {
-                Err("tool exploded".to_owned())
+                Err::<String, String>("tool exploded".to_owned())
             })
             .unwrap();
     })

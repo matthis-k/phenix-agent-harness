@@ -9,7 +9,7 @@ mod policy;
 mod routing;
 mod server;
 
-pub use callables::{CallableRegistry, CallableRegistryError};
+pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
 pub use context::{ContextError, ContextRegistry};
 pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
@@ -34,7 +34,8 @@ use phenix_backend::{
 use phenix_core::{
     AgentDefinition, CallableDescriptor, CallableId, CallableKind, ConfigRevisionId,
     ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, OrchestrationDefinition,
+    ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
+    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
     OrchestrationNodeId, RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor,
     SkillId, ToolCallId, WorkspaceId, WorkspaceLeaseRequest,
 };
@@ -43,6 +44,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConductorError {
@@ -211,6 +213,7 @@ pub struct ConductorRuntime {
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
     orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
     resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
+    read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
     events: Vec<ExecutionEvent>,
     journal: RuntimeJournal,
     callables: CallableRegistry,
@@ -245,6 +248,7 @@ impl ConductorRuntime {
             executions: BTreeMap::new(),
             orchestration_nodes: BTreeMap::new(),
             resolved_routes: BTreeMap::new(),
+            read_sets: BTreeMap::new(),
             events: Vec::new(),
             callables: CallableRegistry::default(),
             agent_authorities: BTreeMap::new(),
@@ -297,6 +301,7 @@ impl ConductorRuntime {
                 executions: &mut self.executions,
                 orchestration_nodes: &mut self.orchestration_nodes,
                 resolved_routes: &mut self.resolved_routes,
+                read_sets: &mut self.read_sets,
                 events: &mut self.events,
                 next_session: &mut self.next_session,
                 next_execution: &mut self.next_execution,
@@ -328,13 +333,14 @@ impl ConductorRuntime {
         self.policy.register(guard);
     }
 
-    pub fn register_tool<F>(
+    pub fn register_tool<F, O>(
         &mut self,
         descriptor: CallableDescriptor,
         handler: F,
     ) -> Result<(), ConductorError>
     where
-        F: Fn(&str) -> Result<String, String> + Send + Sync + 'static,
+        F: Fn(&str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
     {
         self.callables.register_tool(descriptor, handler)?;
         Ok(())
@@ -463,6 +469,41 @@ impl ConductorRuntime {
                     .permits_capabilities(&descriptor.capabilities)
             })
             .collect())
+    }
+
+    pub fn execution_read_set(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<ExecutionReadSet, ConductorError> {
+        if !self.executions.contains_key(execution_id) {
+            return Err(ConductorError::UnknownExecution(execution_id.clone()));
+        }
+        Ok(self
+            .read_sets
+            .get(execution_id)
+            .cloned()
+            .unwrap_or_else(|| ExecutionReadSet::new(execution_id.clone())))
+    }
+
+    pub fn execution_workspace_validity(
+        &self,
+        execution_id: &ExecutionId,
+        current: &BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<ExecutionWorkspaceValidity, ConductorError> {
+        Ok(self
+            .execution_read_set(execution_id)?
+            .validity_against(current))
+    }
+
+    fn record_file_observation(
+        &mut self,
+        execution_id: &ExecutionId,
+        observation: FileObservation,
+    ) -> Result<(), ConductorError> {
+        self.record_domain_event(DomainEvent::WorkspaceFileObserved {
+            execution_id: execution_id.clone(),
+            observation,
+        })
     }
 
     pub fn execution_authority(
@@ -1331,10 +1372,19 @@ impl ConductorRuntime {
             CallableOperation::InvokeTool,
         ) {
             Ok(()) => match serde_json::from_str::<Value>(&invocation.arguments_json) {
-                Ok(_) => self
-                    .callables
-                    .invoke_tool(&invocation.callable, &invocation.arguments_json)
-                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                Ok(_) => {
+                    let outcome = self
+                        .callables
+                        .invoke_tool(&invocation.callable, &invocation.arguments_json)
+                        .map_err(|error| BackendError::Protocol(error.to_string()))?;
+                    if outcome.success {
+                        for observation in outcome.file_observations.iter().cloned() {
+                            self.record_file_observation(execution_id, observation)
+                                .map_err(conductor_protocol_error)?;
+                        }
+                    }
+                    outcome.into_backend_result()
+                }
                 Err(error) => ToolResult {
                     output: format!("invalid JSON tool arguments: {error}"),
                     success: false,
