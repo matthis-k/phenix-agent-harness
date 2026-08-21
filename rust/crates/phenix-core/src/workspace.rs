@@ -16,8 +16,7 @@ pub enum FilesystemAuthority {
 impl FilesystemAuthority {
     #[must_use]
     pub fn permits_capabilities(self, capabilities: &CapabilitySet) -> bool {
-        !capabilities.0.contains(CAPABILITY_FILESYSTEM_WRITE)
-            || self == FilesystemAuthority::Write
+        !capabilities.0.contains(CAPABILITY_FILESYSTEM_WRITE) || self == FilesystemAuthority::Write
     }
 }
 

@@ -1,5 +1,6 @@
 use phenix_core::{
-    ExecutionReadSet, FileKind, FileObservation, FileVersion, WorkspaceConflict, WorkspaceDescriptor,
+    ExecutionReadSet, FileKind, FileObservation, FileVersion, WorkspaceConflict,
+    WorkspaceDescriptor,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -25,12 +26,11 @@ pub struct WorkspaceConsistency {
 
 impl WorkspaceConsistency {
     pub fn new(descriptor: &WorkspaceDescriptor) -> Result<Self, WorkspaceConsistencyError> {
-        let root = fs::canonicalize(&descriptor.root).map_err(|source| {
-            WorkspaceConsistencyError::Io {
+        let root =
+            fs::canonicalize(&descriptor.root).map_err(|source| WorkspaceConsistencyError::Io {
                 path: descriptor.root.clone(),
                 source,
-            }
-        })?;
+            })?;
         Ok(Self {
             root,
             scratch_paths: descriptor.scratch_paths.clone(),
@@ -49,20 +49,18 @@ impl WorkspaceConsistency {
         let relative = normalize_relative(path.as_ref())?;
         let target = self.root.join(&relative);
         self.ensure_ancestor_inside(&target)?;
-        let metadata = fs::symlink_metadata(&target).map_err(|source| {
-            WorkspaceConsistencyError::Io {
+        let metadata =
+            fs::symlink_metadata(&target).map_err(|source| WorkspaceConsistencyError::Io {
                 path: target.clone(),
                 source,
-            }
-        })?;
+            })?;
         let scratch = self.is_scratch(&relative);
         if metadata.file_type().is_symlink() {
-            let canonical = fs::canonicalize(&target).map_err(|source| {
-                WorkspaceConsistencyError::Io {
+            let canonical =
+                fs::canonicalize(&target).map_err(|source| WorkspaceConsistencyError::Io {
                     path: target.clone(),
                     source,
-                }
-            })?;
+                })?;
             self.ensure_canonical_inside(&canonical)?;
             if !scratch {
                 return Err(WorkspaceConsistencyError::UnsupportedReadTarget {
@@ -81,11 +79,10 @@ impl WorkspaceConsistency {
             path: target,
             source,
         })?;
-        let content = String::from_utf8(bytes.clone()).map_err(|_| {
-            WorkspaceConsistencyError::NotUtf8 {
+        let content =
+            String::from_utf8(bytes.clone()).map_err(|_| WorkspaceConsistencyError::NotUtf8 {
                 path: relative.clone(),
-            }
-        })?;
+            })?;
         let observation = (!scratch).then(|| FileObservation {
             path: relative.clone(),
             version: FileVersion::Present {
@@ -158,9 +155,8 @@ impl WorkspaceConsistency {
             return Ok(None);
         }
 
-        let expected = expected.ok_or_else(|| {
-            WorkspaceConsistencyError::MissingExpectedVersion(relative.clone())
-        })?;
+        let expected = expected
+            .ok_or_else(|| WorkspaceConsistencyError::MissingExpectedVersion(relative.clone()))?;
         let actual = self.version_at(&relative)?;
         if actual != *expected {
             return Err(WorkspaceConsistencyError::Conflict(WorkspaceConflict {
@@ -179,11 +175,9 @@ impl WorkspaceConsistency {
         }
 
         self.create_parent_directories(&target)?;
-        fs::write(&target, content.as_bytes()).map_err(|source| {
-            WorkspaceConsistencyError::Io {
-                path: target,
-                source,
-            }
+        fs::write(&target, content.as_bytes()).map_err(|source| WorkspaceConsistencyError::Io {
+            path: target,
+            source,
         })?;
         let observation = FileObservation {
             path: relative,
@@ -224,12 +218,11 @@ impl WorkspaceConsistency {
         let kind = file_kind(&metadata);
         let hash = match kind {
             FileKind::Regular => {
-                let canonical = fs::canonicalize(&target).map_err(|source| {
-                    WorkspaceConsistencyError::Io {
+                let canonical =
+                    fs::canonicalize(&target).map_err(|source| WorkspaceConsistencyError::Io {
                         path: target.clone(),
                         source,
-                    }
-                })?;
+                    })?;
                 self.ensure_canonical_inside(&canonical)?;
                 fingerprint(&fs::read(&canonical).map_err(|source| {
                     WorkspaceConsistencyError::Io {
@@ -239,12 +232,11 @@ impl WorkspaceConsistency {
                 })?)
             }
             FileKind::Directory => {
-                let canonical = fs::canonicalize(&target).map_err(|source| {
-                    WorkspaceConsistencyError::Io {
+                let canonical =
+                    fs::canonicalize(&target).map_err(|source| WorkspaceConsistencyError::Io {
                         path: target.clone(),
                         source,
-                    }
-                })?;
+                    })?;
                 self.ensure_canonical_inside(&canonical)?;
                 let mut entries = fs::read_dir(&canonical)
                     .map_err(|source| WorkspaceConsistencyError::Io {
@@ -264,16 +256,16 @@ impl WorkspaceConsistency {
                 fingerprint(entries.join("\0").as_bytes())
             }
             FileKind::Symlink => {
-                let link = fs::read_link(&target).map_err(|source| WorkspaceConsistencyError::Io {
-                    path: target.clone(),
-                    source,
-                })?;
-                let canonical = fs::canonicalize(&target).map_err(|source| {
-                    WorkspaceConsistencyError::Io {
+                let link =
+                    fs::read_link(&target).map_err(|source| WorkspaceConsistencyError::Io {
                         path: target.clone(),
                         source,
-                    }
-                })?;
+                    })?;
+                let canonical =
+                    fs::canonicalize(&target).map_err(|source| WorkspaceConsistencyError::Io {
+                        path: target.clone(),
+                        source,
+                    })?;
                 self.ensure_canonical_inside(&canonical)?;
                 fingerprint(link.to_string_lossy().as_bytes())
             }
@@ -292,12 +284,11 @@ impl WorkspaceConsistency {
                 path: parent.to_path_buf(),
                 source,
             })?;
-            let canonical = fs::canonicalize(parent).map_err(|source| {
-                WorkspaceConsistencyError::Io {
+            let canonical =
+                fs::canonicalize(parent).map_err(|source| WorkspaceConsistencyError::Io {
                     path: parent.to_path_buf(),
                     source,
-                }
-            })?;
+                })?;
             self.ensure_canonical_inside(&canonical)?;
         }
         Ok(())
@@ -339,11 +330,22 @@ pub enum WorkspaceConsistencyError {
     InvalidPath(PathBuf),
     EscapesWorkspace(PathBuf),
     MissingExpectedVersion(PathBuf),
-    UnsupportedReadTarget { path: PathBuf, kind: FileKind },
-    UnsupportedWriteTarget { path: PathBuf, kind: FileKind },
-    NotUtf8 { path: PathBuf },
+    UnsupportedReadTarget {
+        path: PathBuf,
+        kind: FileKind,
+    },
+    UnsupportedWriteTarget {
+        path: PathBuf,
+        kind: FileKind,
+    },
+    NotUtf8 {
+        path: PathBuf,
+    },
     Conflict(WorkspaceConflict),
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 impl Display for WorkspaceConsistencyError {
@@ -590,10 +592,11 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let fixture = Fixture::new();
-        let outside = fixture.root.parent().unwrap().join(format!(
-            "phenix-workspace-outside-{}",
-            std::process::id()
-        ));
+        let outside = fixture
+            .root
+            .parent()
+            .unwrap()
+            .join(format!("phenix-workspace-outside-{}", std::process::id()));
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("secret"), "outside").unwrap();
         symlink(&outside, fixture.root.join("target")).unwrap();

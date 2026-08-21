@@ -427,7 +427,10 @@ fn execute_read(consistency: &WorkspaceConsistency, arguments: &str) -> Result<S
         selected.push('\n');
     }
     let returned_lines = end_index.saturating_sub(start_index);
-    let version = read.observation.as_ref().map(|observation| &observation.version);
+    let version = read
+        .observation
+        .as_ref()
+        .map(|observation| &observation.version);
 
     Ok(json!({
         "path": read.path.to_string_lossy().into_owned(),
@@ -841,10 +844,9 @@ mod tests {
         let workspace = temp_workspace("stale-write");
         fs::write(workspace.join("example.txt"), "v1").unwrap();
         let consistency = consistency(&workspace, BTreeSet::new());
-        let read: Value = serde_json::from_str(
-            &execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap(),
-        )
-        .unwrap();
+        let read: Value =
+            serde_json::from_str(&execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap())
+                .unwrap();
         fs::write(workspace.join("example.txt"), "external-v2").unwrap();
 
         let arguments = json!({
@@ -866,10 +868,7 @@ mod tests {
     #[test]
     fn scratch_write_does_not_require_a_source_version() {
         let workspace = temp_workspace("scratch-write");
-        let consistency = consistency(
-            &workspace,
-            BTreeSet::from([PathBuf::from("target")]),
-        );
+        let consistency = consistency(&workspace, BTreeSet::from([PathBuf::from("target")]));
 
         let write = execute_write(
             &consistency,
@@ -898,10 +897,9 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("matched 2 occurrences"));
 
-        let read: Value = serde_json::from_str(
-            &execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap(),
-        )
-        .unwrap();
+        let read: Value =
+            serde_json::from_str(&execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap())
+                .unwrap();
         let arguments = json!({
             "path": "example.txt",
             "old_text": "alpha",
