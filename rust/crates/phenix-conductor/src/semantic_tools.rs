@@ -34,6 +34,15 @@ struct SkillResourceReadInput {
 }
 
 pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut ResolvedInvocation) {
+    let authority = runtime
+        .execution_authority(&resolved.execution_id)
+        .expect("resolved invocation execution exists");
+    resolved.tools.callables.retain(|descriptor| {
+        authority
+            .filesystem
+            .permits_capabilities(&descriptor.capabilities)
+    });
+
     let is_root = runtime.snapshot().executions.iter().any(|execution| {
         execution.id == resolved.execution_id && execution.kind == ExecutionKind::Root
     });
