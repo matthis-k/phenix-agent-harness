@@ -1,6 +1,6 @@
 use phenix_backend::{
-    Backend, BackendCapabilities, BackendError, BackendExecutionRequest, BackendHost, BackendSession,
-    BackendSessionRequest,
+    Backend, BackendCapabilities, BackendError, BackendExecutionRequest, BackendHost,
+    BackendSession, BackendSessionRequest,
 };
 use phenix_conductor::{ConductorRuntime, ConductorServer};
 use phenix_core::{
@@ -174,7 +174,10 @@ fn writer_executions_on_one_workspace_do_not_overlap_backend_dispatch() {
     let (state, _) = ready
         .wait_timeout_while(state, Duration::from_secs(1), |state| state.entered == 0)
         .unwrap();
-    assert_eq!(state.entered, 1, "first writer never reached backend dispatch");
+    assert_eq!(
+        state.entered, 1,
+        "first writer never reached backend dispatch"
+    );
 
     let (mut state, _) = ready
         .wait_timeout_while(state, Duration::from_millis(500), |state| state.entered < 2)
