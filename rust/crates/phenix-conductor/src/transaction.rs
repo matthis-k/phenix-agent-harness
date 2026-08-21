@@ -9,51 +9,31 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SANDBOX_SNAPSHOT: &str = "/tmp/phenix-transaction-snapshot";
-const SANDBOX_EXCLUDES: &str = "/tmp/phenix-transaction-excludes";
-const SANDBOX_INNER_STATUS: &str = "/tmp/phenix-transaction-inner-status";
-const SANDBOX_RESULT_STATUS: &str = "/tmp/phenix-transaction-result-status";
+const SANDBOX_TRANSACTION_RELATIVE: &str = ".git/phenix-transaction";
+const SANDBOX_SNAPSHOT_RELATIVE: &str = ".git/phenix-transaction/snapshot";
+const SANDBOX_EXCLUDES_RELATIVE: &str = ".git/phenix-transaction/excludes";
+const SANDBOX_RESULT_STATUS_RELATIVE: &str = ".git/phenix-transaction/result-status";
 const COMMAND_SCRIPT: &str = r#"
-bwrap_path=$1
-bash_path=$2
-rsync_path=$3
-workspace=$4
-snapshot=$5
-excludes=$6
-inner_status=$7
-result_status=$8
-user_command=$9
-
-: > "$result_status"
-exec 3> "$inner_status"
+bash_path=$1
+rsync_path=$2
+rm_path=$3
+mkdir_path=$4
+workspace=$5
+exclude_rules=$6
+user_command=$7
 
 command_status=0
-"$bwrap_path" \
-  --die-with-parent \
-  --ro-bind / / \
-  --dev-bind /dev /dev \
-  --proc /proc \
-  --tmpfs /tmp \
-  --bind "$workspace" "$workspace" \
-  --unshare-pid \
-  --cap-drop ALL \
-  --chdir "$workspace" \
-  --setenv TMPDIR /tmp \
-  --json-status-fd 3 \
-  -- "$bash_path" -c "$user_command" </dev/null || command_status=$?
+"$bash_path" -c "$user_command" </dev/null || command_status=$?
 
-exec 3>&-
+git_dir="$workspace/.git"
+transaction_dir="$workspace/.git/phenix-transaction"
+snapshot="$workspace/.git/phenix-transaction/snapshot"
+excludes="$workspace/.git/phenix-transaction/excludes"
+result_status="$workspace/.git/phenix-transaction/result-status"
 
-command_started=0
-while IFS= read -r status_line; do
-  case "$status_line" in
-    *'"exit-code"'*) command_started=1 ;;
-  esac
-done < "$inner_status"
-
-if [ "$command_started" -ne 1 ]; then
-  exit "$command_status"
-fi
+"$rm_path" -rf -- "$git_dir" || exit $?
+"$mkdir_path" -p -- "$snapshot" || exit $?
+printf '%s' "$exclude_rules" > "$excludes" || exit $?
 
 "$rsync_path" \
   -rlpt \
@@ -108,39 +88,26 @@ impl WorkspaceTransaction {
         command: &str,
     ) -> Result<TransactionOutput, TransactionError> {
         let bwrap = std::env::var_os("PHENIX_BWRAP").unwrap_or_else(|| OsString::from("bwrap"));
+        let rm = std::env::var_os("PHENIX_RM").unwrap_or_else(|| OsString::from("rm"));
+        let mkdir = std::env::var_os("PHENIX_MKDIR").unwrap_or_else(|| OsString::from("mkdir"));
+        let exclude_rules =
+            fs::read_to_string(&self.paths.excludes).map_err(|source| TransactionError::Io {
+                path: self.paths.excludes.clone(),
+                source,
+            })?;
         let output = self
             .sandbox_command(&bwrap, &self.paths.command_work)
-            .arg("--uid")
-            .arg("0")
-            .arg("--gid")
-            .arg("0")
-            .arg("--cap-add")
-            .arg("ALL")
-            .arg("--bind")
-            .arg(&self.paths.snapshot)
-            .arg(SANDBOX_SNAPSHOT)
-            .arg("--ro-bind")
-            .arg(&self.paths.excludes)
-            .arg(SANDBOX_EXCLUDES)
-            .arg("--bind")
-            .arg(&self.paths.inner_status)
-            .arg(SANDBOX_INNER_STATUS)
-            .arg("--bind")
-            .arg(&self.paths.result_status)
-            .arg(SANDBOX_RESULT_STATUS)
             .arg("--")
             .arg(bash)
             .arg("-c")
             .arg(COMMAND_SCRIPT)
             .arg("phenix-transaction")
-            .arg(&bwrap)
             .arg(bash)
             .arg(&self.rsync)
+            .arg(&rm)
+            .arg(&mkdir)
             .arg(self.consistency.root())
-            .arg(SANDBOX_SNAPSHOT)
-            .arg(SANDBOX_EXCLUDES)
-            .arg(SANDBOX_INNER_STATUS)
-            .arg(SANDBOX_RESULT_STATUS)
+            .arg(exclude_rules)
             .arg(command)
             .output()
             .map_err(|source| TransactionError::Spawn {
@@ -154,17 +121,17 @@ impl WorkspaceTransaction {
             });
         }
 
-        let status = fs::read_to_string(&self.paths.result_status).map_err(|source| {
-            TransactionError::Io {
-                path: self.paths.result_status.clone(),
+        let result_status = self.paths.result_status();
+        let status =
+            fs::read_to_string(&result_status).map_err(|source| TransactionError::Io {
+                path: result_status.clone(),
                 source,
-            }
-        })?;
+            })?;
         let exit_code = match status.trim().parse::<i32>() {
             Ok(code) if (0..=255).contains(&code) => code,
             _ => {
                 return Err(TransactionError::InvalidSandboxStatus {
-                    path: self.paths.result_status.clone(),
+                    path: result_status,
                     value: status,
                 });
             }
@@ -178,7 +145,8 @@ impl WorkspaceTransaction {
     }
 
     pub fn commit(&self) -> Result<(), TransactionError> {
-        let snapshot_manifest = self.consistency.snapshot_manifest(&self.paths.snapshot)?;
+        let snapshot = self.paths.snapshot();
+        let snapshot_manifest = self.consistency.snapshot_manifest(&snapshot)?;
         self.consistency
             .validate_checkpoint_baseline(&self.baseline)?;
 
@@ -190,7 +158,7 @@ impl WorkspaceTransaction {
             .arg("--quiet")
             .arg("--exclude-from")
             .arg(&self.paths.excludes)
-            .arg(self.paths.snapshot.join("."))
+            .arg(snapshot.join("."))
             .arg(self.consistency.root())
             .output()
             .map_err(|source| TransactionError::Spawn {
@@ -249,10 +217,7 @@ struct TransactionPaths {
     root: PathBuf,
     upper: PathBuf,
     command_work: PathBuf,
-    snapshot: PathBuf,
     excludes: PathBuf,
-    inner_status: PathBuf,
-    result_status: PathBuf,
 }
 
 impl TransactionPaths {
@@ -281,17 +246,8 @@ impl TransactionPaths {
                 Ok(()) => {
                     let upper = root.join("upper");
                     let command_work = root.join("command-work");
-                    let snapshot = root.join("snapshot");
-                    for path in [&upper, &command_work, &snapshot] {
+                    for path in [&upper, &command_work] {
                         fs::create_dir(path).map_err(|source| TransactionError::Io {
-                            path: path.clone(),
-                            source,
-                        })?;
-                    }
-                    let inner_status = root.join("inner-status");
-                    let result_status = root.join("result-status");
-                    for path in [&inner_status, &result_status] {
-                        fs::write(path, b"").map_err(|source| TransactionError::Io {
                             path: path.clone(),
                             source,
                         })?;
@@ -301,9 +257,6 @@ impl TransactionPaths {
                         root,
                         upper,
                         command_work,
-                        snapshot,
-                        inner_status,
-                        result_status,
                     });
                 }
                 Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -311,6 +264,14 @@ impl TransactionPaths {
             }
         }
         Err(TransactionError::CreateTempExhausted(canonical_parent))
+    }
+
+    fn snapshot(&self) -> PathBuf {
+        self.upper.join(SANDBOX_SNAPSHOT_RELATIVE)
+    }
+
+    fn result_status(&self) -> PathBuf {
+        self.upper.join(SANDBOX_RESULT_STATUS_RELATIVE)
     }
 
     fn write_excludes(
@@ -534,18 +495,19 @@ mod tests {
         let output = transaction
             .execute(
                 &bash(),
-                "printf tamper > /tmp/phenix-transaction-result-status; printf tamper > /tmp/phenix-transaction-inner-status; test ! -e /tmp/phenix-transaction-snapshot; test ! -e /tmp/phenix-transaction-excludes; printf new > source.txt",
+                "rm -rf .git; mkdir -p .git/phenix-transaction/snapshot; printf tamper > .git/phenix-transaction/snapshot/source.txt; printf 99 > .git/phenix-transaction/result-status; printf new > source.txt",
             )
             .unwrap();
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(
-            fs::read_to_string(&transaction.paths.result_status).unwrap(),
+            fs::read_to_string(transaction.paths.result_status()).unwrap(),
             "0\n"
         );
-        assert!(fs::read_to_string(&transaction.paths.inner_status)
-            .unwrap()
-            .contains("\"exit-code\""));
+        assert_eq!(
+            fs::read_to_string(transaction.paths.snapshot().join("source.txt")).unwrap(),
+            "new"
+        );
         transaction.commit().unwrap();
         assert_eq!(
             fs::read_to_string(fixture.root.join("source.txt")).unwrap(),
