@@ -375,12 +375,25 @@
                   stepName = "Unit tests";
                 };
                 runtimeInputs = pkgs: [
+                  pkgs.bubblewrap
                   pkgs.cargo
+                  pkgs.coreutils
                   pkgs.git
+                  pkgs.rsync
                   pkgs.rustc
                 ];
                 exec = ''
                   ${rustRoot}
+
+                  # GitHub's Ubuntu 24.04 runner restricts unprivileged user namespaces
+                  # with AppArmor. Bubblewrap requires one when it is not running as root.
+                  if [ "''${GITHUB_ACTIONS:-}" = "true" ] \
+                    && [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] \
+                    && [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = "1" ]; then
+                    /usr/bin/sudo -n /usr/sbin/sysctl \
+                      -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null
+                  fi
+
                   cargo test --workspace --lib --bins --locked
                 '';
               };
@@ -482,6 +495,7 @@
         name = "phenix-acp-dev";
         packages = [
           pkgs.actionlint
+          pkgs.bubblewrap
           pkgs.cargo
           pkgs.clippy
           pkgs.git
@@ -489,6 +503,7 @@
           pkgs.lua-language-server
           pkgs.nixd
           pkgs.nixfmt
+          pkgs.rsync
           pkgs.rust-analyzer
           pkgs.rustc
           pkgs.rustfmt

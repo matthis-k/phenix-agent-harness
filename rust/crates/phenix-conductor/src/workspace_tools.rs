@@ -1,3 +1,5 @@
+mod transaction;
+
 use super::workspace_consistency::WorkspaceConsistency;
 use crate::{ConductorError, ConductorRuntime, ToolOutcome};
 use phenix_core::{
@@ -11,6 +13,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use transaction::WorkspaceTransaction;
 
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 const DEFAULT_READ_LINES: usize = 400;
@@ -62,12 +65,12 @@ pub(super) fn register(
 ) -> Result<(), ConductorError> {
     let root = consistency.root().to_path_buf();
 
-    let bash_workspace = root.clone();
+    let bash_consistency = consistency.clone();
     runtime.register_tool(
         tool_descriptor(
             "bash",
             format!(
-                "Execute a Bash command in the current Phenix workspace ({}). This tool requires filesystem write authority until shell writes are isolated by the workspace sandbox.",
+                "Execute a Bash command in the current Phenix workspace ({}). Protected workspace writes run in a disposable overlay and are applied only if the complete pre-command protected manifest is unchanged. Git metadata stays disposable and configured scratch roots remain directly writable.",
                 root.display()
             ),
             json!({
@@ -93,7 +96,7 @@ pub(super) fn register(
             }),
             FilesystemAuthority::Write,
         ),
-        move |arguments| execute_bash(&bash_workspace, arguments),
+        move |arguments| execute_bash(&bash_consistency, arguments),
     )?;
 
     let read_consistency = consistency.clone();
@@ -340,7 +343,7 @@ fn nullable_file_version_schema() -> Value {
     })
 }
 
-fn execute_bash(workspace: &Path, arguments: &str) -> Result<String, String> {
+fn execute_bash(consistency: &WorkspaceConsistency, arguments: &str) -> Result<String, String> {
     let input: BashInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid bash arguments: {error}"))?;
     if input.command.trim().is_empty() {
@@ -348,15 +351,15 @@ fn execute_bash(workspace: &Path, arguments: &str) -> Result<String, String> {
     }
 
     let bash = std::env::var_os("PHENIX_BASH").unwrap_or_else(|| OsString::from("bash"));
-    let output = Command::new(bash)
-        .arg("-c")
-        .arg(input.command)
-        .current_dir(workspace)
-        .output()
-        .map_err(|error| format!("failed to execute bash: {error}"))?;
+    let transaction =
+        WorkspaceTransaction::begin(consistency.clone()).map_err(|error| error.to_string())?;
+    let output = transaction
+        .execute(&bash, &input.command)
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
 
     Ok(json!({
-        "exit_code": output.status.code().unwrap_or(-1),
+        "exit_code": output.exit_code,
         "stdout": capture(&output.stdout),
         "stderr": capture(&output.stderr),
     })
@@ -749,33 +752,38 @@ mod tests {
     }
 
     #[test]
-    fn bash_executes_in_the_bound_workspace() {
+    fn bash_executes_transactionally_in_the_bound_workspace() {
         let workspace = temp_workspace("bash-tool");
         fs::write(workspace.join("marker.txt"), "workspace-marker").unwrap();
+        let consistency = consistency(&workspace, BTreeSet::new());
 
         let output = execute_bash(
-            &workspace,
-            r#"{"command":"printf '%s\\n' \"$(cat marker.txt)\" \"$PWD\""}"#,
+            &consistency,
+            r#"{"command":"printf '%s\\n' \"$(cat marker.txt)\" \"$PWD\"; printf changed > marker.txt"}"#,
         )
         .unwrap();
         let output: Value = serde_json::from_str(&output).unwrap();
         let stdout = output["stdout"].as_str().unwrap();
         assert!(stdout.contains("workspace-marker"));
         assert!(stdout.contains(workspace.to_string_lossy().as_ref()));
+        assert_eq!(
+            fs::read_to_string(workspace.join("marker.txt")).unwrap(),
+            "changed"
+        );
 
         let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]
     fn nonzero_exit_is_reported_without_failing_the_tool_call() {
-        let output = execute_bash(
-            Path::new("."),
-            r#"{"command":"printf failure >&2; exit 7"}"#,
-        )
-        .unwrap();
+        let workspace = temp_workspace("bash-nonzero");
+        let consistency = consistency(&workspace, BTreeSet::new());
+        let output =
+            execute_bash(&consistency, r#"{"command":"printf failure >&2; exit 7"}"#).unwrap();
         let output: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(output["exit_code"], 7);
         assert_eq!(output["stderr"], "failure");
+        let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]
