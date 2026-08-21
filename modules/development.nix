@@ -375,8 +375,10 @@
                   stepName = "Unit tests";
                 };
                 runtimeInputs = pkgs: [
+                  pkgs.bubblewrap
                   pkgs.cargo
                   pkgs.git
+                  pkgs.rsync
                   pkgs.rustc
                 ];
                 exec = ''
@@ -482,6 +484,7 @@
         name = "phenix-acp-dev";
         packages = [
           pkgs.actionlint
+          pkgs.bubblewrap
           pkgs.cargo
           pkgs.clippy
           pkgs.git
@@ -489,6 +492,7 @@
           pkgs.lua-language-server
           pkgs.nixd
           pkgs.nixfmt
+          pkgs.rsync
           pkgs.rust-analyzer
           pkgs.rustc
           pkgs.rustfmt
