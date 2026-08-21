@@ -34,8 +34,8 @@ use phenix_backend::{
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, ConfigRevisionId, ExecutionEvent,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
-    ExecutionTarget, ModelTarget, OrchestrationDefinition, RoutingProfile, SessionId, SessionState,
-    SessionSummary, SkillDescriptor, SkillId, ToolCallId,
+    ExecutionTarget, ModelTarget, OrchestrationDefinition, OrchestrationNodeId, RoutingProfile,
+    SessionId, SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -198,6 +198,7 @@ pub struct ConductorRuntime {
     config_revision: ConfigRevisionId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
+    orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
     resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
     events: Vec<ExecutionEvent>,
     journal: RuntimeJournal,
@@ -228,6 +229,7 @@ impl ConductorRuntime {
             config_revision,
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
+            orchestration_nodes: BTreeMap::new(),
             resolved_routes: BTreeMap::new(),
             events: Vec::new(),
             callables: CallableRegistry::default(),
@@ -260,6 +262,7 @@ impl ConductorRuntime {
                 config_revision: &self.config_revision,
                 sessions: &mut self.sessions,
                 executions: &mut self.executions,
+                orchestration_nodes: &mut self.orchestration_nodes,
                 resolved_routes: &mut self.resolved_routes,
                 events: &mut self.events,
                 next_session: &mut self.next_session,
@@ -525,6 +528,16 @@ impl ConductorRuntime {
         callable: &CallableId,
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
+        self.start_agent_with_node(parent_id, callable, objective, None)
+    }
+
+    fn start_agent_with_node(
+        &mut self,
+        parent_id: &ExecutionId,
+        callable: &CallableId,
+        objective: impl Into<String>,
+        orchestration_node: Option<OrchestrationNodeId>,
+    ) -> Result<ExecutionSummary, ConductorError> {
         let descriptor = self.callables.descriptor(callable)?.clone();
         if descriptor.kind != CallableKind::Agent {
             return Err(CallableRegistryError::WrongKind {
@@ -535,15 +548,28 @@ impl ConductorRuntime {
             .into());
         }
         self.callables.execution_provider(callable)?;
-        self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgent)?;
-        self.create_child(
+        let operation = if orchestration_node.is_some() {
+            CallableOperation::StartAgentNode
+        } else {
+            CallableOperation::StartAgent
+        };
+        self.check_callable_policy(parent_id, &descriptor, operation)?;
+        let child = self.create_child(
             parent_id,
             ExecutionKind::Agent,
             callable.clone(),
             ExecutionPayload::Invocation {
                 input: objective.into(),
             },
-        )
+        )?;
+        if let Some(node_id) = orchestration_node {
+            self.record_domain_event(DomainEvent::OrchestrationNodeStarted {
+                execution_id: parent_id.clone(),
+                node_id,
+                child_execution_id: child.id.clone(),
+            })?;
+        }
+        Ok(child)
     }
 
     pub fn start_orchestration(
@@ -958,23 +984,16 @@ impl ConductorRuntime {
             self.set_state(execution_id, ExecutionState::Interrupted)?;
             return Ok(());
         }
-        if states.iter().any(|state| !is_terminal(state)) {
-            return Ok(());
-        }
         self.advance_orchestration(execution_id)
     }
 
     fn advance_orchestration(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
-        let (callable, objective, next_node, state) = {
+        let (callable, objective, state) = {
             let execution = self
                 .executions
                 .get(execution_id)
                 .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-            let ExecutionPayload::Orchestration {
-                objective,
-                next_node,
-            } = &execution.payload
-            else {
+            let ExecutionPayload::Orchestration { objective, .. } = &execution.payload else {
                 return Err(ConductorError::NonModelExecution(execution_id.clone()));
             };
             (
@@ -984,7 +1003,6 @@ impl ConductorRuntime {
                     .clone()
                     .expect("orchestration execution has callable"),
                 objective.clone(),
-                *next_node,
                 execution.summary.state.clone(),
             )
         };
@@ -992,27 +1010,55 @@ impl ConductorRuntime {
             return Ok(());
         }
         let definition = self.callables.orchestration(&callable)?.clone();
-        if next_node >= definition.nodes.len() {
-            self.set_state(execution_id, ExecutionState::Completed)?;
+        let node_states = self
+            .executions
+            .values()
+            .filter(|record| record.summary.parent_execution.as_ref() == Some(execution_id))
+            .filter_map(|record| {
+                self.orchestration_nodes
+                    .get(&record.summary.id)
+                    .map(|node_id| (node_id.clone(), record.summary.state.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let ready = definition
+            .nodes
+            .iter()
+            .filter(|node| {
+                !node_states.contains_key(&node.id)
+                    && node.depends_on.iter().all(|dependency| {
+                        node_states.get(dependency) == Some(&ExecutionState::Completed)
+                    })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if !ready.is_empty() {
+            for node in ready {
+                let node_objective = match node.objective {
+                    Some(node_objective) => {
+                        format!(
+                            "{node_objective}\n\nOrchestration objective:\n{objective}"
+                        )
+                    }
+                    None => objective.clone(),
+                };
+                self.start_agent_with_node(
+                    execution_id,
+                    &node.callable,
+                    node_objective,
+                    Some(node.id),
+                )?;
+            }
             return Ok(());
         }
-        let step = definition.nodes[next_node].clone();
-        let objective = match step.objective {
-            Some(step_objective) => {
-                format!(
-                    "{step_objective}
 
-Orchestration objective:
-{objective}"
-                )
-            }
-            None => objective,
-        };
-        self.start_agent(execution_id, &step.callable, objective)?;
-        self.record_domain_event(DomainEvent::OrchestrationAdvanced {
-            execution_id: execution_id.clone(),
-            next_node: next_node + 1,
-        })?;
+        if node_states.len() == definition.nodes.len()
+            && node_states
+                .values()
+                .all(|state| *state == ExecutionState::Completed)
+        {
+            self.set_state(execution_id, ExecutionState::Completed)?;
+        }
         Ok(())
     }
 
