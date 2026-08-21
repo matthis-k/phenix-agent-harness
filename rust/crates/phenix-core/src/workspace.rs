@@ -164,7 +164,9 @@ impl ExecutionReadSet {
     }
 
     pub fn observe(&mut self, observation: FileObservation) {
-        self.files.insert(observation.path, observation.version);
+        self.files
+            .entry(observation.path)
+            .or_insert(observation.version);
     }
 
     #[must_use]
@@ -196,6 +198,7 @@ pub struct WorkspaceConflict {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn callable(id: &str) -> CallableId {
         CallableId::parse(id).unwrap()
@@ -259,6 +262,33 @@ mod tests {
         assert!(FilesystemAuthority::ReadOnly.permits_capabilities(&read));
         assert!(!FilesystemAuthority::ReadOnly.permits_capabilities(&write));
         assert!(FilesystemAuthority::Write.permits_capabilities(&write));
+    }
+
+    #[test]
+    fn read_set_keeps_the_first_observed_version() {
+        let mut reads = ExecutionReadSet::new(ExecutionId::parse("execution-1").unwrap());
+        reads.observe(FileObservation {
+            path: PathBuf::from("src/lib.rs"),
+            version: FileVersion::Present {
+                content_hash: "v1".to_owned(),
+                kind: FileKind::Regular,
+            },
+        });
+        reads.observe(FileObservation {
+            path: PathBuf::from("src/lib.rs"),
+            version: FileVersion::Present {
+                content_hash: "v2".to_owned(),
+                kind: FileKind::Regular,
+            },
+        });
+
+        assert_eq!(
+            reads.files[Path::new("src/lib.rs")],
+            FileVersion::Present {
+                content_hash: "v1".to_owned(),
+                kind: FileKind::Regular,
+            }
+        );
     }
 
     #[test]

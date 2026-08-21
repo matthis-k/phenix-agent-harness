@@ -6,14 +6,61 @@ use crate::{
 use phenix_backend::ToolResult;
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, OrchestrationDefinition, OrchestrationNodeId, SessionId,
+    ExecutionState, ExecutionSummary, FileObservation, OrchestrationDefinition,
+    OrchestrationNodeId, SessionId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
 
-type ToolHandler = dyn Fn(&str) -> Result<String, String> + Send + Sync;
+type ToolHandler = dyn Fn(&str) -> Result<ToolOutcome, String> + Send + Sync;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolOutcome {
+    pub output: String,
+    pub success: bool,
+    pub file_observations: Vec<FileObservation>,
+}
+
+impl ToolOutcome {
+    #[must_use]
+    pub fn success(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            success: true,
+            file_observations: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_file_observation(mut self, observation: FileObservation) -> Self {
+        self.file_observations.push(observation);
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn into_backend_result(self) -> ToolResult {
+        ToolResult {
+            output: self.output,
+            success: self.success,
+        }
+    }
+
+    fn failure(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            success: false,
+            file_observations: Vec::new(),
+        }
+    }
+}
+
+impl From<String> for ToolOutcome {
+    fn from(output: String) -> Self {
+        Self::success(output)
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CallableRegistryError {
@@ -130,14 +177,16 @@ impl Debug for CallableRegistry {
 }
 
 impl CallableRegistry {
-    pub fn register_tool<F>(
+    pub fn register_tool<F, O>(
         &mut self,
         descriptor: CallableDescriptor,
         handler: F,
     ) -> Result<(), CallableRegistryError>
     where
-        F: Fn(&str) -> Result<String, String> + Send + Sync + 'static,
+        F: Fn(&str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
     {
+        let handler = move |arguments: &str| handler(arguments).map(Into::into);
         self.register(
             descriptor,
             CallableKind::Tool,
@@ -379,7 +428,7 @@ impl CallableRegistry {
         &self,
         id: &CallableId,
         arguments_json: &str,
-    ) -> Result<ToolResult, CallableRegistryError> {
+    ) -> Result<ToolOutcome, CallableRegistryError> {
         let entry = self
             .entries
             .get(id)
@@ -392,14 +441,8 @@ impl CallableRegistry {
             });
         };
         Ok(match handler(arguments_json) {
-            Ok(output) => ToolResult {
-                output,
-                success: true,
-            },
-            Err(output) => ToolResult {
-                output,
-                success: false,
-            },
+            Ok(outcome) => outcome,
+            Err(output) => ToolOutcome::failure(output),
         })
     }
 }

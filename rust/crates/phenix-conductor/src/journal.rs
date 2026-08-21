@@ -1,8 +1,9 @@
 use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
 use phenix_core::{
     ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
-    ExecutionKind, ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget,
-    OrchestrationNodeId, SessionId, SessionState, SessionSummary, ToolCallId,
+    ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
+    FileObservation, ModelTarget, OrchestrationNodeId, SessionId, SessionState, SessionSummary,
+    ToolCallId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -129,6 +130,10 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         route: ResolvedRoute,
     },
+    WorkspaceFileObserved {
+        execution_id: ExecutionId,
+        observation: FileObservation,
+    },
     FrontendEvent {
         event: ExecutionEvent,
     },
@@ -209,6 +214,7 @@ pub(crate) struct DurableProjection<'a> {
     pub executions: &'a mut BTreeMap<ExecutionId, ExecutionRecord>,
     pub orchestration_nodes: &'a mut BTreeMap<ExecutionId, OrchestrationNodeId>,
     pub resolved_routes: &'a mut BTreeMap<ExecutionId, ResolvedRoute>,
+    pub read_sets: &'a mut BTreeMap<ExecutionId, ExecutionReadSet>,
     pub events: &'a mut Vec<ExecutionEvent>,
     pub next_session: &'a mut u64,
     pub next_execution: &'a mut u64,
@@ -603,6 +609,26 @@ pub(crate) fn apply_domain_event(
                     )));
                 }
             }
+        }
+        DomainEvent::WorkspaceFileObserved {
+            execution_id,
+            observation,
+        } => {
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "workspace observation references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.state != ExecutionState::Running {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace observation references non-running execution {execution_id}"
+                )));
+            }
+            state
+                .read_sets
+                .entry(execution_id.clone())
+                .or_insert_with(|| ExecutionReadSet::new(execution_id.clone()))
+                .observe(observation.clone());
         }
         DomainEvent::FrontendEvent { event } => {
             let expected = *state.next_event + 1;

@@ -1,5 +1,5 @@
 use crate::workspace_consistency::{WorkspaceConsistency, WorkspaceConsistencyError};
-use phenix_conductor::{ConductorError, ConductorRuntime};
+use phenix_conductor::{ConductorError, ConductorRuntime, ToolOutcome};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, FileVersion,
     FilesystemAuthority, WorkspaceDescriptor, CAPABILITY_FILESYSTEM_READ,
@@ -403,7 +403,10 @@ fn execute_bash(workspace: &Path, arguments: &str) -> Result<String, String> {
     .to_string())
 }
 
-fn execute_read(consistency: &WorkspaceConsistency, arguments: &str) -> Result<String, String> {
+fn execute_read(
+    consistency: &WorkspaceConsistency,
+    arguments: &str,
+) -> Result<ToolOutcome, String> {
     let input: ReadInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid read arguments: {error}"))?;
     let offset = input.offset.unwrap_or(1);
@@ -432,7 +435,7 @@ fn execute_read(consistency: &WorkspaceConsistency, arguments: &str) -> Result<S
         .as_ref()
         .map(|observation| &observation.version);
 
-    Ok(json!({
+    let output = json!({
         "path": read.path.to_string_lossy().into_owned(),
         "content": selected,
         "start_line": (returned_lines > 0).then_some(start_index + 1),
@@ -441,7 +444,12 @@ fn execute_read(consistency: &WorkspaceConsistency, arguments: &str) -> Result<S
         "truncated": end_index < total_lines,
         "version": version,
     })
-    .to_string())
+    .to_string();
+    let mut outcome = ToolOutcome::success(output);
+    if let Some(observation) = read.observation {
+        outcome = outcome.with_file_observation(observation);
+    }
+    Ok(outcome)
 }
 
 fn execute_write(consistency: &WorkspaceConsistency, arguments: &str) -> Result<String, String> {
@@ -829,7 +837,8 @@ mod tests {
             r#"{"path":"nested/example.txt","offset":2,"limit":1}"#,
         )
         .unwrap();
-        let read: Value = serde_json::from_str(&read).unwrap();
+        assert_eq!(read.file_observations.len(), 1);
+        let read: Value = serde_json::from_str(&read.output).unwrap();
         assert_eq!(read["content"], "two\n");
         assert_eq!(read["start_line"], 2);
         assert_eq!(read["end_line"], 2);
@@ -845,9 +854,8 @@ mod tests {
         let workspace = temp_workspace("stale-write");
         fs::write(workspace.join("example.txt"), "v1").unwrap();
         let consistency = consistency(&workspace, BTreeSet::new());
-        let read: Value =
-            serde_json::from_str(&execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap())
-                .unwrap();
+        let read = execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap();
+        let read: Value = serde_json::from_str(&read.output).unwrap();
         fs::write(workspace.join("example.txt"), "external-v2").unwrap();
 
         let arguments = json!({
@@ -898,9 +906,8 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("matched 2 occurrences"));
 
-        let read: Value =
-            serde_json::from_str(&execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap())
-                .unwrap();
+        let read = execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap();
+        let read: Value = serde_json::from_str(&read.output).unwrap();
         let arguments = json!({
             "path": "example.txt",
             "old_text": "alpha",
