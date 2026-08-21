@@ -143,6 +143,14 @@ impl ConductorRuntime {
                 .map_err(|error| PersistenceError::InvalidJournal(error.to_string()))?;
         }
 
+        if let Some(workspace_id) = runtime
+            .sessions
+            .values()
+            .next()
+            .map(|session| session.summary.workspace_id.clone())
+        {
+            runtime.workspace_id = workspace_id;
+        }
         runtime.journal = journal;
         Ok(runtime)
     }
@@ -156,7 +164,7 @@ mod tests {
         BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
         ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
         OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
-        RoutingProfile, RoutingProfileId, SessionId,
+        RoutingProfile, RoutingProfileId, SessionId, WorkspaceId,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -284,6 +292,38 @@ mod tests {
         let resumed_events = restored.events_since(cursor);
         assert!(!resumed_events.is_empty());
         assert_eq!(resumed_events[0].sequence, cursor + 1);
+    }
+
+    #[test]
+    fn replay_preserves_workspace_binding_and_rejects_mixed_workspaces() {
+        let mut runtime = ConductorRuntime::new();
+        let workspace = WorkspaceId::parse("workspace:/repo").unwrap();
+        runtime.bind_workspace(workspace.clone()).unwrap();
+        runtime.create_session(None, None, fixed()).unwrap();
+        runtime.create_session(None, None, fixed()).unwrap();
+
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert!(restored
+            .snapshot()
+            .sessions
+            .iter()
+            .all(|session| session.workspace_id == workspace));
+
+        let mut corrupted = runtime.journal().clone();
+        let session = corrupted
+            .entries
+            .iter_mut()
+            .filter_map(|entry| match &mut entry.event {
+                DomainEvent::SessionCreated { session } => Some(session),
+                _ => None,
+            })
+            .nth(1)
+            .unwrap();
+        session.workspace_id = WorkspaceId::parse("workspace:/other").unwrap();
+        assert!(matches!(
+            ConductorRuntime::restore(corrupted),
+            Err(PersistenceError::InvalidJournal(_))
+        ));
     }
 
     #[test]

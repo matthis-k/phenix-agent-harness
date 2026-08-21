@@ -34,6 +34,11 @@ impl Workspace {
     pub fn root(&self) -> &Path {
         &self.descriptor.root
     }
+
+    #[must_use]
+    pub fn id(&self) -> &WorkspaceId {
+        &self.descriptor.id
+    }
 }
 
 #[derive(Debug)]

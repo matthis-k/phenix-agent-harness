@@ -64,8 +64,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let workspace = workspace::Workspace::discover(&cwd)?;
     let mut server = match arguments.state {
-        Some(path) => ConductorServer::load_or_new(JsonFileStore::new(path))?,
-        None => ConductorServer::new(ConductorRuntime::new()),
+        Some(path) => {
+            ConductorServer::load_or_new(JsonFileStore::new(path), workspace.id().clone())?
+        }
+        None => {
+            let mut runtime = ConductorRuntime::new();
+            runtime.bind_workspace(workspace.id().clone())?;
+            ConductorServer::new(runtime)
+        }
     };
 
     {

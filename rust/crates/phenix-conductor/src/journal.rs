@@ -335,10 +335,23 @@ pub(crate) fn apply_domain_event(
                 )));
             }
             if let Some(parent) = &session.parent_session {
-                if !state.sessions.contains_key(parent) {
-                    return Err(JournalError::InvalidEvent(format!(
+                let parent = state.sessions.get(parent).ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
                         "session {} references unknown parent {parent}",
                         session.id
+                    ))
+                })?;
+                if parent.summary.workspace_id != session.workspace_id {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "session {} workspace {} does not match parent workspace {}",
+                        session.id, session.workspace_id, parent.summary.workspace_id
+                    )));
+                }
+            } else if let Some(existing) = state.sessions.values().next() {
+                if existing.summary.workspace_id != session.workspace_id {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "root session {} workspace {} does not match runtime workspace {}",
+                        session.id, session.workspace_id, existing.summary.workspace_id
                     )));
                 }
             }
