@@ -1,8 +1,8 @@
 use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
 use phenix_core::{
     ConfigRevisionId, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, SessionId, SessionState,
-    SessionSummary, ToolCallId,
+    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, OrchestrationNodeId, SessionId,
+    SessionState, SessionSummary, ToolCallId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -93,6 +93,11 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         next_node: usize,
     },
+    OrchestrationNodeStarted {
+        execution_id: ExecutionId,
+        node_id: OrchestrationNodeId,
+        child_execution_id: ExecutionId,
+    },
     InvocationResolved {
         execution_id: ExecutionId,
         route: ResolvedRoute,
@@ -175,6 +180,7 @@ pub(crate) struct DurableProjection<'a> {
     pub config_revision: &'a ConfigRevisionId,
     pub sessions: &'a mut BTreeMap<SessionId, SessionRecord>,
     pub executions: &'a mut BTreeMap<ExecutionId, ExecutionRecord>,
+    pub orchestration_nodes: &'a mut BTreeMap<ExecutionId, OrchestrationNodeId>,
     pub resolved_routes: &'a mut BTreeMap<ExecutionId, ResolvedRoute>,
     pub events: &'a mut Vec<ExecutionEvent>,
     pub next_session: &'a mut u64,
@@ -455,6 +461,58 @@ pub(crate) fn apply_domain_event(
                 )));
             }
             *current = *next_node;
+        }
+        DomainEvent::OrchestrationNodeStarted {
+            execution_id,
+            node_id,
+            child_execution_id,
+        } => {
+            let orchestration = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "orchestration node references unknown execution {execution_id}"
+                ))
+            })?;
+            if orchestration.summary.kind != ExecutionKind::Orchestration {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration node references non-orchestration execution {execution_id}"
+                )));
+            }
+            let child = state.executions.get(child_execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "orchestration node {node_id} references unknown child {child_execution_id}"
+                ))
+            })?;
+            if child.summary.parent_execution.as_ref() != Some(execution_id) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration node {node_id} child {child_execution_id} has the wrong parent"
+                )));
+            }
+            if state
+                .orchestration_nodes
+                .iter()
+                .any(|(child_id, existing_node)| {
+                    existing_node == node_id
+                        && state
+                            .executions
+                            .get(child_id)
+                            .and_then(|execution| execution.summary.parent_execution.as_ref())
+                            == Some(execution_id)
+                })
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration {execution_id} started node {node_id} more than once"
+                )));
+            }
+            match state.orchestration_nodes.entry(child_execution_id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(node_id.clone());
+                }
+                Entry::Occupied(_) => {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "child execution {child_execution_id} was assigned to more than one orchestration node"
+                    )));
+                }
+            }
         }
         DomainEvent::InvocationResolved {
             execution_id,
