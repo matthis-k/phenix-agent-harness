@@ -2,13 +2,20 @@ use crate::{AttemptGroupId, CallableId, ExecutionId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AttemptFailureReport {
+    pub approach: String,
+    pub failure_at: String,
+    pub reason: String,
+    pub completed_work: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FailureAttemptSummary {
     pub execution_id: ExecutionId,
     pub attempt: u32,
     pub approach: String,
     pub failure_at: String,
     pub reason: String,
-    #[serde(default)]
     pub completed_work: Vec<String>,
 }
 
@@ -24,6 +31,7 @@ pub struct AttemptGroup {
     pub parent_execution: ExecutionId,
     pub callable: CallableId,
     pub goal: String,
+    pub attempts: Vec<ExecutionId>,
     pub failures: Vec<FailureAttemptSummary>,
 }
 
@@ -36,13 +44,19 @@ impl AttemptGroup {
         goal: impl Into<String>,
         first_failure: FailureAttemptSummary,
     ) -> Self {
+        let first_execution = first_failure.execution_id.clone();
         Self {
             id,
             parent_execution,
             callable,
             goal: goal.into(),
+            attempts: vec![first_execution],
             failures: vec![first_failure],
         }
+    }
+
+    pub fn record_retry(&mut self, execution_id: ExecutionId) {
+        self.attempts.push(execution_id);
     }
 
     pub fn record_failure(&mut self, failure: FailureAttemptSummary) {
@@ -51,9 +65,27 @@ impl AttemptGroup {
 
     #[must_use]
     pub fn next_attempt(&self) -> u32 {
-        self.failures
-            .last()
-            .map_or(1, |failure| failure.attempt.saturating_add(1))
+        u32::try_from(self.attempts.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(1)
+    }
+
+    #[must_use]
+    pub fn attempt_for_execution(&self, execution_id: &ExecutionId) -> Option<u32> {
+        self.attempts
+            .iter()
+            .position(|attempt| attempt == execution_id)
+            .and_then(|index| u32::try_from(index + 1).ok())
+    }
+
+    #[must_use]
+    pub fn latest_execution(&self) -> Option<&ExecutionId> {
+        self.attempts.last()
+    }
+
+    #[must_use]
+    pub fn contains_execution(&self, execution_id: &ExecutionId) -> bool {
+        self.attempts.contains(execution_id)
     }
 
     #[must_use]
@@ -81,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_group_keeps_one_goal_and_failure_timeline() {
+    fn retry_group_keeps_one_goal_and_attempt_timeline() {
         let mut group = AttemptGroup::from_first_failure(
             AttemptGroupId::parse("attempt-group-1").unwrap(),
             ExecutionId::parse("parent").unwrap(),
@@ -94,6 +126,8 @@ mod tests {
                 "duplicated auth authority",
             ),
         );
+        let second = ExecutionId::parse("attempt-2").unwrap();
+        group.record_retry(second.clone());
         group.record_failure(failure(
             "attempt-2",
             2,
@@ -106,6 +140,7 @@ mod tests {
         assert_eq!(context.failures.len(), 2);
         assert_eq!(context.failures[0].failure_at, "provider discovery");
         assert_eq!(context.failures[1].attempt, 2);
+        assert_eq!(group.attempt_for_execution(&second), Some(2));
         assert_eq!(group.next_attempt(), 3);
     }
 }

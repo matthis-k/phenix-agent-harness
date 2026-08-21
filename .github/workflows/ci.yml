@@ -124,6 +124,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-workflow-callables
 
+      - name: "conductor / durable_retries"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-durable-retries
+
       - name: "conductor / execution_provider_runtime"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"

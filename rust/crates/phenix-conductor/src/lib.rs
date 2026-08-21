@@ -32,12 +32,13 @@ use phenix_backend::{
     BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_core::{
-    AgentDefinition, CallableDescriptor, CallableId, CallableKind, ConfigRevisionId,
-    ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
-    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
-    OrchestrationNodeId, RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor,
-    SkillId, ToolCallId, WorkspaceId, WorkspaceLeaseRequest,
+    AgentDefinition, AttemptFailureReport, AttemptGroup, AttemptGroupId, CallableDescriptor,
+    CallableId, CallableKind, ConfigRevisionId, ExecutionAuthority, ExecutionEvent,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet, ExecutionState,
+    ExecutionSummary, ExecutionTarget, ExecutionWorkspaceValidity, FailureAttemptSummary,
+    FileObservation, FileVersion, ModelTarget, OrchestrationDefinition, OrchestrationNodeId,
+    RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId,
+    WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -58,6 +59,7 @@ pub enum ConductorError {
     },
     EmptyInput,
     InvalidLifecycle(ExecutionId),
+    InvalidRetry(ExecutionId),
     NonModelExecution(ExecutionId),
     NonProviderExecution(ExecutionId),
     PolicyDenied {
@@ -87,6 +89,7 @@ impl Display for ConductorError {
             ),
             Self::EmptyInput => f.write_str("input must not be empty"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
+            Self::InvalidRetry(id) => write!(f, "execution cannot be retried: {id}"),
             Self::NonModelExecution(id) => {
                 write!(f, "execution is not model-provider backed: {id}")
             }
@@ -211,6 +214,7 @@ pub struct ConductorRuntime {
     workspace_id: WorkspaceId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
+    attempt_groups: BTreeMap<AttemptGroupId, AttemptGroup>,
     orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
     resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
     read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
@@ -224,6 +228,7 @@ pub struct ConductorRuntime {
     event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
     next_session: u64,
     next_execution: u64,
+    next_attempt_group: u64,
     next_event: u64,
     next_tool_call: u64,
 }
@@ -245,6 +250,7 @@ impl ConductorRuntime {
             workspace_id,
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
+            attempt_groups: BTreeMap::new(),
             orchestration_nodes: BTreeMap::new(),
             resolved_routes: BTreeMap::new(),
             read_sets: BTreeMap::new(),
@@ -257,6 +263,7 @@ impl ConductorRuntime {
             event_sink: None,
             next_session: 0,
             next_execution: 0,
+            next_attempt_group: 0,
             next_event: 0,
             next_tool_call: 0,
         }
@@ -297,12 +304,14 @@ impl ConductorRuntime {
                 config_revision: &self.config_revision,
                 sessions: &mut self.sessions,
                 executions: &mut self.executions,
+                attempt_groups: &mut self.attempt_groups,
                 orchestration_nodes: &mut self.orchestration_nodes,
                 resolved_routes: &mut self.resolved_routes,
                 read_sets: &mut self.read_sets,
                 events: &mut self.events,
                 next_session: &mut self.next_session,
                 next_execution: &mut self.next_execution,
+                next_attempt_group: &mut self.next_attempt_group,
                 next_event: &mut self.next_event,
                 next_tool_call: &mut self.next_tool_call,
             };
@@ -465,6 +474,19 @@ impl ConductorRuntime {
                     .permits_capabilities(&descriptor.capabilities)
             })
             .collect())
+    }
+
+    #[must_use]
+    pub fn attempt_groups(&self) -> Vec<AttemptGroup> {
+        self.attempt_groups.values().cloned().collect()
+    }
+
+    #[must_use]
+    pub fn attempt_group_for_execution(&self, execution_id: &ExecutionId) -> Option<AttemptGroup> {
+        self.attempt_groups
+            .values()
+            .find(|group| group.contains_execution(execution_id))
+            .cloned()
     }
 
     pub fn execution_read_set(
@@ -759,6 +781,99 @@ impl ConductorRuntime {
             })?;
         }
         Ok(child)
+    }
+
+    pub fn retry_agent(
+        &mut self,
+        failed_execution_id: &ExecutionId,
+        report: AttemptFailureReport,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        let (parent_id, callable, original_goal) = {
+            let failed = self
+                .executions
+                .get(failed_execution_id)
+                .ok_or_else(|| ConductorError::UnknownExecution(failed_execution_id.clone()))?;
+            if failed.summary.kind != ExecutionKind::Agent
+                || failed.summary.state != ExecutionState::Failed
+            {
+                return Err(ConductorError::InvalidRetry(failed_execution_id.clone()));
+            }
+            let parent_id = failed
+                .summary
+                .parent_execution
+                .clone()
+                .ok_or_else(|| ConductorError::InvalidRetry(failed_execution_id.clone()))?;
+            let callable = failed
+                .summary
+                .callable
+                .clone()
+                .ok_or_else(|| ConductorError::InvalidRetry(failed_execution_id.clone()))?;
+            let ExecutionPayload::Invocation { input } = &failed.payload else {
+                return Err(ConductorError::InvalidRetry(failed_execution_id.clone()));
+            };
+            (parent_id, callable, input.clone())
+        };
+        let parent = self
+            .executions
+            .get(&parent_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?;
+        if is_terminal(&parent.summary.state) {
+            return Err(ConductorError::InvalidRetry(failed_execution_id.clone()));
+        }
+
+        let existing_group = self
+            .attempt_groups
+            .iter()
+            .find(|(_, group)| group.contains_execution(failed_execution_id))
+            .map(|(id, group)| (id.clone(), group.clone()));
+
+        let group_id = if let Some((group_id, group)) = existing_group {
+            if group.latest_execution() != Some(failed_execution_id) {
+                return Err(ConductorError::InvalidRetry(failed_execution_id.clone()));
+            }
+            if !group
+                .failures
+                .iter()
+                .any(|failure| failure.execution_id == *failed_execution_id)
+            {
+                let attempt = group
+                    .attempt_for_execution(failed_execution_id)
+                    .ok_or_else(|| ConductorError::InvalidRetry(failed_execution_id.clone()))?;
+                self.record_domain_event(DomainEvent::AttemptFailureRecorded {
+                    group_id: group_id.clone(),
+                    failure: failure_summary(failed_execution_id.clone(), attempt, &report),
+                })?;
+            }
+            group_id
+        } else {
+            let group_id = self.new_attempt_group_id();
+            let group = AttemptGroup::from_first_failure(
+                group_id.clone(),
+                parent_id.clone(),
+                callable.clone(),
+                original_goal,
+                failure_summary(failed_execution_id.clone(), 1, &report),
+            );
+            self.record_domain_event(DomainEvent::AttemptGroupCreated { group })?;
+            group_id
+        };
+
+        let context = self
+            .attempt_groups
+            .get(&group_id)
+            .expect("attempt group was recorded before retry")
+            .retry_context();
+        let serialized = serde_json::to_string(&context)
+            .expect("retry context contains only JSON-serializable values");
+        let retry_input = format!(
+            "Retry the same goal. Use only the compact failure context below; do not infer prior transcript content.\n\nRetry context JSON:\n{serialized}"
+        );
+        let retry = self.start_agent(&parent_id, &callable, retry_input)?;
+        self.record_domain_event(DomainEvent::AttemptRetryStarted {
+            group_id,
+            execution_id: retry.id.clone(),
+        })?;
+        Ok(retry)
     }
 
     pub fn start_orchestration(
@@ -1439,8 +1554,28 @@ impl ConductorRuntime {
         ExecutionId::parse(format!("execution-{}", self.next_execution + 1)).expect("generated id")
     }
 
+    fn new_attempt_group_id(&self) -> AttemptGroupId {
+        AttemptGroupId::parse(format!("attempt-group-{}", self.next_attempt_group + 1))
+            .expect("generated id")
+    }
+
     fn new_tool_call_id(&self) -> ToolCallId {
         ToolCallId::parse(format!("tool-call-{}", self.next_tool_call + 1)).expect("generated id")
+    }
+}
+
+fn failure_summary(
+    execution_id: ExecutionId,
+    attempt: u32,
+    report: &AttemptFailureReport,
+) -> FailureAttemptSummary {
+    FailureAttemptSummary {
+        execution_id,
+        attempt,
+        approach: report.approach.clone(),
+        failure_at: report.failure_at.clone(),
+        reason: report.reason.clone(),
+        completed_work: report.completed_work.clone(),
     }
 }
 
