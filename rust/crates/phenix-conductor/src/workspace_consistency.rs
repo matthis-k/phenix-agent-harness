@@ -1,7 +1,4 @@
-use phenix_core::{
-    ExecutionReadSet, FileKind, FileObservation, FileVersion, WorkspaceConflict,
-    WorkspaceDescriptor,
-};
+use phenix_core::{FileKind, FileObservation, FileVersion, WorkspaceConflict, WorkspaceDescriptor};
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -97,43 +94,6 @@ impl WorkspaceConsistency {
         })
     }
 
-    pub fn observe(
-        &self,
-        path: impl AsRef<Path>,
-    ) -> Result<Option<FileObservation>, WorkspaceConsistencyError> {
-        let relative = normalize_relative(path.as_ref())?;
-        let version = self.version_at(&relative)?;
-        if self.is_scratch(&relative) {
-            return Ok(None);
-        }
-        Ok(Some(FileObservation {
-            path: relative,
-            version,
-        }))
-    }
-
-    pub fn validate(
-        &self,
-        reads: &ExecutionReadSet,
-    ) -> Result<Vec<WorkspaceConflict>, WorkspaceConsistencyError> {
-        let mut conflicts = Vec::new();
-        for (path, expected) in &reads.files {
-            let relative = normalize_relative(path)?;
-            let actual = self.version_at(&relative)?;
-            if self.is_scratch(&relative) {
-                continue;
-            }
-            if actual != *expected {
-                conflicts.push(WorkspaceConflict {
-                    path: relative,
-                    expected: expected.clone(),
-                    actual,
-                });
-            }
-        }
-        Ok(conflicts)
-    }
-
     pub fn write_utf8(
         &self,
         path: impl AsRef<Path>,
@@ -187,11 +147,6 @@ impl WorkspaceConsistency {
             },
         };
         Ok(Some(observation))
-    }
-
-    #[must_use]
-    pub fn is_scratch_path(&self, path: &Path) -> bool {
-        self.is_scratch(path)
     }
 
     fn is_scratch(&self, relative: &Path) -> bool {
@@ -440,7 +395,7 @@ fn fingerprint(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{ExecutionId, WorkspaceId};
+    use phenix_core::WorkspaceId;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct Fixture {
@@ -496,20 +451,20 @@ mod tests {
     }
 
     #[test]
-    fn validation_is_scoped_to_observed_files() {
+    fn exact_versions_change_only_for_changed_files() {
         let fixture = Fixture::new();
         fs::write(fixture.root.join("a.rs"), "a1").unwrap();
         fs::write(fixture.root.join("b.rs"), "b1").unwrap();
         let guard = WorkspaceConsistency::new(&fixture.descriptor(BTreeSet::new())).unwrap();
-        let mut reads = ExecutionReadSet::new(ExecutionId::parse("execution-1").unwrap());
-        reads.observe(guard.observe("a.rs").unwrap().unwrap());
-        reads.observe(guard.observe("b.rs").unwrap().unwrap());
+        let a_before = guard.read_utf8("a.rs").unwrap().observation.unwrap();
+        let b_before = guard.read_utf8("b.rs").unwrap().observation.unwrap();
 
         fs::write(fixture.root.join("a.rs"), "a2").unwrap();
-        let conflicts = guard.validate(&reads).unwrap();
+        let a_after = guard.read_utf8("a.rs").unwrap().observation.unwrap();
+        let b_after = guard.read_utf8("b.rs").unwrap().observation.unwrap();
 
-        assert_eq!(conflicts.len(), 1);
-        assert_eq!(conflicts[0].path, PathBuf::from("a.rs"));
+        assert_ne!(a_before.version, a_after.version);
+        assert_eq!(b_before.version, b_after.version);
     }
 
     #[test]
@@ -538,7 +493,7 @@ mod tests {
         assert!(matches!(
             guard.write_utf8("new.rs", None, "new"),
             Err(WorkspaceConsistencyError::MissingExpectedVersion(path))
-                if path == PathBuf::from("new.rs")
+                if path == Path::new("new.rs")
         ));
     }
 
