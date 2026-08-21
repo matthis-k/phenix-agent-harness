@@ -39,7 +39,10 @@ fn target() -> ExecutionTarget {
     })
 }
 
-fn child_states(runtime: &ConductorRuntime, orchestration: &phenix_core::ExecutionId) -> Vec<(String, ExecutionState)> {
+fn child_states(
+    runtime: &ConductorRuntime,
+    orchestration: &phenix_core::ExecutionId,
+) -> Vec<(String, ExecutionState)> {
     let mut children = runtime
         .snapshot()
         .executions
@@ -48,7 +51,10 @@ fn child_states(runtime: &ConductorRuntime, orchestration: &phenix_core::Executi
         .filter(|execution| execution.kind == ExecutionKind::Agent)
         .map(|execution| {
             (
-                execution.callable.expect("agent child has callable").to_string(),
+                execution
+                    .callable
+                    .expect("agent child has callable")
+                    .to_string(),
                 execution.state,
             )
         })
@@ -101,10 +107,15 @@ fn dag_runtime_starts_all_ready_nodes_and_waits_for_join_dependencies() {
         .into_iter()
         .find(|execution| {
             execution.parent_execution.as_ref() == Some(&orchestration.id)
-                && execution.callable.as_ref().is_some_and(|id| id.as_str() == "agent.alpha")
+                && execution
+                    .callable
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == "agent.alpha")
         })
         .unwrap();
-    runtime.set_state(&alpha.id, ExecutionState::Completed).unwrap();
+    runtime
+        .set_state(&alpha.id, ExecutionState::Completed)
+        .unwrap();
 
     assert_eq!(
         child_states(&runtime, &orchestration.id),
@@ -121,10 +132,15 @@ fn dag_runtime_starts_all_ready_nodes_and_waits_for_join_dependencies() {
         .into_iter()
         .find(|execution| {
             execution.parent_execution.as_ref() == Some(&orchestration.id)
-                && execution.callable.as_ref().is_some_and(|id| id.as_str() == "agent.beta")
+                && execution
+                    .callable
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == "agent.beta")
         })
         .unwrap();
-    runtime.set_state(&beta.id, ExecutionState::Completed).unwrap();
+    runtime
+        .set_state(&beta.id, ExecutionState::Completed)
+        .unwrap();
 
     assert_eq!(
         child_states(&runtime, &orchestration.id),
