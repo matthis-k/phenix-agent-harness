@@ -448,6 +448,23 @@ impl ConductorRuntime {
         self.callables.tool_descriptors()
     }
 
+    fn permitted_tool_descriptors(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        let authority = self.execution_authority(execution_id)?;
+        Ok(self
+            .callables
+            .tool_descriptors()
+            .into_iter()
+            .filter(|descriptor| {
+                authority
+                    .filesystem
+                    .permits_capabilities(&descriptor.capabilities)
+            })
+            .collect())
+    }
+
     pub fn execution_authority(
         &self,
         execution_id: &ExecutionId,
@@ -851,7 +868,7 @@ impl ConductorRuntime {
             model: route.model,
             prompt,
             tools: ToolProvision {
-                callables: self.callables.tool_descriptors(),
+                callables: self.permitted_tool_descriptors(execution_id)?,
             },
         })
     }
@@ -1449,6 +1466,7 @@ mod tests {
     use phenix_core::{
         BackendId, CallablePolicy, CapabilitySet, FilesystemAuthority, InferenceOptions, ModelId,
         NetworkAuthority, ProviderId, RepositoryAuthority, RoutingProfileId, WorkspaceId,
+        CAPABILITY_FILESYSTEM_READ, CAPABILITY_FILESYSTEM_WRITE,
     };
     use serde_json::json;
 
@@ -1469,6 +1487,23 @@ mod tests {
             input_schema: json!({"type": "object"}),
             output_schema: json!({"type": "object"}),
             capabilities: CapabilitySet::default(),
+            policy: CallablePolicy::default(),
+        }
+    }
+
+    fn tool(id: &str, capabilities: &[&str]) -> CallableDescriptor {
+        CallableDescriptor {
+            id: CallableId::parse(id).unwrap(),
+            kind: CallableKind::Tool,
+            description: "test tool".to_owned(),
+            input_schema: json!({"type": "object"}),
+            output_schema: json!({"type": "object"}),
+            capabilities: CapabilitySet(
+                capabilities
+                    .iter()
+                    .map(|capability| (*capability).to_owned())
+                    .collect(),
+            ),
             policy: CallablePolicy::default(),
         }
     }
@@ -1720,6 +1755,45 @@ mod tests {
             ConductorRuntime::restore(corrupted),
             Err(PersistenceError::InvalidJournal(message)) if message.contains("authority exceeds parent")
         ));
+    }
+
+    #[test]
+    fn resolved_invocation_filters_tools_by_execution_authority() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.reader"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        runtime
+            .register_tool(tool("tool.read", &[CAPABILITY_FILESYSTEM_READ]), |_| {
+                Ok("read".to_owned())
+            })
+            .unwrap();
+        runtime
+            .register_tool(tool("tool.write", &[CAPABILITY_FILESYSTEM_WRITE]), |_| {
+                Ok("write".to_owned())
+            })
+            .unwrap();
+
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let execution = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.reader").unwrap(),
+                "inspect",
+            )
+            .unwrap();
+        let resolved = runtime.resolve_invocation(&execution.id).unwrap();
+        let tools = resolved
+            .tools
+            .callables
+            .iter()
+            .map(|descriptor| descriptor.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(tools, vec!["tool.read"]);
     }
 
     #[test]
