@@ -37,6 +37,12 @@ pub struct ExecutionAuthority {
     pub callables: BTreeSet<CallableId>,
 }
 
+impl Default for ExecutionAuthority {
+    fn default() -> Self {
+        Self::read_only()
+    }
+}
+
 impl ExecutionAuthority {
     #[must_use]
     pub fn read_only() -> Self {
@@ -160,6 +166,14 @@ mod tests {
 
     fn callable(id: &str) -> CallableId {
         CallableId::parse(id).unwrap()
+    }
+
+    #[test]
+    fn authority_defaults_to_read_only() {
+        assert_eq!(
+            ExecutionAuthority::default(),
+            ExecutionAuthority::read_only()
+        );
     }
 
     #[test]

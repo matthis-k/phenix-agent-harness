@@ -199,6 +199,30 @@ pub struct CallableDescriptor {
     pub policy: CallablePolicy,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AgentDefinition {
+    #[serde(flatten)]
+    pub descriptor: CallableDescriptor,
+    #[serde(default)]
+    pub authority: ExecutionAuthority,
+}
+
+impl AgentDefinition {
+    #[must_use]
+    pub fn new(descriptor: CallableDescriptor, authority: ExecutionAuthority) -> Self {
+        Self {
+            descriptor,
+            authority,
+        }
+    }
+}
+
+impl From<CallableDescriptor> for AgentDefinition {
+    fn from(descriptor: CallableDescriptor) -> Self {
+        Self::new(descriptor, ExecutionAuthority::read_only())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoutingProfile {
     pub id: RoutingProfileId,
@@ -352,6 +376,36 @@ mod tests {
     fn target_is_one_mode_only() {
         let target = ExecutionTarget::Routed(RoutingProfileId::parse("default").unwrap());
         assert!(matches!(target, ExecutionTarget::Routed(_)));
+    }
+
+    #[test]
+    fn descriptor_only_agent_definition_is_read_only() {
+        let mut descriptor = orchestration_descriptor();
+        descriptor.id = CallableId::parse("agent.scout").unwrap();
+        descriptor.kind = CallableKind::Agent;
+        let definition = AgentDefinition::from(descriptor);
+        assert_eq!(definition.authority, ExecutionAuthority::read_only());
+    }
+
+    #[test]
+    fn agent_definition_serializes_authority_with_descriptor() {
+        let mut descriptor = orchestration_descriptor();
+        descriptor.id = CallableId::parse("agent.implement").unwrap();
+        descriptor.kind = CallableKind::Agent;
+        let definition = AgentDefinition::new(
+            descriptor,
+            ExecutionAuthority {
+                filesystem: FilesystemAuthority::Write,
+                network: NetworkAuthority::None,
+                repository: RepositoryAuthority::Read,
+                ipc: BTreeSet::new(),
+                secrets: BTreeSet::new(),
+                callables: BTreeSet::new(),
+            },
+        );
+        let value = serde_json::to_value(&definition).unwrap();
+        assert_eq!(value["id"], "agent.implement");
+        assert_eq!(value["authority"]["filesystem"], "write");
     }
 
     #[test]

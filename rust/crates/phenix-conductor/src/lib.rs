@@ -32,10 +32,11 @@ use phenix_backend::{
     BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, ConfigRevisionId, ExecutionEvent,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
-    ExecutionTarget, ModelTarget, OrchestrationDefinition, OrchestrationNodeId, RoutingProfile,
-    SessionId, SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId,
+    AgentDefinition, CallableDescriptor, CallableId, CallableKind, ConfigRevisionId,
+    ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
+    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, OrchestrationDefinition,
+    OrchestrationNodeId, RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor,
+    SkillId, ToolCallId,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -146,6 +147,7 @@ enum ExecutionPayload {
 struct ExecutionRecord {
     summary: ExecutionSummary,
     payload: ExecutionPayload,
+    authority: ExecutionAuthority,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -203,6 +205,7 @@ pub struct ConductorRuntime {
     events: Vec<ExecutionEvent>,
     journal: RuntimeJournal,
     callables: CallableRegistry,
+    agent_authorities: BTreeMap<CallableId, ExecutionAuthority>,
     routing: RoutingRegistry,
     context: ContextRegistry,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
@@ -233,6 +236,7 @@ impl ConductorRuntime {
             resolved_routes: BTreeMap::new(),
             events: Vec::new(),
             callables: CallableRegistry::default(),
+            agent_authorities: BTreeMap::new(),
             routing: RoutingRegistry::default(),
             context: ContextRegistry::default(),
             skill_activations: BTreeMap::new(),
@@ -245,7 +249,10 @@ impl ConductorRuntime {
         }
     }
 
-    fn record_domain_event(&mut self, event: DomainEvent) -> Result<(), ConductorError> {
+    fn record_domain_event(&mut self, mut event: DomainEvent) -> Result<(), ConductorError> {
+        if let DomainEvent::ExecutionCreated { execution, payload } = &mut event {
+            payload.set_authority(self.effective_authority_for_execution(execution)?);
+        }
         let frontend_event = match &event {
             DomainEvent::FrontendEvent { event } => Some(event.clone()),
             _ => None,
@@ -307,21 +314,37 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    pub fn register_agent(&mut self, descriptor: CallableDescriptor) -> Result<(), ConductorError> {
+    pub fn register_agent<D>(&mut self, definition: D) -> Result<(), ConductorError>
+    where
+        D: Into<AgentDefinition>,
+    {
+        let AgentDefinition {
+            descriptor,
+            authority,
+        } = definition.into();
+        let callable = descriptor.id.clone();
         self.callables.register_agent(descriptor)?;
+        self.agent_authorities.insert(callable, authority);
         Ok(())
     }
 
-    pub fn register_provider_agent<P>(
+    pub fn register_provider_agent<D, P>(
         &mut self,
-        descriptor: CallableDescriptor,
+        definition: D,
         provider: P,
     ) -> Result<(), ConductorError>
     where
+        D: Into<AgentDefinition>,
         P: ExecutionProvider + 'static,
     {
+        let AgentDefinition {
+            descriptor,
+            authority,
+        } = definition.into();
+        let callable = descriptor.id.clone();
         self.callables
             .register_provider_agent(descriptor, provider)?;
+        self.agent_authorities.insert(callable, authority);
         Ok(())
     }
 
@@ -397,6 +420,55 @@ impl ConductorRuntime {
     #[must_use]
     pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
         self.callables.tool_descriptors()
+    }
+
+    pub fn execution_authority(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<ExecutionAuthority, ConductorError> {
+        self.executions
+            .get(execution_id)
+            .map(|execution| execution.authority.clone())
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))
+    }
+
+    fn effective_authority_for_execution(
+        &self,
+        execution: &ExecutionSummary,
+    ) -> Result<ExecutionAuthority, ConductorError> {
+        let configured = self.configured_authority_for_execution(execution)?;
+        let Some(parent_id) = execution.parent_execution.as_ref() else {
+            return Ok(configured);
+        };
+        let parent = self
+            .executions
+            .get(parent_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?;
+        Ok(parent.authority.attenuate(&configured))
+    }
+
+    fn configured_authority_for_execution(
+        &self,
+        execution: &ExecutionSummary,
+    ) -> Result<ExecutionAuthority, ConductorError> {
+        match execution.kind {
+            ExecutionKind::Root => Ok(authority_envelope(self.agent_authorities.values())),
+            ExecutionKind::Agent => Ok(execution
+                .callable
+                .as_ref()
+                .and_then(|callable| self.agent_authorities.get(callable))
+                .cloned()
+                .unwrap_or_default()),
+            ExecutionKind::Orchestration => {
+                let Some(callable) = execution.callable.as_ref() else {
+                    return Ok(ExecutionAuthority::read_only());
+                };
+                let definition = self.callables.orchestration(callable)?;
+                Ok(authority_envelope(definition.nodes.iter().filter_map(
+                    |node| self.agent_authorities.get(&node.callable),
+                )))
+            }
+        }
     }
 
     pub fn create_session(
@@ -510,6 +582,7 @@ impl ConductorRuntime {
             execution: summary.clone(),
             payload: JournalExecutionPayload::Invocation {
                 input: text.clone(),
+                authority: ExecutionAuthority::read_only(),
             },
         })?;
         self.push_event(&summary.id, ExecutionEventKind::UserInput { text })?;
@@ -1256,6 +1329,23 @@ fn is_terminal(state: &ExecutionState) -> bool {
     )
 }
 
+fn authority_envelope<'a>(
+    authorities: impl IntoIterator<Item = &'a ExecutionAuthority>,
+) -> ExecutionAuthority {
+    let mut envelope = ExecutionAuthority::read_only();
+    for authority in authorities {
+        envelope.filesystem = envelope.filesystem.max(authority.filesystem);
+        envelope.network = envelope.network.max(authority.network);
+        envelope.repository = envelope.repository.max(authority.repository);
+        envelope.ipc.extend(authority.ipc.iter().cloned());
+        envelope.secrets.extend(authority.secrets.iter().cloned());
+        envelope
+            .callables
+            .extend(authority.callables.iter().cloned());
+    }
+    envelope
+}
+
 struct RuntimeHost<'a> {
     runtime: &'a mut ConductorRuntime,
     execution_id: ExecutionId,
@@ -1306,8 +1396,8 @@ impl ExecutionProviderHost for ProviderRuntimeHost<'_> {
 mod tests {
     use super::*;
     use phenix_core::{
-        BackendId, CallablePolicy, CapabilitySet, InferenceOptions, ModelId, ProviderId,
-        RoutingProfileId,
+        BackendId, CallablePolicy, CapabilitySet, FilesystemAuthority, InferenceOptions, ModelId,
+        NetworkAuthority, ProviderId, RepositoryAuthority, RoutingProfileId,
     };
     use serde_json::json;
 
@@ -1329,6 +1419,27 @@ mod tests {
             output_schema: json!({"type": "object"}),
             capabilities: CapabilitySet::default(),
             policy: CallablePolicy::default(),
+        }
+    }
+
+    fn authority(
+        filesystem: FilesystemAuthority,
+        network: NetworkAuthority,
+        repository: RepositoryAuthority,
+        ipc: &[&str],
+        secrets: &[&str],
+        callables: &[&str],
+    ) -> ExecutionAuthority {
+        ExecutionAuthority {
+            filesystem,
+            network,
+            repository,
+            ipc: ipc.iter().map(|value| (*value).to_owned()).collect(),
+            secrets: secrets.iter().map(|value| (*value).to_owned()).collect(),
+            callables: callables
+                .iter()
+                .map(|value| CallableId::parse(*value).unwrap())
+                .collect(),
         }
     }
 
@@ -1381,6 +1492,167 @@ mod tests {
             .start_agent(&root.id, &CallableId::parse("scout").unwrap(), "child")
             .unwrap();
         assert_eq!(child.target, fixed("fixed"));
+    }
+
+    #[test]
+    fn child_authority_is_attenuated_by_parent() {
+        let mut runtime = ConductorRuntime::new();
+        let parent_authority = authority(
+            FilesystemAuthority::ReadOnly,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Read,
+            &["dbus"],
+            &["github"],
+            &["agent.child", "tool.read"],
+        );
+        let child_maximum = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &["dbus", "docker"],
+            &["github", "other"],
+            &["tool.read", "tool.write"],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                parent_authority.clone(),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                child_maximum.clone(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let child = runtime
+            .start_agent(
+                &parent.id,
+                &CallableId::parse("agent.child").unwrap(),
+                "child",
+            )
+            .unwrap();
+
+        assert_eq!(
+            runtime.execution_authority(&parent.id).unwrap(),
+            parent_authority
+        );
+        assert_eq!(
+            runtime.execution_authority(&child.id).unwrap(),
+            parent_authority.attenuate(&child_maximum)
+        );
+    }
+
+    #[test]
+    fn root_authority_is_the_configured_agent_envelope() {
+        let mut runtime = ConductorRuntime::new();
+        let scout = authority(
+            FilesystemAuthority::ReadOnly,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Read,
+            &["dbus"],
+            &[],
+            &["agent.worker"],
+        );
+        let worker = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::None,
+            RepositoryAuthority::Write,
+            &[],
+            &["github"],
+            &["tool.write"],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(agent("agent.scout"), scout.clone()))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(agent("agent.worker"), worker.clone()))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let root = runtime.submit(&session.id, "work").unwrap();
+
+        assert_eq!(
+            runtime.execution_authority(&root.id).unwrap(),
+            authority_envelope([&scout, &worker])
+        );
+    }
+
+    #[test]
+    fn execution_authority_roundtrips_and_rejects_parent_expansion() {
+        let mut runtime = ConductorRuntime::new();
+        let parent_authority = ExecutionAuthority::read_only();
+        let child_maximum = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &[],
+            &[],
+            &[],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                parent_authority.clone(),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(agent("agent.child"), child_maximum))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let child = runtime
+            .start_agent(
+                &parent.id,
+                &CallableId::parse("agent.child").unwrap(),
+                "child",
+            )
+            .unwrap();
+        let journal = runtime.journal().clone();
+        let restored = ConductorRuntime::restore(journal.clone()).unwrap();
+        assert_eq!(
+            restored.execution_authority(&child.id).unwrap(),
+            parent_authority
+        );
+
+        let mut corrupted = journal;
+        let child_payload = corrupted
+            .entries
+            .iter_mut()
+            .find_map(|entry| match &mut entry.event {
+                DomainEvent::ExecutionCreated { execution, payload }
+                    if execution.id == child.id =>
+                {
+                    Some(payload)
+                }
+                _ => None,
+            })
+            .expect("child creation is durable");
+        child_payload.set_authority(authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::None,
+            RepositoryAuthority::Read,
+            &[],
+            &[],
+            &[],
+        ));
+        assert!(matches!(
+            ConductorRuntime::restore(corrupted),
+            Err(PersistenceError::InvalidJournal(message)) if message.contains("authority exceeds parent")
+        ));
     }
 
     #[test]

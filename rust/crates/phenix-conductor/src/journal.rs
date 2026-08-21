@@ -1,8 +1,8 @@
 use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
 use phenix_core::{
-    ConfigRevisionId, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, OrchestrationNodeId, SessionId,
-    SessionState, SessionSummary, ToolCallId,
+    ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
+    ExecutionKind, ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget,
+    OrchestrationNodeId, SessionId, SessionState, SessionSummary, ToolCallId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -16,12 +16,36 @@ pub const JOURNAL_FORMAT_VERSION: u64 = 1;
 pub enum JournalExecutionPayload {
     Invocation {
         input: String,
+        #[serde(default)]
+        authority: ExecutionAuthority,
     },
     #[serde(alias = "workflow")]
     Orchestration {
         objective: String,
         next_node: usize,
+        #[serde(default)]
+        authority: ExecutionAuthority,
     },
+}
+
+impl JournalExecutionPayload {
+    #[must_use]
+    pub(crate) fn authority(&self) -> &ExecutionAuthority {
+        match self {
+            Self::Invocation { authority, .. } | Self::Orchestration { authority, .. } => authority,
+        }
+    }
+
+    pub(crate) fn set_authority(&mut self, authority: ExecutionAuthority) {
+        match self {
+            Self::Invocation {
+                authority: current, ..
+            }
+            | Self::Orchestration {
+                authority: current, ..
+            } => *current = authority,
+        }
+    }
 }
 
 impl From<&ExecutionPayload> for JournalExecutionPayload {
@@ -29,6 +53,7 @@ impl From<&ExecutionPayload> for JournalExecutionPayload {
         match value {
             ExecutionPayload::Invocation { input } => Self::Invocation {
                 input: input.clone(),
+                authority: ExecutionAuthority::read_only(),
             },
             ExecutionPayload::Orchestration {
                 objective,
@@ -36,6 +61,7 @@ impl From<&ExecutionPayload> for JournalExecutionPayload {
             } => Self::Orchestration {
                 objective: objective.clone(),
                 next_node: *next_node,
+                authority: ExecutionAuthority::read_only(),
             },
         }
     }
@@ -44,10 +70,11 @@ impl From<&ExecutionPayload> for JournalExecutionPayload {
 impl From<JournalExecutionPayload> for ExecutionPayload {
     fn from(value: JournalExecutionPayload) -> Self {
         match value {
-            JournalExecutionPayload::Invocation { input } => Self::Invocation { input },
+            JournalExecutionPayload::Invocation { input, .. } => Self::Invocation { input },
             JournalExecutionPayload::Orchestration {
                 objective,
                 next_node,
+                ..
             } => Self::Orchestration {
                 objective,
                 next_node,
@@ -207,7 +234,7 @@ fn materialize_execution_payload(
     payload: &JournalExecutionPayload,
 ) -> ExecutionPayload {
     match payload {
-        JournalExecutionPayload::Invocation { input }
+        JournalExecutionPayload::Invocation { input, .. }
             if execution.kind == ExecutionKind::Root
                 && matches!(execution.target, ExecutionTarget::Routed(_)) =>
         {
@@ -397,10 +424,16 @@ pub(crate) fn apply_domain_event(
                     execution.id
                 )));
             }
-            if let Some(parent) = &execution.parent_execution {
-                if !state.executions.contains_key(parent) {
+            if let Some(parent_id) = &execution.parent_execution {
+                let parent = state.executions.get(parent_id).ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "execution {} references unknown parent {parent_id}",
+                        execution.id
+                    ))
+                })?;
+                if !parent.authority.permits(payload.authority()) {
                     return Err(JournalError::InvalidEvent(format!(
-                        "execution {} references unknown parent {parent}",
+                        "execution {} authority exceeds parent {parent_id}",
                         execution.id
                     )));
                 }
@@ -411,6 +444,7 @@ pub(crate) fn apply_domain_event(
                     entry.insert(ExecutionRecord {
                         summary: execution.clone(),
                         payload: materialized_payload,
+                        authority: payload.authority().clone(),
                     });
                 }
                 Entry::Occupied(_) => {
@@ -622,9 +656,11 @@ mod tests {
             payload,
             JournalExecutionPayload::Orchestration {
                 ref objective,
-                next_node: 2
+                next_node: 2,
+                ..
             } if objective == "legacy"
         ));
+        assert_eq!(payload.authority(), &ExecutionAuthority::read_only());
         assert_eq!(
             serde_json::to_value(&payload).unwrap()["kind"],
             "orchestration"
