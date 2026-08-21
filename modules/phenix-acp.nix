@@ -30,7 +30,9 @@ _: {
           cp "$conductor_binary" "$out/libexec/phenix-conductor"
           makeWrapper "$out/libexec/phenix-conductor" "$out/bin/phenix-conductor" \
             --set PHENIX_BASH "${pkgs.bash}/bin/bash" \
+            --set PHENIX_BWRAP "${pkgs.bubblewrap}/bin/bwrap" \
             --set PHENIX_RG "${pkgs.ripgrep}/bin/rg" \
+            --set PHENIX_RSYNC "${pkgs.rsync}/bin/rsync" \
             --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
             --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           runHook postInstall
