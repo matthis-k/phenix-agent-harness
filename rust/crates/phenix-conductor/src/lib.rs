@@ -217,7 +217,6 @@ pub struct ConductorRuntime {
     events: Vec<ExecutionEvent>,
     journal: RuntimeJournal,
     callables: CallableRegistry,
-    agent_authorities: BTreeMap<CallableId, ExecutionAuthority>,
     routing: RoutingRegistry,
     context: ContextRegistry,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
@@ -251,7 +250,6 @@ impl ConductorRuntime {
             read_sets: BTreeMap::new(),
             events: Vec::new(),
             callables: CallableRegistry::default(),
-            agent_authorities: BTreeMap::new(),
             routing: RoutingRegistry::default(),
             context: ContextRegistry::default(),
             skill_activations: BTreeMap::new(),
@@ -364,13 +362,7 @@ impl ConductorRuntime {
     where
         D: Into<AgentDefinition>,
     {
-        let AgentDefinition {
-            descriptor,
-            authority,
-        } = definition.into();
-        let callable = descriptor.id.clone();
-        self.callables.register_agent(descriptor)?;
-        self.agent_authorities.insert(callable, authority);
+        self.callables.register_agent(definition)?;
         Ok(())
     }
 
@@ -383,14 +375,8 @@ impl ConductorRuntime {
         D: Into<AgentDefinition>,
         P: ExecutionProvider + 'static,
     {
-        let AgentDefinition {
-            descriptor,
-            authority,
-        } = definition.into();
-        let callable = descriptor.id.clone();
         self.callables
-            .register_provider_agent(descriptor, provider)?;
-        self.agent_authorities.insert(callable, authority);
+            .register_provider_agent(definition, provider)?;
         Ok(())
     }
 
@@ -569,21 +555,32 @@ impl ConductorRuntime {
         execution: &ExecutionSummary,
     ) -> Result<ExecutionAuthority, ConductorError> {
         match execution.kind {
-            ExecutionKind::Root => Ok(authority_envelope(self.agent_authorities.values())),
-            ExecutionKind::Agent => Ok(execution
-                .callable
-                .as_ref()
-                .and_then(|callable| self.agent_authorities.get(callable))
-                .cloned()
-                .unwrap_or_default()),
+            ExecutionKind::Root => Ok(authority_envelope(
+                self.callables
+                    .agent_definitions()
+                    .map(|definition| &definition.authority),
+            )),
+            ExecutionKind::Agent => {
+                let Some(callable) = execution.callable.as_ref() else {
+                    return Ok(ExecutionAuthority::read_only());
+                };
+                Ok(self.callables.agent_definition(callable)?.authority.clone())
+            }
             ExecutionKind::Orchestration => {
                 let Some(callable) = execution.callable.as_ref() else {
                     return Ok(ExecutionAuthority::read_only());
                 };
                 let definition = self.callables.orchestration(callable)?;
-                Ok(authority_envelope(definition.nodes.iter().filter_map(
-                    |node| self.agent_authorities.get(&node.callable),
-                )))
+                let authorities = definition
+                    .nodes
+                    .iter()
+                    .map(|node| {
+                        self.callables
+                            .agent_definition(&node.callable)
+                            .map(|definition| &definition.authority)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(authority_envelope(authorities))
             }
         }
     }

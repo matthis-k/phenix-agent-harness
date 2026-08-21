@@ -5,9 +5,9 @@ use crate::{
 };
 use phenix_backend::ToolResult;
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, ExecutionAuthority, ExecutionEventKind,
-    ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary, FileObservation,
-    OrchestrationDefinition, OrchestrationNodeId, SessionId,
+    AgentDefinition, CallableDescriptor, CallableId, CallableKind, ExecutionAuthority,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
+    FileObservation, OrchestrationDefinition, OrchestrationNodeId, SessionId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -142,27 +142,36 @@ impl Display for CallableRegistryError {
 
 impl Error for CallableRegistryError {}
 
-enum CallableImplementation {
-    Tool(Arc<ToolHandler>),
-    Executable(ExecutionProviderBinding),
+enum CallableEntry {
+    Tool {
+        descriptor: CallableDescriptor,
+        handler: Arc<ToolHandler>,
+    },
+    Agent {
+        definition: AgentDefinition,
+        provider: ExecutionProviderBinding,
+    },
     Orchestration(Box<OrchestrationDefinition>),
 }
 
-struct CallableEntry {
-    descriptor: CallableDescriptor,
-    implementation: CallableImplementation,
-}
-
 impl CallableEntry {
+    fn descriptor(&self) -> &CallableDescriptor {
+        match self {
+            Self::Tool { descriptor, .. } => descriptor,
+            Self::Agent { definition, .. } => &definition.descriptor,
+            Self::Orchestration(definition) => &definition.descriptor,
+        }
+    }
+
     fn is_executable(&self) -> bool {
-        matches!(&self.implementation, CallableImplementation::Executable(_))
+        matches!(self, Self::Agent { .. })
     }
 }
 
 impl Debug for CallableEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("CallableEntry")
-            .field("descriptor", &self.descriptor)
+            .field("descriptor", self.descriptor())
             .field("executable", &self.is_executable())
             .finish_non_exhaustive()
     }
@@ -206,41 +215,46 @@ impl CallableRegistry {
         let handler = move |context: &ToolExecutionContext, arguments: &str| {
             handler(context, arguments).map(Into::into)
         };
-        self.register(
-            descriptor,
+        self.insert(
+            CallableEntry::Tool {
+                descriptor,
+                handler: Arc::new(handler),
+            },
             CallableKind::Tool,
-            CallableImplementation::Tool(Arc::new(handler)),
         )
     }
 
     /// Register the canonical model-backed agent provider.
-    pub fn register_agent(
-        &mut self,
-        descriptor: CallableDescriptor,
-    ) -> Result<(), CallableRegistryError> {
-        self.register(
-            descriptor,
+    pub fn register_agent<D>(&mut self, definition: D) -> Result<(), CallableRegistryError>
+    where
+        D: Into<AgentDefinition>,
+    {
+        self.insert(
+            CallableEntry::Agent {
+                definition: definition.into(),
+                provider: ExecutionProviderBinding::Model,
+            },
             CallableKind::Agent,
-            CallableImplementation::Executable(ExecutionProviderBinding::Model),
         )
     }
 
     /// Register an agent whose execution mechanism is conductor-neutral and
     /// supplied by an explicit provider rather than the model backend path.
-    pub fn register_provider_agent<P>(
+    pub fn register_provider_agent<D, P>(
         &mut self,
-        descriptor: CallableDescriptor,
+        definition: D,
         provider: P,
     ) -> Result<(), CallableRegistryError>
     where
+        D: Into<AgentDefinition>,
         P: ExecutionProvider + 'static,
     {
-        self.register(
-            descriptor,
+        self.insert(
+            CallableEntry::Agent {
+                definition: definition.into(),
+                provider: ExecutionProviderBinding::Provider(Arc::new(provider)),
+            },
             CallableKind::Agent,
-            CallableImplementation::Executable(ExecutionProviderBinding::Provider(Arc::new(
-                provider,
-            ))),
         )
     }
 
@@ -345,37 +359,30 @@ impl CallableRegistry {
         }
         definition.nodes = normalized;
 
-        let descriptor = definition.descriptor.clone();
-        self.register(
-            descriptor,
+        self.insert(
+            CallableEntry::Orchestration(Box::new(definition)),
             CallableKind::Orchestration,
-            CallableImplementation::Orchestration(Box::new(definition)),
         )
     }
 
-    fn register(
+    fn insert(
         &mut self,
-        descriptor: CallableDescriptor,
+        entry: CallableEntry,
         expected: CallableKind,
-        implementation: CallableImplementation,
     ) -> Result<(), CallableRegistryError> {
+        let descriptor = entry.descriptor();
         if descriptor.kind != expected {
             return Err(CallableRegistryError::WrongKind {
-                callable: descriptor.id,
+                callable: descriptor.id.clone(),
                 expected,
-                actual: descriptor.kind,
+                actual: descriptor.kind.clone(),
             });
         }
-        if self.entries.contains_key(&descriptor.id) {
-            return Err(CallableRegistryError::Duplicate(descriptor.id));
+        let id = descriptor.id.clone();
+        if self.entries.contains_key(&id) {
+            return Err(CallableRegistryError::Duplicate(id));
         }
-        self.entries.insert(
-            descriptor.id.clone(),
-            CallableEntry {
-                descriptor,
-                implementation,
-            },
-        );
+        self.entries.insert(id, entry);
         Ok(())
     }
 
@@ -383,7 +390,7 @@ impl CallableRegistry {
     pub fn descriptors(&self) -> Vec<CallableDescriptor> {
         self.entries
             .values()
-            .map(|entry| entry.descriptor.clone())
+            .map(|entry| entry.descriptor().clone())
             .collect()
     }
 
@@ -391,8 +398,8 @@ impl CallableRegistry {
     pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
         self.entries
             .values()
-            .filter(|entry| entry.descriptor.kind == CallableKind::Tool)
-            .map(|entry| entry.descriptor.clone())
+            .filter(|entry| entry.descriptor().kind == CallableKind::Tool)
+            .map(|entry| entry.descriptor().clone())
             .collect()
     }
 
@@ -402,8 +409,33 @@ impl CallableRegistry {
     ) -> Result<&CallableDescriptor, CallableRegistryError> {
         self.entries
             .get(id)
-            .map(|entry| &entry.descriptor)
+            .map(CallableEntry::descriptor)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))
+    }
+
+    pub fn agent_definition(
+        &self,
+        id: &CallableId,
+    ) -> Result<&AgentDefinition, CallableRegistryError> {
+        let entry = self
+            .entries
+            .get(id)
+            .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
+        match entry {
+            CallableEntry::Agent { definition, .. } => Ok(definition),
+            _ => Err(CallableRegistryError::WrongKind {
+                callable: id.clone(),
+                expected: CallableKind::Agent,
+                actual: entry.descriptor().kind.clone(),
+            }),
+        }
+    }
+
+    pub fn agent_definitions(&self) -> impl Iterator<Item = &AgentDefinition> {
+        self.entries.values().filter_map(|entry| match entry {
+            CallableEntry::Agent { definition, .. } => Some(definition),
+            _ => None,
+        })
     }
 
     pub fn execution_provider(
@@ -414,8 +446,8 @@ impl CallableRegistry {
             .entries
             .get(id)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
-        match &entry.implementation {
-            CallableImplementation::Executable(provider) => Ok(provider),
+        match entry {
+            CallableEntry::Agent { provider, .. } => Ok(provider),
             _ => Err(CallableRegistryError::NotExecutable(id.clone())),
         }
     }
@@ -428,12 +460,12 @@ impl CallableRegistry {
             .entries
             .get(id)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
-        match &entry.implementation {
-            CallableImplementation::Orchestration(definition) => Ok(definition.as_ref()),
+        match entry {
+            CallableEntry::Orchestration(definition) => Ok(definition.as_ref()),
             _ => Err(CallableRegistryError::WrongKind {
                 callable: id.clone(),
                 expected: CallableKind::Orchestration,
-                actual: entry.descriptor.kind.clone(),
+                actual: entry.descriptor().kind.clone(),
             }),
         }
     }
@@ -453,11 +485,11 @@ impl CallableRegistry {
             .entries
             .get(id)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
-        let CallableImplementation::Tool(handler) = &entry.implementation else {
+        let CallableEntry::Tool { handler, .. } = entry else {
             return Err(CallableRegistryError::WrongKind {
                 callable: id.clone(),
                 expected: CallableKind::Tool,
-                actual: entry.descriptor.kind.clone(),
+                actual: entry.descriptor().kind.clone(),
             });
         };
         Ok(match handler(context, arguments_json) {
