@@ -1036,9 +1036,7 @@ impl ConductorRuntime {
             for node in ready {
                 let node_objective = match node.objective {
                     Some(node_objective) => {
-                        format!(
-                            "{node_objective}\n\nOrchestration objective:\n{objective}"
-                        )
+                        format!("{node_objective}\n\nOrchestration objective:\n{objective}")
                     }
                     None => objective.clone(),
                 };

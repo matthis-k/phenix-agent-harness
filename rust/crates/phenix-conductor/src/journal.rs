@@ -487,14 +487,18 @@ pub(crate) fn apply_domain_event(
                     "orchestration node {node_id} child {child_execution_id} has the wrong parent"
                 )));
             }
-            if state.orchestration_nodes.iter().any(|(child_id, existing_node)| {
-                existing_node == node_id
-                    && state
-                        .executions
-                        .get(child_id)
-                        .and_then(|execution| execution.summary.parent_execution.as_ref())
-                        == Some(execution_id)
-            }) {
+            if state
+                .orchestration_nodes
+                .iter()
+                .any(|(child_id, existing_node)| {
+                    existing_node == node_id
+                        && state
+                            .executions
+                            .get(child_id)
+                            .and_then(|execution| execution.summary.parent_execution.as_ref())
+                            == Some(execution_id)
+                })
+            {
                 return Err(JournalError::InvalidEvent(format!(
                     "orchestration {execution_id} started node {node_id} more than once"
                 )));
