@@ -9,15 +9,37 @@ use phenix_core::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use transaction::WorkspaceTransaction;
+use transaction::{TransactionOutput, WorkspaceTransaction};
 
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 const DEFAULT_READ_LINES: usize = 400;
 const MAX_READ_LINES: usize = 2000;
+const READ_ONLY_BASH_SCRIPT: &str = r#"
+bash_path=$1
+user_command=$2
+
+command_status=0
+"$bash_path" -c "$user_command" </dev/null || command_status=$?
+
+while :; do
+  descendants=0
+  for process in /proc/[0-9]*; do
+    pid=${process##*/}
+    case "$pid" in
+      1|"$$") continue ;;
+    esac
+    descendants=1
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  [ "$descendants" -eq 0 ] && break
+done
+
+exit "$command_status"
+"#;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -66,11 +88,11 @@ pub(super) fn register(
     let root = consistency.root().to_path_buf();
 
     let bash_consistency = consistency.clone();
-    runtime.register_tool(
+    runtime.register_contextual_tool(
         tool_descriptor(
             "bash",
             format!(
-                "Execute a Bash command in the current Phenix workspace ({}). Protected workspace writes run in a disposable overlay and are applied only if the complete pre-command protected manifest is unchanged. Git metadata stays disposable and configured scratch roots remain directly writable.",
+                "Execute a Bash command in the current Phenix workspace ({}). Read-only executions see protected workspace paths read-only while configured scratch roots stay writable. Write-authority executions use a disposable overlay and apply protected changes only if the complete pre-command protected manifest is unchanged. Git metadata remains disposable for write-authority executions.",
                 root.display()
             ),
             json!({
@@ -94,9 +116,15 @@ pub(super) fn register(
                     "stderr": { "type": "string" }
                 }
             }),
-            FilesystemAuthority::Write,
+            FilesystemAuthority::ReadOnly,
         ),
-        move |arguments| execute_bash(&bash_consistency, arguments),
+        move |context, arguments| {
+            execute_bash(
+                &bash_consistency,
+                context.authority.filesystem,
+                arguments,
+            )
+        },
     )?;
 
     let read_consistency = consistency.clone();
@@ -343,7 +371,11 @@ fn nullable_file_version_schema() -> Value {
     })
 }
 
-fn execute_bash(consistency: &WorkspaceConsistency, arguments: &str) -> Result<String, String> {
+fn execute_bash(
+    consistency: &WorkspaceConsistency,
+    filesystem: FilesystemAuthority,
+    arguments: &str,
+) -> Result<String, String> {
     let input: BashInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid bash arguments: {error}"))?;
     if input.command.trim().is_empty() {
@@ -351,12 +383,20 @@ fn execute_bash(consistency: &WorkspaceConsistency, arguments: &str) -> Result<S
     }
 
     let bash = std::env::var_os("PHENIX_BASH").unwrap_or_else(|| OsString::from("bash"));
-    let transaction =
-        WorkspaceTransaction::begin(consistency.clone()).map_err(|error| error.to_string())?;
-    let output = transaction
-        .execute(&bash, &input.command)
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())?;
+    let output = match filesystem {
+        FilesystemAuthority::ReadOnly => {
+            execute_read_only_bash(consistency, &bash, &input.command)?
+        }
+        FilesystemAuthority::Write => {
+            let transaction = WorkspaceTransaction::begin(consistency.clone())
+                .map_err(|error| error.to_string())?;
+            let output = transaction
+                .execute(&bash, &input.command)
+                .map_err(|error| error.to_string())?;
+            transaction.commit().map_err(|error| error.to_string())?;
+            output
+        }
+    };
 
     Ok(json!({
         "exit_code": output.exit_code,
@@ -364,6 +404,55 @@ fn execute_bash(consistency: &WorkspaceConsistency, arguments: &str) -> Result<S
         "stderr": capture(&output.stderr),
     })
     .to_string())
+}
+
+fn execute_read_only_bash(
+    consistency: &WorkspaceConsistency,
+    bash: &OsStr,
+    command: &str,
+) -> Result<TransactionOutput, String> {
+    let bwrap = std::env::var_os("PHENIX_BWRAP").unwrap_or_else(|| OsString::from("bwrap"));
+    let scratch_mounts = consistency
+        .prepare_scratch_mounts()
+        .map_err(|error| error.to_string())?;
+    let mut process = Command::new(&bwrap);
+    process
+        .arg("--die-with-parent")
+        .arg("--unshare-pid")
+        .arg("--ro-bind")
+        .arg("/")
+        .arg("/")
+        .arg("--dev-bind")
+        .arg("/dev")
+        .arg("/dev")
+        .arg("--proc")
+        .arg("/proc")
+        .arg("--tmpfs")
+        .arg("/tmp");
+    for (_, absolute) in scratch_mounts {
+        process.arg("--bind").arg(&absolute).arg(&absolute);
+    }
+    let output = process
+        .arg("--chdir")
+        .arg(consistency.root())
+        .arg("--setenv")
+        .arg("TMPDIR")
+        .arg("/tmp")
+        .arg("--")
+        .arg(bash)
+        .arg("-c")
+        .arg(READ_ONLY_BASH_SCRIPT)
+        .arg("phenix-read-only-bash")
+        .arg(bash)
+        .arg(command)
+        .output()
+        .map_err(|error| format!("failed to execute {}: {error}", Path::new(&bwrap).display()))?;
+
+    Ok(TransactionOutput {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
 }
 
 fn execute_read(
@@ -759,6 +848,7 @@ mod tests {
 
         let output = execute_bash(
             &consistency,
+            FilesystemAuthority::Write,
             r#"{"command":"printf '%s\\n' \"$(cat marker.txt)\" \"$PWD\"; printf changed > marker.txt"}"#,
         )
         .unwrap();
@@ -778,11 +868,42 @@ mod tests {
     fn nonzero_exit_is_reported_without_failing_the_tool_call() {
         let workspace = temp_workspace("bash-nonzero");
         let consistency = consistency(&workspace, BTreeSet::new());
-        let output =
-            execute_bash(&consistency, r#"{"command":"printf failure >&2; exit 7"}"#).unwrap();
+        let output = execute_bash(
+            &consistency,
+            FilesystemAuthority::ReadOnly,
+            r#"{"command":"printf failure >&2; exit 7"}"#,
+        )
+        .unwrap();
         let output: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(output["exit_code"], 7);
         assert_eq!(output["stderr"], "failure");
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn read_only_bash_rejects_protected_writes_and_keeps_writable_mounts() {
+        let workspace = temp_workspace("bash-read-only");
+        fs::write(workspace.join("source.txt"), "protected").unwrap();
+        let consistency = consistency(&workspace, BTreeSet::from([PathBuf::from("target")]));
+
+        let output = execute_bash(
+            &consistency,
+            FilesystemAuthority::ReadOnly,
+            r#"{"command":"printf changed > source.txt; source_status=$?; printf scratch > target/cache; printf tmp > /tmp/cache; cat /tmp/cache; exit $source_status"}"#,
+        )
+        .unwrap();
+        let output: Value = serde_json::from_str(&output).unwrap();
+
+        assert_ne!(output["exit_code"], 0);
+        assert_eq!(output["stdout"], "tmp");
+        assert_eq!(
+            fs::read_to_string(workspace.join("source.txt")).unwrap(),
+            "protected"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("target/cache")).unwrap(),
+            "scratch"
+        );
         let _ = fs::remove_dir_all(workspace);
     }
 
@@ -942,10 +1063,10 @@ mod tests {
             .map(|descriptor| (descriptor.id.as_str().to_owned(), descriptor.capabilities))
             .collect::<BTreeMap<_, _>>();
 
-        for id in ["read", "grep"] {
+        for id in ["bash", "read", "grep"] {
             assert!(descriptors[id].0.contains(CAPABILITY_FILESYSTEM_READ));
         }
-        for id in ["bash", "write", "edit"] {
+        for id in ["write", "edit"] {
             assert!(descriptors[id].0.contains(CAPABILITY_FILESYSTEM_WRITE));
         }
         let _ = fs::remove_dir_all(workspace);
@@ -974,16 +1095,22 @@ mod tests {
         let scout = CallableId::parse("agent.scout").unwrap();
         let implementer = CallableId::parse("agent.implementer").unwrap();
         let verifier = CallableId::parse("agent.verifier").unwrap();
-        for agent in [&scout, &implementer, &verifier] {
-            let mut authority = ExecutionAuthority::read_only();
-            authority.filesystem = FilesystemAuthority::Write;
+        for agent in [&scout, &verifier] {
             runtime
                 .register_agent(AgentDefinition::new(
                     fixture_descriptor(agent.as_str(), CallableKind::Agent),
-                    authority,
+                    ExecutionAuthority::read_only(),
                 ))
                 .unwrap();
         }
+        let mut implementer_authority = ExecutionAuthority::read_only();
+        implementer_authority.filesystem = FilesystemAuthority::Write;
+        runtime
+            .register_agent(AgentDefinition::new(
+                fixture_descriptor(implementer.as_str(), CallableKind::Agent),
+                implementer_authority,
+            ))
+            .unwrap();
 
         let orchestration_id = CallableId::parse("orchestration.tool-surface").unwrap();
         runtime
@@ -1054,7 +1181,12 @@ mod tests {
                 })
                 .unwrap_or_else(|| panic!("orchestration never scheduled {agent}"));
             runtime.drive_execution(&child.id, &mut backend).unwrap();
-            recorder.assert_model_tools(model_name, &["bash", "edit", "grep", "read", "write"]);
+            let expected = if agent == &implementer {
+                &["bash", "edit", "grep", "read", "write"][..]
+            } else {
+                &["bash", "grep", "read"][..]
+            };
+            recorder.assert_model_tools(model_name, expected);
         }
 
         recorder.assert_model_tools("root", &["bash", "edit", "grep", "read", "write"]);
