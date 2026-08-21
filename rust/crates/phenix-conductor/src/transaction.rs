@@ -3,26 +3,69 @@ use super::WorkspaceConsistency;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display, Formatter};
-use std::fs::{self, File, OpenOptions};
-use std::io::Read;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-const SANDBOX_RELEASE: &str = "/tmp/phenix-transaction-release";
 const SANDBOX_SNAPSHOT: &str = "/tmp/phenix-transaction-snapshot";
 const SANDBOX_EXCLUDES: &str = "/tmp/phenix-transaction-excludes";
+const SANDBOX_INNER_STATUS: &str = "/tmp/phenix-transaction-inner-status";
+const SANDBOX_RESULT_STATUS: &str = "/tmp/phenix-transaction-result-status";
 const COMMAND_SCRIPT: &str = r#"
-release_file=$1
+bwrap_path=$1
 bash_path=$2
-user_command=$3
+rsync_path=$3
+workspace=$4
+snapshot=$5
+excludes=$6
+inner_status=$7
+result_status=$8
+user_command=$9
 
-while [ ! -s "$release_file" ]; do
-  sleep 0.001
-done
-exec "$bash_path" -c "$user_command" </dev/null
+: > "$result_status"
+exec 3> "$inner_status"
+
+command_status=0
+"$bwrap_path" \
+  --die-with-parent \
+  --ro-bind / / \
+  --dev-bind /dev /dev \
+  --proc /proc \
+  --tmpfs /tmp \
+  --bind "$workspace" "$workspace" \
+  --unshare-pid \
+  --cap-drop ALL \
+  --chdir "$workspace" \
+  --setenv TMPDIR /tmp \
+  --json-status-fd 3 \
+  -- "$bash_path" -c "$user_command" </dev/null || command_status=$?
+
+exec 3>&-
+
+command_started=0
+while IFS= read -r status_line; do
+  case "$status_line" in
+    *'"exit-code"'*) command_started=1 ;;
+  esac
+done < "$inner_status"
+
+if [ "$command_started" -ne 1 ]; then
+  exit "$command_status"
+fi
+
+"$rsync_path" \
+  -rlpt \
+  --delete \
+  --delete-delay \
+  --delay-updates \
+  --quiet \
+  --exclude-from "$excludes" \
+  "$workspace/." \
+  "$snapshot/." || { snapshot_status=$?; exit "$snapshot_status"; }
+
+printf '%s\n' "$command_status" > "$result_status"
 "#;
 
 static NEXT_TRANSACTION_ID: AtomicU64 = AtomicU64::new(0);
@@ -65,53 +108,67 @@ impl WorkspaceTransaction {
         command: &str,
     ) -> Result<TransactionOutput, TransactionError> {
         let bwrap = std::env::var_os("PHENIX_BWRAP").unwrap_or_else(|| OsString::from("bwrap"));
-        let info = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&self.paths.info)
-            .map_err(|source| TransactionError::Io {
-                path: self.paths.info.clone(),
-                source,
-            })?;
-
-        let mut process = self.sandbox_command(&bwrap, &self.paths.command_work);
-        process
-            .arg("--ro-bind")
-            .arg(&self.paths.release)
-            .arg(SANDBOX_RELEASE)
-            .arg("--info-fd")
+        let output = self
+            .sandbox_command(&bwrap, &self.paths.command_work)
+            .arg("--uid")
             .arg("0")
+            .arg("--gid")
+            .arg("0")
+            .arg("--cap-add")
+            .arg("ALL")
+            .arg("--bind")
+            .arg(&self.paths.snapshot)
+            .arg(SANDBOX_SNAPSHOT)
+            .arg("--ro-bind")
+            .arg(&self.paths.excludes)
+            .arg(SANDBOX_EXCLUDES)
+            .arg("--bind")
+            .arg(&self.paths.inner_status)
+            .arg(SANDBOX_INNER_STATUS)
+            .arg("--bind")
+            .arg(&self.paths.result_status)
+            .arg(SANDBOX_RESULT_STATUS)
             .arg("--")
             .arg(bash)
             .arg("-c")
             .arg(COMMAND_SCRIPT)
             .arg("phenix-transaction")
-            .arg(SANDBOX_RELEASE)
+            .arg(&bwrap)
             .arg(bash)
+            .arg(&self.rsync)
+            .arg(self.consistency.root())
+            .arg(SANDBOX_SNAPSHOT)
+            .arg(SANDBOX_EXCLUDES)
+            .arg(SANDBOX_INNER_STATUS)
+            .arg(SANDBOX_RESULT_STATUS)
             .arg(command)
-            .stdin(Stdio::from(info))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let mut child = process.spawn().map_err(|source| TransactionError::Spawn {
-            program: PathBuf::from(&bwrap),
-            source,
-        })?;
-        let userns = self.capture_user_namespace(&bwrap, &mut child)?;
-        fs::write(&self.paths.release, b"1").map_err(|source| TransactionError::Io {
-            path: self.paths.release.clone(),
-            source,
-        })?;
-
-        let output = child
-            .wait_with_output()
-            .map_err(|source| TransactionError::Wait {
+            .output()
+            .map_err(|source| TransactionError::Spawn {
                 program: PathBuf::from(&bwrap),
                 source,
             })?;
-        let exit_code = output.status.code().unwrap_or(-1);
+        if !output.status.success() {
+            return Err(TransactionError::SandboxFailed {
+                exit_code: output.status.code().unwrap_or(-1),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            });
+        }
 
-        self.snapshot(&bwrap, userns)?;
+        let status = fs::read_to_string(&self.paths.result_status).map_err(|source| {
+            TransactionError::Io {
+                path: self.paths.result_status.clone(),
+                source,
+            }
+        })?;
+        let exit_code = match status.trim().parse::<i32>() {
+            Ok(code) if (0..=255).contains(&code) => code,
+            _ => {
+                return Err(TransactionError::InvalidSandboxStatus {
+                    path: self.paths.result_status.clone(),
+                    value: status,
+                });
+            }
+        };
 
         Ok(TransactionOutput {
             exit_code,
@@ -166,8 +223,6 @@ impl WorkspaceTransaction {
             .arg("/proc")
             .arg("--tmpfs")
             .arg("/tmp")
-            .arg("--tmpfs")
-            .arg(&self.paths.root)
             .arg("--overlay-src")
             .arg(self.consistency.root())
             .arg("--overlay")
@@ -187,91 +242,6 @@ impl WorkspaceTransaction {
             .arg("/tmp");
         process
     }
-
-    fn capture_user_namespace(
-        &self,
-        bwrap: &OsStr,
-        child: &mut Child,
-    ) -> Result<File, TransactionError> {
-        loop {
-            let info =
-                fs::read_to_string(&self.paths.info).map_err(|source| TransactionError::Io {
-                    path: self.paths.info.clone(),
-                    source,
-                })?;
-            if !info.is_empty() {
-                if let Some(pid) = sandbox_child_pid(&info) {
-                    let path = PathBuf::from(format!("/proc/{pid}/ns/user"));
-                    return File::open(&path)
-                        .map_err(|source| TransactionError::Io { path, source });
-                }
-                if info.trim_end().ends_with('}') {
-                    return Err(TransactionError::InvalidSandboxInfo {
-                        path: self.paths.info.clone(),
-                        value: info,
-                    });
-                }
-            }
-
-            if let Some(status) = child.try_wait().map_err(|source| TransactionError::Wait {
-                program: PathBuf::from(bwrap),
-                source,
-            })? {
-                let mut stderr = Vec::new();
-                if let Some(stream) = child.stderr.as_mut() {
-                    let _ = stream.read_to_end(&mut stderr);
-                }
-                return Err(TransactionError::SandboxFailed {
-                    exit_code: status.code().unwrap_or(-1),
-                    stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                });
-            }
-            thread::sleep(Duration::from_millis(1));
-        }
-    }
-
-    fn snapshot(&self, bwrap: &OsStr, userns: File) -> Result<(), TransactionError> {
-        let output = self
-            .sandbox_command(bwrap, &self.paths.snapshot_work)
-            .arg("--userns")
-            .arg("0")
-            .arg("--bind")
-            .arg(&self.paths.snapshot)
-            .arg(SANDBOX_SNAPSHOT)
-            .arg("--ro-bind")
-            .arg(&self.paths.excludes)
-            .arg(SANDBOX_EXCLUDES)
-            .arg("--")
-            .arg(&self.rsync)
-            .arg("-rlpt")
-            .arg("--delete")
-            .arg("--delete-delay")
-            .arg("--delay-updates")
-            .arg("--quiet")
-            .arg("--exclude-from")
-            .arg(SANDBOX_EXCLUDES)
-            .arg(self.consistency.root().join("."))
-            .arg(Path::new(SANDBOX_SNAPSHOT).join("."))
-            .stdin(Stdio::from(userns))
-            .output()
-            .map_err(|source| TransactionError::Spawn {
-                program: PathBuf::from(bwrap),
-                source,
-            })?;
-        if !output.status.success() {
-            return Err(TransactionError::SandboxFailed {
-                exit_code: output.status.code().unwrap_or(-1),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            });
-        }
-        Ok(())
-    }
-}
-
-fn sandbox_child_pid(info: &str) -> Option<u32> {
-    let value = serde_json::from_str::<serde_json::Value>(info).ok()?;
-    let pid = value.get("child-pid")?.as_u64()?;
-    u32::try_from(pid).ok()
 }
 
 #[derive(Debug)]
@@ -279,11 +249,10 @@ struct TransactionPaths {
     root: PathBuf,
     upper: PathBuf,
     command_work: PathBuf,
-    snapshot_work: PathBuf,
     snapshot: PathBuf,
     excludes: PathBuf,
-    info: PathBuf,
-    release: PathBuf,
+    inner_status: PathBuf,
+    result_status: PathBuf,
 }
 
 impl TransactionPaths {
@@ -312,17 +281,16 @@ impl TransactionPaths {
                 Ok(()) => {
                     let upper = root.join("upper");
                     let command_work = root.join("command-work");
-                    let snapshot_work = root.join("snapshot-work");
                     let snapshot = root.join("snapshot");
-                    for path in [&upper, &command_work, &snapshot_work, &snapshot] {
+                    for path in [&upper, &command_work, &snapshot] {
                         fs::create_dir(path).map_err(|source| TransactionError::Io {
                             path: path.clone(),
                             source,
                         })?;
                     }
-                    let info = root.join("info");
-                    let release = root.join("release");
-                    for path in [&info, &release] {
+                    let inner_status = root.join("inner-status");
+                    let result_status = root.join("result-status");
+                    for path in [&inner_status, &result_status] {
                         fs::write(path, b"").map_err(|source| TransactionError::Io {
                             path: path.clone(),
                             source,
@@ -333,10 +301,9 @@ impl TransactionPaths {
                         root,
                         upper,
                         command_work,
-                        snapshot_work,
                         snapshot,
-                        info,
-                        release,
+                        inner_status,
+                        result_status,
                     });
                 }
                 Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -378,15 +345,11 @@ pub(super) enum TransactionError {
     Workspace(WorkspaceConsistencyError),
     TempInsideWorkspace(PathBuf),
     CreateTempExhausted(PathBuf),
-    InvalidSandboxInfo {
+    InvalidSandboxStatus {
         path: PathBuf,
         value: String,
     },
     Spawn {
-        program: PathBuf,
-        source: std::io::Error,
-    },
-    Wait {
         program: PathBuf,
         source: std::io::Error,
     },
@@ -418,16 +381,13 @@ impl Display for TransactionError {
                 "failed to allocate a workspace transaction directory below {}",
                 path.display()
             ),
-            Self::InvalidSandboxInfo { path, value } => write!(
+            Self::InvalidSandboxStatus { path, value } => write!(
                 f,
-                "invalid Bubblewrap sandbox info in {}: {value:?}",
+                "invalid Bubblewrap sandbox status in {}: {value:?}",
                 path.display()
             ),
             Self::Spawn { program, source } => {
                 write!(f, "failed to execute {}: {source}", program.display())
-            }
-            Self::Wait { program, source } => {
-                write!(f, "failed to wait for {}: {source}", program.display())
             }
             Self::SandboxFailed { exit_code, stderr } => write!(
                 f,
@@ -454,12 +414,10 @@ impl Error for TransactionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Workspace(error) => Some(error),
-            Self::Spawn { source, .. } | Self::Wait { source, .. } | Self::Io { source, .. } => {
-                Some(source)
-            }
+            Self::Spawn { source, .. } | Self::Io { source, .. } => Some(source),
             Self::TempInsideWorkspace(_)
             | Self::CreateTempExhausted(_)
-            | Self::InvalidSandboxInfo { .. }
+            | Self::InvalidSandboxStatus { .. }
             | Self::SandboxFailed { .. }
             | Self::ApplyFailed { .. } => None,
         }
@@ -576,12 +534,18 @@ mod tests {
         let output = transaction
             .execute(
                 &bash(),
-                "! printf tamper > /tmp/phenix-transaction-release 2>/dev/null; test ! -e /tmp/phenix-transaction-snapshot; test ! -e /tmp/phenix-transaction-excludes; printf new > source.txt",
+                "printf tamper > /tmp/phenix-transaction-result-status; printf tamper > /tmp/phenix-transaction-inner-status; test ! -e /tmp/phenix-transaction-snapshot; test ! -e /tmp/phenix-transaction-excludes; printf new > source.txt",
             )
             .unwrap();
 
         assert_eq!(output.exit_code, 0);
-        assert_eq!(fs::read_to_string(&transaction.paths.release).unwrap(), "1");
+        assert_eq!(
+            fs::read_to_string(&transaction.paths.result_status).unwrap(),
+            "0\n"
+        );
+        assert!(fs::read_to_string(&transaction.paths.inner_status)
+            .unwrap()
+            .contains("\"exit-code\""));
         transaction.commit().unwrap();
         assert_eq!(
             fs::read_to_string(fixture.root.join("source.txt")).unwrap(),
