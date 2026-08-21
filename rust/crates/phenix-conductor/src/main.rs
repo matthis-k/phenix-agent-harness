@@ -11,8 +11,6 @@ mod configuration;
 #[cfg(unix)]
 mod local_service;
 mod workspace;
-mod workspace_consistency;
-mod workspace_tools;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -80,8 +78,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         let context = ContextRegistry::discover(workspace.root())?;
         let mut runtime = server.runtime();
         runtime.install_context_registry(context);
-        workspace_tools::register(&mut runtime, workspace.descriptor().clone())?;
     }
+    server.install_workspace_tools()?;
 
     if let Some(path) = arguments.configuration {
         let configuration = configuration::RuntimeConfiguration::load(path)?;

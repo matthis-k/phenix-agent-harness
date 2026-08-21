@@ -32,6 +32,8 @@ mod semantic_tools;
 mod workspace_consistency;
 #[path = "workspace_lease.rs"]
 mod workspace_lease;
+#[path = "workspace_tools.rs"]
+mod workspace_tools;
 
 use workspace_consistency::{WorkspaceConsistency, WorkspaceConsistencyError};
 use workspace_lease::{WorkspaceLeaseError, WorkspaceLeaseManager};
@@ -44,6 +46,17 @@ const IN_MEMORY_WORKSPACE_ID: &str = "workspace:in-memory";
 type SharedBackend = Arc<Mutex<Box<dyn Backend>>>;
 type SharedRuntime = Arc<Mutex<ConductorRuntime>>;
 type ActiveScopes = Arc<Mutex<BTreeMap<ExecutionId, LiveExecutionScope>>>;
+
+#[derive(Clone)]
+struct ExecutionWorkerContext {
+    runtime: SharedRuntime,
+    backends: BTreeMap<BackendId, SharedBackend>,
+    active_scopes: ActiveScopes,
+    workspace_leases: WorkspaceLeaseManager,
+    workspace_consistency: Option<WorkspaceConsistency>,
+    store: Option<JsonFileStore>,
+    persist_lock: Arc<Mutex<()>>,
+}
 
 struct ExecutionJob {
     execution_id: ExecutionId,
@@ -247,6 +260,16 @@ impl ConductorServer {
         Ok(())
     }
 
+    pub fn install_workspace_tools(&mut self) -> Result<(), ServerError> {
+        let consistency = self
+            .workspace_consistency
+            .clone()
+            .ok_or(ServerError::WorkspaceConsistencyNotInstalled)?;
+        let mut runtime = self.lock_runtime()?;
+        workspace_tools::register(&mut runtime, consistency)?;
+        Ok(())
+    }
+
     pub fn register_backend(
         &mut self,
         backend_id: BackendId,
@@ -282,14 +305,15 @@ impl ConductorServer {
         };
         let (output_sender, output_receiver) = mpsc::sync_channel(OUTPUT_BUFFER);
         let executions = ExecutionQueue::default();
-
-        let runtime = self.runtime.clone();
-        let backends = self.backends.clone();
-        let active_scopes = self.active_scopes.clone();
-        let workspace_leases = self.workspace_leases.clone();
-        let workspace_consistency = self.workspace_consistency.clone();
-        let store = self.store.clone();
-        let persist_lock = self.persist_lock.clone();
+        let worker_context = ExecutionWorkerContext {
+            runtime: self.runtime.clone(),
+            backends: self.backends.clone(),
+            active_scopes: self.active_scopes.clone(),
+            workspace_leases: self.workspace_leases.clone(),
+            workspace_consistency: self.workspace_consistency.clone(),
+            store: self.store.clone(),
+            persist_lock: self.persist_lock.clone(),
+        };
 
         thread::scope(|scope| {
             let writer = scope.spawn(move || -> Result<(), ServerError> {
@@ -314,25 +338,8 @@ impl ConductorServer {
             let executors = (0..EXECUTION_WORKERS)
                 .map(|_| {
                     let executions = executions.clone();
-                    let runtime = runtime.clone();
-                    let backends = backends.clone();
-                    let active_scopes = active_scopes.clone();
-                    let workspace_leases = workspace_leases.clone();
-                    let workspace_consistency = workspace_consistency.clone();
-                    let store = store.clone();
-                    let persist_lock = persist_lock.clone();
-                    scope.spawn(move || {
-                        execution_loop(
-                            executions,
-                            runtime,
-                            backends,
-                            active_scopes,
-                            workspace_leases,
-                            workspace_consistency,
-                            store,
-                            persist_lock,
-                        )
-                    })
+                    let context = worker_context.clone();
+                    scope.spawn(move || execution_loop(executions, context))
                 })
                 .collect::<Vec<_>>();
 
@@ -749,25 +756,10 @@ impl ConductorServer {
 
 fn execution_loop(
     executions: ExecutionQueue,
-    runtime: SharedRuntime,
-    backends: BTreeMap<BackendId, SharedBackend>,
-    active_scopes: ActiveScopes,
-    workspace_leases: WorkspaceLeaseManager,
-    workspace_consistency: Option<WorkspaceConsistency>,
-    store: Option<JsonFileStore>,
-    persist_lock: Arc<Mutex<()>>,
+    context: ExecutionWorkerContext,
 ) -> Result<(), ServerError> {
     while let Some(job) = executions.next()? {
-        let result = execute_job_chain(
-            job.execution_id,
-            &runtime,
-            &backends,
-            &active_scopes,
-            &workspace_leases,
-            workspace_consistency.as_ref(),
-            store.as_ref(),
-            &persist_lock,
-        );
+        let result = execute_job_chain(job.execution_id, &context);
         executions.complete(&job.session_id)?;
         result?;
     }
@@ -776,44 +768,30 @@ fn execution_loop(
 
 fn execute_job_chain(
     execution_id: ExecutionId,
-    runtime: &SharedRuntime,
-    backends: &BTreeMap<BackendId, SharedBackend>,
-    active_scopes: &ActiveScopes,
-    workspace_leases: &WorkspaceLeaseManager,
-    workspace_consistency: Option<&WorkspaceConsistency>,
-    store: Option<&JsonFileStore>,
-    persist_lock: &Arc<Mutex<()>>,
+    context: &ExecutionWorkerContext,
 ) -> Result<(), ServerError> {
     let mut current = Some(execution_id);
     let mut workspace_phase = WorkspacePhase::default();
     while let Some(execution_id) = current {
-        execute_execution(
-            &execution_id,
-            runtime,
-            backends,
-            active_scopes,
-            workspace_leases,
-            workspace_consistency,
-            &mut workspace_phase,
-            store,
-            persist_lock,
-        )?;
-        current = next_scheduled_execution(runtime, &execution_id)?;
+        execute_execution(&execution_id, context, &mut workspace_phase)?;
+        current = next_scheduled_execution(&context.runtime, &execution_id)?;
     }
     Ok(())
 }
 
 fn execute_execution(
     execution_id: &ExecutionId,
-    runtime: &SharedRuntime,
-    backends: &BTreeMap<BackendId, SharedBackend>,
-    active_scopes: &ActiveScopes,
-    workspace_leases: &WorkspaceLeaseManager,
-    workspace_consistency: Option<&WorkspaceConsistency>,
+    context: &ExecutionWorkerContext,
     workspace_phase: &mut WorkspacePhase,
-    store: Option<&JsonFileStore>,
-    persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
+    let runtime = &context.runtime;
+    let backends = &context.backends;
+    let active_scopes = &context.active_scopes;
+    let workspace_leases = &context.workspace_leases;
+    let workspace_consistency = context.workspace_consistency.as_ref();
+    let store = context.store.as_ref();
+    let persist_lock = &context.persist_lock;
+
     let lease_request = {
         let runtime_guard = runtime
             .lock()
@@ -1485,6 +1463,7 @@ pub enum ServerError {
     Persistence(PersistenceError),
     Runtime(ConductorError),
     WorkspaceConsistency(WorkspaceConsistencyError),
+    WorkspaceConsistencyNotInstalled,
     WorkspaceConsistencyUnavailable(WorkspaceId),
     WorkspaceLeaseStatePoisoned,
     DuplicateBackend(BackendId),
@@ -1501,6 +1480,9 @@ impl Display for ServerError {
             Self::Persistence(error) => Display::fmt(error, f),
             Self::Runtime(error) => Display::fmt(error, f),
             Self::WorkspaceConsistency(error) => Display::fmt(error, f),
+            Self::WorkspaceConsistencyNotInstalled => {
+                f.write_str("workspace consistency is not installed")
+            }
             Self::WorkspaceConsistencyUnavailable(workspace_id) => write!(
                 f,
                 "workspace consistency is not installed for writable workspace {workspace_id}"

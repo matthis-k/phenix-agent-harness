@@ -1,16 +1,13 @@
-use crate::workspace_consistency::{WorkspaceConsistency, WorkspaceConsistencyError};
-use phenix_conductor::{ConductorError, ConductorRuntime, ToolOutcome};
+use super::workspace_consistency::WorkspaceConsistency;
+use crate::{ConductorError, ConductorRuntime, ToolOutcome};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, FileVersion,
-    FilesystemAuthority, WorkspaceDescriptor, CAPABILITY_FILESYSTEM_READ,
-    CAPABILITY_FILESYSTEM_WRITE,
+    FilesystemAuthority, CAPABILITY_FILESYSTEM_READ, CAPABILITY_FILESYSTEM_WRITE,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::error::Error;
 use std::ffi::OsString;
-use std::fmt::{self, Display, Formatter};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -59,47 +56,10 @@ struct GrepInput {
     case_sensitive: Option<bool>,
 }
 
-#[derive(Debug)]
-pub enum RegisterError {
-    Conductor(ConductorError),
-    Workspace(WorkspaceConsistencyError),
-}
-
-impl Display for RegisterError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Conductor(error) => Display::fmt(error, f),
-            Self::Workspace(error) => Display::fmt(error, f),
-        }
-    }
-}
-
-impl Error for RegisterError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Conductor(error) => Some(error),
-            Self::Workspace(error) => Some(error),
-        }
-    }
-}
-
-impl From<ConductorError> for RegisterError {
-    fn from(value: ConductorError) -> Self {
-        Self::Conductor(value)
-    }
-}
-
-impl From<WorkspaceConsistencyError> for RegisterError {
-    fn from(value: WorkspaceConsistencyError) -> Self {
-        Self::Workspace(value)
-    }
-}
-
-pub fn register(
+pub(super) fn register(
     runtime: &mut ConductorRuntime,
-    workspace: WorkspaceDescriptor,
-) -> Result<(), RegisterError> {
-    let consistency = WorkspaceConsistency::new(&workspace)?;
+    consistency: WorkspaceConsistency,
+) -> Result<(), ConductorError> {
     let root = consistency.root().to_path_buf();
 
     let bash_workspace = root.clone();
@@ -651,7 +611,7 @@ mod tests {
         AgentDefinition, BackendId, ExecutionAuthority, ExecutionId, ExecutionTarget,
         FilesystemAuthority, InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition,
         OrchestrationNode, OrchestrationNodeId, ProviderId, RoutingProfile, RoutingProfileId,
-        WorkspaceId,
+        WorkspaceDescriptor, WorkspaceId,
     };
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
@@ -967,7 +927,7 @@ mod tests {
     fn workspace_tools_declare_filesystem_requirements() {
         let workspace = temp_workspace("tool-capabilities");
         let mut runtime = ConductorRuntime::new();
-        register(&mut runtime, descriptor(&workspace, BTreeSet::new())).unwrap();
+        register(&mut runtime, consistency(&workspace, BTreeSet::new())).unwrap();
         let descriptors = runtime
             .tool_descriptors()
             .into_iter()
@@ -987,7 +947,7 @@ mod tests {
     fn default_tool_registry_reaches_root_and_every_agent_in_an_orchestration() {
         let workspace = temp_workspace("tool-surface");
         let mut runtime = ConductorRuntime::new();
-        register(&mut runtime, descriptor(&workspace, BTreeSet::new())).unwrap();
+        register(&mut runtime, consistency(&workspace, BTreeSet::new())).unwrap();
         assert_eq!(
             runtime
                 .tool_descriptors()
