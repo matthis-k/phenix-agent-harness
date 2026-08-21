@@ -1,5 +1,5 @@
 use phenix_conductor::{ConductorError, ConductorRuntime};
-use phenix_core::{CallableDescriptor, OrchestrationDefinition, RoutingProfile};
+use phenix_core::{AgentDefinition, OrchestrationDefinition, RoutingProfile};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfiguration {
     #[serde(default)]
-    pub agents: Vec<CallableDescriptor>,
+    pub agents: Vec<AgentDefinition>,
     #[serde(default)]
     pub orchestrations: Vec<OrchestrationDefinition>,
     #[serde(default)]
@@ -105,9 +105,10 @@ impl From<ConductorError> for ConfigurationError {
 mod tests {
     use super::*;
     use phenix_core::{
-        BackendId, CallableId, CallableKind, CallablePolicy, CapabilitySet, ExecutionTarget,
-        InferenceOptions, ModelId, ModelTarget, OrchestrationNode, OrchestrationNodeId, ProviderId,
-        RoutingProfileId,
+        BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+        ExecutionAuthority, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId,
+        ModelTarget, NetworkAuthority, OrchestrationNode, OrchestrationNodeId, ProviderId,
+        RepositoryAuthority, RoutingProfileId,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -159,7 +160,7 @@ mod tests {
             callable_targets: BTreeMap::from([(agent.id.clone(), target("agent"))]),
         };
         let encoded = serde_json::to_string(&RuntimeConfiguration {
-            agents: vec![agent.clone()],
+            agents: vec![agent.clone().into()],
             orchestrations: vec![orchestration],
             routing_profiles: vec![route],
         })
@@ -196,11 +197,38 @@ mod tests {
     }
 
     #[test]
+    fn configured_agent_authority_reaches_execution_creation() {
+        let descriptor = descriptor("agent.writer", CallableKind::Agent);
+        let authority = ExecutionAuthority {
+            filesystem: FilesystemAuthority::Write,
+            network: NetworkAuthority::None,
+            repository: RepositoryAuthority::Read,
+            ..ExecutionAuthority::read_only()
+        };
+        let configuration = RuntimeConfiguration {
+            agents: vec![AgentDefinition::new(descriptor.clone(), authority.clone())],
+            ..RuntimeConfiguration::default()
+        };
+        let encoded = serde_json::to_string(&configuration).unwrap();
+        let decoded: RuntimeConfiguration = serde_json::from_str(&encoded).unwrap();
+        let mut runtime = ConductorRuntime::new();
+        decoded.apply(&mut runtime).unwrap();
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(target("worker")))
+            .unwrap();
+        let execution = runtime
+            .start_session_callable(&session.id, &descriptor.id, "write")
+            .unwrap();
+
+        assert_eq!(runtime.execution_authority(&execution.id).unwrap(), authority);
+    }
+
+    #[test]
     fn configured_workflow_step_keeps_the_user_objective() {
         let agent = descriptor("agent.worker", CallableKind::Agent);
         let workflow_id = CallableId::parse("orchestration.implement").unwrap();
         let configuration = RuntimeConfiguration {
-            agents: vec![agent.clone()],
+            agents: vec![agent.clone().into()],
             orchestrations: vec![OrchestrationDefinition {
                 descriptor: descriptor(workflow_id.as_str(), CallableKind::Orchestration),
                 nodes: vec![node(
@@ -237,7 +265,7 @@ mod tests {
     #[test]
     fn application_configuration_rejects_wrong_callable_kinds() {
         let configuration = RuntimeConfiguration {
-            agents: vec![descriptor("tool.not-an-agent", CallableKind::Tool)],
+            agents: vec![descriptor("tool.not-an-agent", CallableKind::Tool).into()],
             ..RuntimeConfiguration::default()
         };
         assert!(matches!(
