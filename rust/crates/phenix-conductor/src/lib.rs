@@ -34,16 +34,17 @@ use phenix_backend::{
 use phenix_core::{
     AgentDefinition, CallableDescriptor, CallableId, CallableKind, ConfigRevisionId,
     ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget, FileObservation,
-    ModelTarget, OrchestrationDefinition, OrchestrationNodeId, RoutingProfile, SessionId,
-    SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId, WorkspaceId,
-    WorkspaceLeaseRequest,
+    ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
+    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
+    OrchestrationNodeId, RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor,
+    SkillId, ToolCallId, WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConductorError {
@@ -482,6 +483,16 @@ impl ConductorRuntime {
             .get(execution_id)
             .cloned()
             .unwrap_or_else(|| ExecutionReadSet::new(execution_id.clone())))
+    }
+
+    pub fn execution_workspace_validity(
+        &self,
+        execution_id: &ExecutionId,
+        current: &BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<ExecutionWorkspaceValidity, ConductorError> {
+        Ok(self
+            .execution_read_set(execution_id)?
+            .validity_against(current))
     }
 
     fn record_file_observation(

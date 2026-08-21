@@ -186,6 +186,19 @@ impl ExecutionReadSet {
             })
             .collect()
     }
+
+    #[must_use]
+    pub fn validity_against(
+        &self,
+        current: &BTreeMap<PathBuf, FileVersion>,
+    ) -> ExecutionWorkspaceValidity {
+        let conflicts = self.conflicts_with(current);
+        if conflicts.is_empty() {
+            ExecutionWorkspaceValidity::Current
+        } else {
+            ExecutionWorkspaceValidity::Invalidated { conflicts }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -193,6 +206,13 @@ pub struct WorkspaceConflict {
     pub path: PathBuf,
     pub expected: FileVersion,
     pub actual: FileVersion,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ExecutionWorkspaceValidity {
+    Current,
+    Invalidated { conflicts: Vec<WorkspaceConflict> },
 }
 
 #[cfg(test)]
@@ -288,6 +308,37 @@ mod tests {
                 content_hash: "v1".to_owned(),
                 kind: FileKind::Regular,
             }
+        );
+    }
+
+    #[test]
+    fn workspace_validity_tracks_exact_observed_versions() {
+        let mut reads = ExecutionReadSet::new(ExecutionId::parse("execution-1").unwrap());
+        let original = FileVersion::Present {
+            content_hash: "v1".to_owned(),
+            kind: FileKind::Regular,
+        };
+        reads.observe(FileObservation {
+            path: PathBuf::from("src/lib.rs"),
+            version: original.clone(),
+        });
+
+        let changed = BTreeMap::from([(
+            PathBuf::from("src/lib.rs"),
+            FileVersion::Present {
+                content_hash: "v2".to_owned(),
+                kind: FileKind::Regular,
+            },
+        )]);
+        assert!(matches!(
+            reads.validity_against(&changed),
+            ExecutionWorkspaceValidity::Invalidated { conflicts } if conflicts.len() == 1
+        ));
+
+        let restored = BTreeMap::from([(PathBuf::from("src/lib.rs"), original)]);
+        assert_eq!(
+            reads.validity_against(&restored),
+            ExecutionWorkspaceValidity::Current
         );
     }
 
