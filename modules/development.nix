@@ -113,6 +113,12 @@
           test = "runtime_edge_cases";
           label = "conductor / runtime_edge_cases";
         }
+        {
+          id = "conductor-workspace-execution-leases";
+          package = "phenix-conductor";
+          test = "workspace_execution_leases";
+          label = "conductor / workspace_execution_leases";
+        }
       ];
 
       cargoTestTargets = integrationTargets ++ systemTargets;

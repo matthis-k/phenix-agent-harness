@@ -9,7 +9,7 @@ use phenix_backend::{
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget,
-    RoutingProfileDescriptor, SessionId, SessionState,
+    RoutingProfileDescriptor, SessionId, SessionState, WorkspaceId,
 };
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
@@ -26,6 +26,10 @@ use std::thread;
 
 #[path = "semantic_tools.rs"]
 mod semantic_tools;
+#[path = "workspace_lease.rs"]
+mod workspace_lease;
+
+use workspace_lease::{WorkspaceLeaseError, WorkspaceLeaseManager};
 
 const EVENT_BUFFER: usize = 256;
 const OUTPUT_BUFFER: usize = 256;
@@ -158,6 +162,7 @@ pub struct ConductorServer {
     backends: BTreeMap<BackendId, SharedBackend>,
     catalogs: BTreeMap<BackendId, BackendCatalog>,
     active_scopes: ActiveScopes,
+    workspace_leases: WorkspaceLeaseManager,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
 }
@@ -170,16 +175,26 @@ impl ConductorServer {
             backends: BTreeMap::new(),
             catalogs: BTreeMap::new(),
             active_scopes: Arc::new(Mutex::new(BTreeMap::new())),
+            workspace_leases: WorkspaceLeaseManager::default(),
             store: None,
             persist_lock: Arc::new(Mutex::new(())),
         }
     }
 
-    pub fn load_or_new(store: JsonFileStore) -> Result<Self, ServerError> {
+    pub fn load_or_new(
+        store: JsonFileStore,
+        workspace_id: WorkspaceId,
+    ) -> Result<Self, ServerError> {
         let runtime = match store.load() {
-            Ok(journal) => ConductorRuntime::restore(journal)?,
+            Ok(journal) => {
+                let mut runtime = ConductorRuntime::restore(journal)?;
+                runtime.bind_workspace(workspace_id.clone())?;
+                runtime
+            }
             Err(PersistenceError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-                ConductorRuntime::new()
+                let mut runtime = ConductorRuntime::new();
+                runtime.bind_workspace(workspace_id)?;
+                runtime
             }
             Err(error) => return Err(error.into()),
         };
@@ -232,6 +247,7 @@ impl ConductorServer {
         let runtime = self.runtime.clone();
         let backends = self.backends.clone();
         let active_scopes = self.active_scopes.clone();
+        let workspace_leases = self.workspace_leases.clone();
         let store = self.store.clone();
         let persist_lock = self.persist_lock.clone();
 
@@ -261,6 +277,7 @@ impl ConductorServer {
                     let runtime = runtime.clone();
                     let backends = backends.clone();
                     let active_scopes = active_scopes.clone();
+                    let workspace_leases = workspace_leases.clone();
                     let store = store.clone();
                     let persist_lock = persist_lock.clone();
                     scope.spawn(move || {
@@ -269,6 +286,7 @@ impl ConductorServer {
                             runtime,
                             backends,
                             active_scopes,
+                            workspace_leases,
                             store,
                             persist_lock,
                         )
@@ -692,6 +710,7 @@ fn execution_loop(
     runtime: SharedRuntime,
     backends: BTreeMap<BackendId, SharedBackend>,
     active_scopes: ActiveScopes,
+    workspace_leases: WorkspaceLeaseManager,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
@@ -701,6 +720,7 @@ fn execution_loop(
             &runtime,
             &backends,
             &active_scopes,
+            &workspace_leases,
             store.as_ref(),
             &persist_lock,
         );
@@ -715,6 +735,7 @@ fn execute_job_chain(
     runtime: &SharedRuntime,
     backends: &BTreeMap<BackendId, SharedBackend>,
     active_scopes: &ActiveScopes,
+    workspace_leases: &WorkspaceLeaseManager,
     store: Option<&JsonFileStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
@@ -725,6 +746,7 @@ fn execute_job_chain(
             runtime,
             backends,
             active_scopes,
+            workspace_leases,
             store,
             persist_lock,
         )?;
@@ -738,9 +760,36 @@ fn execute_execution(
     runtime: &SharedRuntime,
     backends: &BTreeMap<BackendId, SharedBackend>,
     active_scopes: &ActiveScopes,
+    workspace_leases: &WorkspaceLeaseManager,
     store: Option<&JsonFileStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
+    let lease_request = {
+        let runtime_guard = runtime
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
+        match runtime_guard.execution_state(execution_id) {
+            Some(ExecutionState::Pending) => runtime_guard.workspace_lease_request(execution_id),
+            Some(state) if is_terminal_state(&state) => return Ok(()),
+            Some(_) => return Ok(()),
+            None => return Ok(()),
+        }
+    };
+    let lease_request = match lease_request {
+        Ok(request) => request,
+        Err(error) => {
+            fail_shared_execution(
+                runtime,
+                execution_id,
+                map_conductor_error(error),
+                store,
+                persist_lock,
+            )?;
+            return Ok(());
+        }
+    };
+    let _workspace_lease = workspace_leases.acquire(lease_request)?;
+
     let provider_kind = {
         let runtime_guard = runtime
             .lock()
@@ -1357,6 +1406,7 @@ pub enum ServerError {
     Json(serde_json::Error),
     Persistence(PersistenceError),
     Runtime(ConductorError),
+    WorkspaceLeaseStatePoisoned,
     DuplicateBackend(BackendId),
     OutputClosed,
     StatePoisoned(&'static str),
@@ -1370,6 +1420,7 @@ impl Display for ServerError {
             Self::Json(error) => Display::fmt(error, f),
             Self::Persistence(error) => Display::fmt(error, f),
             Self::Runtime(error) => Display::fmt(error, f),
+            Self::WorkspaceLeaseStatePoisoned => f.write_str("workspace lease state lock poisoned"),
             Self::DuplicateBackend(id) => write!(f, "backend already registered: {id}"),
             Self::OutputClosed => f.write_str("frontend output channel closed"),
             Self::StatePoisoned(name) => write!(f, "{name} lock poisoned"),
@@ -1401,6 +1452,12 @@ impl From<PersistenceError> for ServerError {
 impl From<ConductorError> for ServerError {
     fn from(value: ConductorError) -> Self {
         Self::Runtime(value)
+    }
+}
+
+impl From<WorkspaceLeaseError> for ServerError {
+    fn from(_: WorkspaceLeaseError) -> Self {
+        Self::WorkspaceLeaseStatePoisoned
     }
 }
 
@@ -1463,6 +1520,10 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.execution_id = Some(id);
             error
         }
+        ConductorError::WorkspaceMismatch { expected, actual } => protocol_error(
+            ErrorCode::InvalidRequest,
+            format!("workspace binding mismatch: persisted {expected}, discovered {actual}"),
+        ),
         ConductorError::EmptyInput => {
             protocol_error(ErrorCode::InvalidRequest, "input must not be empty")
         }
@@ -1772,7 +1833,7 @@ mod tests {
     }
 
     #[test]
-    fn independent_sessions_use_bounded_parallel_execution_lanes() {
+    fn read_only_sessions_share_workspace_and_execute_concurrently() {
         let gate = ConcurrentGate {
             state: Arc::new((Mutex::new(0), Condvar::new())),
         };

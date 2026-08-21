@@ -36,7 +36,7 @@ use phenix_core::{
     ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
     ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, OrchestrationDefinition,
     OrchestrationNodeId, RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor,
-    SkillId, ToolCallId,
+    SkillId, ToolCallId, WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -50,6 +50,10 @@ pub enum ConductorError {
     ClosedSession(SessionId),
     SessionHasActiveExecutions(SessionId),
     UnknownExecution(ExecutionId),
+    WorkspaceMismatch {
+        expected: WorkspaceId,
+        actual: WorkspaceId,
+    },
     EmptyInput,
     InvalidLifecycle(ExecutionId),
     NonModelExecution(ExecutionId),
@@ -75,6 +79,10 @@ impl Display for ConductorError {
                 write!(f, "session has active executions and cannot close: {id}")
             }
             Self::UnknownExecution(id) => write!(f, "unknown execution: {id}"),
+            Self::WorkspaceMismatch { expected, actual } => write!(
+                f,
+                "workspace binding mismatch: persisted {expected}, discovered {actual}"
+            ),
             Self::EmptyInput => f.write_str("input must not be empty"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
             Self::NonModelExecution(id) => {
@@ -198,6 +206,7 @@ impl PreparedInvocation {
 #[derive(Debug)]
 pub struct ConductorRuntime {
     config_revision: ConfigRevisionId,
+    workspace_id: WorkspaceId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
     orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
@@ -227,9 +236,11 @@ impl ConductorRuntime {
     #[must_use]
     pub fn new() -> Self {
         let config_revision = ConfigRevisionId::parse("config-1").expect("static config id");
+        let workspace_id = WorkspaceId::parse("workspace:in-memory").expect("static workspace id");
         Self {
             journal: RuntimeJournal::new(config_revision.clone()),
             config_revision,
+            workspace_id,
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
             orchestration_nodes: BTreeMap::new(),
@@ -247,6 +258,21 @@ impl ConductorRuntime {
             next_event: 0,
             next_tool_call: 0,
         }
+    }
+
+    pub fn bind_workspace(&mut self, workspace_id: WorkspaceId) -> Result<(), ConductorError> {
+        if let Some(session) = self
+            .sessions
+            .values()
+            .find(|session| session.summary.workspace_id != workspace_id)
+        {
+            return Err(ConductorError::WorkspaceMismatch {
+                expected: session.summary.workspace_id.clone(),
+                actual: workspace_id,
+            });
+        }
+        self.workspace_id = workspace_id;
+        Ok(())
     }
 
     fn record_domain_event(&mut self, mut event: DomainEvent) -> Result<(), ConductorError> {
@@ -422,6 +448,23 @@ impl ConductorRuntime {
         self.callables.tool_descriptors()
     }
 
+    fn permitted_tool_descriptors(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        let authority = self.execution_authority(execution_id)?;
+        Ok(self
+            .callables
+            .tool_descriptors()
+            .into_iter()
+            .filter(|descriptor| {
+                authority
+                    .filesystem
+                    .permits_capabilities(&descriptor.capabilities)
+            })
+            .collect())
+    }
+
     pub fn execution_authority(
         &self,
         execution_id: &ExecutionId,
@@ -430,6 +473,25 @@ impl ConductorRuntime {
             .get(execution_id)
             .map(|execution| execution.authority.clone())
             .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))
+    }
+
+    pub(crate) fn workspace_lease_request(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<WorkspaceLeaseRequest, ConductorError> {
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let session = self
+            .sessions
+            .get(&execution.summary.session_id)
+            .expect("execution session invariant");
+        Ok(WorkspaceLeaseRequest {
+            workspace_id: session.summary.workspace_id.clone(),
+            execution_id: execution_id.clone(),
+            mode: execution.authority.filesystem.into(),
+        })
     }
 
     fn effective_authority_for_execution(
@@ -477,15 +539,21 @@ impl ConductorRuntime {
         name: Option<String>,
         target: ExecutionTarget,
     ) -> Result<SessionSummary, ConductorError> {
-        if let Some(parent) = parent_session.as_ref() {
-            if !self.sessions.contains_key(parent) {
-                return Err(ConductorError::UnknownSession(parent.clone()));
-            }
-        }
+        let workspace_id = if let Some(parent) = parent_session.as_ref() {
+            self.sessions
+                .get(parent)
+                .ok_or_else(|| ConductorError::UnknownSession(parent.clone()))?
+                .summary
+                .workspace_id
+                .clone()
+        } else {
+            self.workspace_id.clone()
+        };
         let summary = SessionSummary {
             id: self.new_session_id(),
             parent_session,
             name,
+            workspace_id,
             config_revision: self.config_revision.clone(),
             default_target: target,
             state: SessionState::Active,
@@ -800,7 +868,7 @@ impl ConductorRuntime {
             model: route.model,
             prompt,
             tools: ToolProvision {
-                callables: self.callables.tool_descriptors(),
+                callables: self.permitted_tool_descriptors(execution_id)?,
             },
         })
     }
@@ -1397,7 +1465,8 @@ mod tests {
     use super::*;
     use phenix_core::{
         BackendId, CallablePolicy, CapabilitySet, FilesystemAuthority, InferenceOptions, ModelId,
-        NetworkAuthority, ProviderId, RepositoryAuthority, RoutingProfileId,
+        NetworkAuthority, ProviderId, RepositoryAuthority, RoutingProfileId, WorkspaceId,
+        CAPABILITY_FILESYSTEM_READ, CAPABILITY_FILESYSTEM_WRITE,
     };
     use serde_json::json;
 
@@ -1418,6 +1487,23 @@ mod tests {
             input_schema: json!({"type": "object"}),
             output_schema: json!({"type": "object"}),
             capabilities: CapabilitySet::default(),
+            policy: CallablePolicy::default(),
+        }
+    }
+
+    fn tool(id: &str, capabilities: &[&str]) -> CallableDescriptor {
+        CallableDescriptor {
+            id: CallableId::parse(id).unwrap(),
+            kind: CallableKind::Tool,
+            description: "test tool".to_owned(),
+            input_schema: json!({"type": "object"}),
+            output_schema: json!({"type": "object"}),
+            capabilities: CapabilitySet(
+                capabilities
+                    .iter()
+                    .map(|capability| (*capability).to_owned())
+                    .collect(),
+            ),
             policy: CallablePolicy::default(),
         }
     }
@@ -1451,6 +1537,22 @@ mod tests {
         let execution = runtime.submit(&fork.id, "work").unwrap();
         assert_eq!(fork.parent_session, Some(root.id));
         assert_eq!(execution.parent_execution, None);
+    }
+
+    #[test]
+    fn sessions_bind_to_runtime_workspace_and_forks_inherit_it() {
+        let mut runtime = ConductorRuntime::new();
+        let workspace = WorkspaceId::parse("workspace:/repo").unwrap();
+        runtime.bind_workspace(workspace.clone()).unwrap();
+        let root = runtime.create_session(None, None, fixed("a")).unwrap();
+        let fork = runtime.fork_session(&root.id, None).unwrap();
+
+        assert_eq!(root.workspace_id, workspace);
+        assert_eq!(fork.workspace_id, root.workspace_id);
+        assert!(matches!(
+            runtime.bind_workspace(WorkspaceId::parse("workspace:/other").unwrap()),
+            Err(ConductorError::WorkspaceMismatch { .. })
+        ));
     }
 
     #[test]
@@ -1653,6 +1755,45 @@ mod tests {
             ConductorRuntime::restore(corrupted),
             Err(PersistenceError::InvalidJournal(message)) if message.contains("authority exceeds parent")
         ));
+    }
+
+    #[test]
+    fn resolved_invocation_filters_tools_by_execution_authority() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.reader"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        runtime
+            .register_tool(tool("tool.read", &[CAPABILITY_FILESYSTEM_READ]), |_| {
+                Ok("read".to_owned())
+            })
+            .unwrap();
+        runtime
+            .register_tool(tool("tool.write", &[CAPABILITY_FILESYSTEM_WRITE]), |_| {
+                Ok("write".to_owned())
+            })
+            .unwrap();
+
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let execution = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.reader").unwrap(),
+                "inspect",
+            )
+            .unwrap();
+        let resolved = runtime.resolve_invocation(&execution.id).unwrap();
+        let tools = resolved
+            .tools
+            .callables
+            .iter()
+            .map(|descriptor| descriptor.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(tools, vec!["tool.read"]);
     }
 
     #[test]
