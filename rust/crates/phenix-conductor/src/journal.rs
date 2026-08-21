@@ -2,13 +2,14 @@ use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
 use phenix_core::{
     ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
     ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
-    FileObservation, ModelTarget, OrchestrationNodeId, SessionId, SessionState, SessionSummary,
-    ToolCallId,
+    FileObservation, FileVersion, FilesystemAuthority, ModelTarget, OrchestrationNodeId, SessionId,
+    SessionState, SessionSummary, ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::path::PathBuf;
 
 pub const JOURNAL_FORMAT_VERSION: u64 = 1;
 
@@ -129,6 +130,12 @@ pub enum DomainEvent {
     InvocationResolved {
         execution_id: ExecutionId,
         route: ResolvedRoute,
+    },
+    WorkspaceCheckpointCaptured {
+        execution_id: ExecutionId,
+        workspace_id: WorkspaceId,
+        #[serde(default)]
+        files: BTreeMap<PathBuf, FileVersion>,
     },
     WorkspaceFileObserved {
         execution_id: ExecutionId,
@@ -608,6 +615,42 @@ pub(crate) fn apply_domain_event(
                         "execution {execution_id} was resolved more than once"
                     )));
                 }
+            }
+        }
+        DomainEvent::WorkspaceCheckpointCaptured {
+            execution_id,
+            workspace_id,
+            files: _,
+        } => {
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.state != ExecutionState::Pending {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references non-pending execution {execution_id}"
+                )));
+            }
+            if execution.authority.filesystem != FilesystemAuthority::Write {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references non-writer execution {execution_id}"
+                )));
+            }
+            let session = state
+                .sessions
+                .get(&execution.summary.session_id)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                    "workspace checkpoint execution {execution_id} references unknown session {}",
+                    execution.summary.session_id
+                ))
+                })?;
+            if session.summary.workspace_id != *workspace_id {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint for {execution_id} uses workspace {workspace_id} instead of {}",
+                    session.summary.workspace_id
+                )));
             }
         }
         DomainEvent::WorkspaceFileObserved {

@@ -2,19 +2,22 @@ use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendExecutionRequest, BackendHost,
     BackendSession, BackendSessionRequest,
 };
-use phenix_conductor::{ConductorRuntime, ConductorServer};
+use phenix_conductor::{ConductorRuntime, ConductorServer, DomainEvent};
 use phenix_core::{
     AgentDefinition, BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy,
     CapabilitySet, ExecutionAuthority, ExecutionState, ExecutionTarget, FilesystemAuthority,
-    InferenceOptions, ModelId, ModelTarget, ProviderId, SessionId,
+    InferenceOptions, ModelId, ModelTarget, ProviderId, SessionId, WorkspaceDescriptor,
+    WorkspaceId,
 };
 use phenix_protocol::{ClientMessage, Command};
 use serde_json::json;
 use std::collections::BTreeSet;
+use std::fs;
 use std::io::Cursor;
+use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Default)]
 struct DispatchState {
@@ -128,10 +131,29 @@ fn encode(commands: impl IntoIterator<Item = Command>) -> String {
 
 #[test]
 fn writer_executions_on_one_workspace_do_not_overlap_backend_dispatch() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace_root = std::env::temp_dir().join(format!(
+        "phenix-workspace-checkpoint-test-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&workspace_root).unwrap();
+    fs::write(workspace_root.join("source.rs"), "before\n").unwrap();
+    let workspace_id = WorkspaceId::parse("workspace:checkpoint-test").unwrap();
+
     let gate = Arc::new((Mutex::new(DispatchState::default()), Condvar::new()));
     let mut runtime = ConductorRuntime::new();
     runtime.register_agent(writer_agent()).unwrap();
     let mut server = ConductorServer::new(runtime);
+    server
+        .install_workspace_consistency(WorkspaceDescriptor {
+            id: workspace_id.clone(),
+            root: workspace_root.clone(),
+            scratch_paths: BTreeSet::new(),
+        })
+        .unwrap();
     server
         .register_backend(
             BackendId::parse("fixture").unwrap(),
@@ -165,8 +187,8 @@ fn writer_executions_on_one_workspace_do_not_overlap_backend_dispatch() {
         server
             .serve_ndjson(Cursor::new(input), std::io::sink())
             .unwrap();
-        let snapshot = server.runtime().snapshot();
-        snapshot
+        let runtime = server.runtime();
+        (runtime.snapshot(), runtime.journal().clone())
     });
 
     let (lock, ready) = &*gate;
@@ -191,7 +213,7 @@ fn writer_executions_on_one_workspace_do_not_overlap_backend_dispatch() {
     ready.notify_all();
     drop(state);
 
-    let snapshot = worker.join().unwrap();
+    let (snapshot, journal) = worker.join().unwrap();
     let state = lock.lock().unwrap();
     assert_eq!(state.entered, 2);
     assert!(!state.overlapped);
@@ -204,4 +226,40 @@ fn writer_executions_on_one_workspace_do_not_overlap_backend_dispatch() {
         "writer execution states: {:?}",
         snapshot.executions
     );
+
+    let checkpoints = journal
+        .entries
+        .iter()
+        .filter_map(|entry| match &entry.event {
+            DomainEvent::WorkspaceCheckpointCaptured {
+                execution_id,
+                workspace_id: checkpoint_workspace,
+                files,
+            } => Some((entry.sequence, execution_id, checkpoint_workspace, files)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(checkpoints.len(), 2, "one checkpoint per root write phase");
+    for (checkpoint_sequence, execution_id, checkpoint_workspace, files) in checkpoints {
+        assert_eq!(checkpoint_workspace, &workspace_id);
+        assert!(files.contains_key(Path::new("source.rs")));
+        let running_sequence = journal
+            .entries
+            .iter()
+            .find_map(|entry| match &entry.event {
+                DomainEvent::ExecutionStateChanged {
+                    execution_id: candidate,
+                    state: ExecutionState::Running,
+                } if candidate == execution_id => Some(entry.sequence),
+                _ => None,
+            })
+            .expect("writer must enter running state");
+        assert!(
+            checkpoint_sequence < running_sequence,
+            "checkpoint must be durable before provider execution starts"
+        );
+    }
+
+    drop(state);
+    fs::remove_dir_all(workspace_root).unwrap();
 }
