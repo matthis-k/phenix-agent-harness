@@ -4,6 +4,7 @@ use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
     ExecutionEventKind, ExecutionKind, ExecutionSummary, SkillId,
 };
+use schemars::{schema_for, JsonSchema};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -13,23 +14,37 @@ pub(super) const ORCHESTRATION_START_ID: &str = "phenix_orchestration_start";
 pub(super) const SKILL_LOAD_ID: &str = "phenix_skill_load";
 pub(super) const SKILL_RESOURCE_READ_ID: &str = "phenix_skill_resource_read";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EmptyInput {}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct OrchestrationStartInput {
+    /// Orchestration id returned by phenix_orchestration_list.
+    #[schemars(length(min = 1))]
     orchestration: String,
+    /// Objective for the orchestration.
+    #[schemars(length(min = 1))]
     objective: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SkillLoadInput {
+    /// Skill id from the available-skills catalog.
+    #[schemars(length(min = 1))]
     skill: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SkillResourceReadInput {
+    /// Active skill id.
+    #[schemars(length(min = 1))]
     skill: String,
+    /// Relative resource path exactly as listed by the active skill.
+    #[schemars(length(min = 1))]
     path: String,
 }
 
@@ -163,15 +178,9 @@ fn orchestration_descriptors() -> Vec<CallableDescriptor> {
 }
 
 fn parse_list(arguments_json: &str) -> Result<(), String> {
-    let value: Value = serde_json::from_str(arguments_json)
-        .map_err(|error| format!("invalid orchestration list arguments: {error}"))?;
-    let Some(object) = value.as_object() else {
-        return Err("orchestration list arguments must be an object".to_owned());
-    };
-    if !object.is_empty() {
-        return Err("orchestration list arguments must be empty".to_owned());
-    }
-    Ok(())
+    serde_json::from_str::<EmptyInput>(arguments_json)
+        .map(|_| ())
+        .map_err(|error| format!("invalid orchestration list arguments: {error}"))
 }
 
 fn parse_start(arguments_json: &str) -> Result<(CallableId, String), String> {
@@ -234,23 +243,16 @@ fn conductor_protocol_error(error: crate::ConductorError) -> BackendError {
     BackendError::Protocol(error.to_string())
 }
 
+fn input_schema<T: JsonSchema>() -> Value {
+    serde_json::to_value(schema_for!(T)).expect("derived input schema must serialize")
+}
+
 fn skill_load_descriptor() -> CallableDescriptor {
     CallableDescriptor {
         id: CallableId::parse(SKILL_LOAD_ID).expect("static skill load id"),
         kind: CallableKind::Tool,
         description: "Load the full instructions and resource inventory for one discoverable Phenix skill by id. Use the available-skills catalog from context instead of guessing names.".to_owned(),
-        input_schema: json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["skill"],
-            "properties": {
-                "skill": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Skill id from the available-skills catalog"
-                }
-            }
-        }),
+        input_schema: input_schema::<SkillLoadInput>(),
         output_schema: json!({
             "type": "string"
         }),
@@ -266,19 +268,7 @@ fn skill_resource_read_descriptor() -> CallableDescriptor {
         id: CallableId::parse(SKILL_RESOURCE_READ_ID).expect("static skill resource read id"),
         kind: CallableKind::Tool,
         description: "Read one frozen text resource listed by a skill that is active for this execution. A skill becomes active through explicit manual invocation or a successful phenix_skill_load.".to_owned(),
-        input_schema: json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["skill", "path"],
-            "properties": {
-                "skill": { "type": "string", "minLength": 1 },
-                "path": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Relative resource path exactly as listed by the active skill"
-                }
-            }
-        }),
+        input_schema: input_schema::<SkillResourceReadInput>(),
         output_schema: json!({ "type": "string" }),
         capabilities: CapabilitySet::default(),
         policy: CallablePolicy {
@@ -292,11 +282,7 @@ fn orchestration_list_descriptor() -> CallableDescriptor {
         id: CallableId::parse(ORCHESTRATION_LIST_ID).expect("static orchestration list id"),
         kind: CallableKind::Tool,
         description: "List the orchestrations this Phenix root agent can call. Use this instead of guessing orchestration names.".to_owned(),
-        input_schema: json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {}
-        }),
+        input_schema: input_schema::<EmptyInput>(),
         output_schema: json!({
             "type": "object",
             "required": ["orchestrations"],
@@ -316,23 +302,7 @@ fn orchestration_start_descriptor() -> CallableDescriptor {
         id: CallableId::parse(ORCHESTRATION_START_ID).expect("static orchestration start id"),
         kind: CallableKind::Tool,
         description: "Start one conductor-owned orchestration returned by phenix_orchestration_list with a concrete objective.".to_owned(),
-        input_schema: json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["orchestration", "objective"],
-            "properties": {
-                "orchestration": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Orchestration id returned by phenix_orchestration_list"
-                },
-                "objective": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Objective for the orchestration"
-                }
-            }
-        }),
+        input_schema: input_schema::<OrchestrationStartInput>(),
         output_schema: json!({
             "type": "object",
             "required": ["execution_id", "callable", "kind", "state"]
@@ -341,5 +311,23 @@ fn orchestration_start_descriptor() -> CallableDescriptor {
         policy: CallablePolicy {
             requires_permission: false,
         },
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+
+    #[test]
+    fn derived_semantic_input_schemas_preserve_parser_constraints() {
+        let empty = input_schema::<EmptyInput>();
+        assert_eq!(empty["additionalProperties"], false);
+
+        let start = input_schema::<OrchestrationStartInput>();
+        assert_eq!(start["properties"]["orchestration"]["minLength"], 1);
+        assert_eq!(start["properties"]["objective"]["minLength"], 1);
+
+        let resource = input_schema::<SkillResourceReadInput>();
+        assert_eq!(resource["properties"]["path"]["minLength"], 1);
     }
 }

@@ -1,9 +1,9 @@
 use phenix_backend::ToolPresentation;
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{
-    AgentNode, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
     ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, OrchestrationDefinition,
-    OrchestrationPolicy, SessionId,
+    OrchestrationNode, OrchestrationNodeId, SessionId,
 };
 use phenix_protocol::Command;
 use serde_json::json;
@@ -24,6 +24,23 @@ fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
         output_schema: json!({"type": "object"}),
         capabilities: CapabilitySet::default(),
         policy: CallablePolicy::default(),
+    }
+}
+
+fn node(
+    id: &str,
+    callable: &str,
+    depends_on: &[&str],
+    objective: Option<&str>,
+) -> OrchestrationNode {
+    OrchestrationNode {
+        id: OrchestrationNodeId::parse(id).unwrap(),
+        callable: CallableId::parse(callable).unwrap(),
+        depends_on: depends_on
+            .iter()
+            .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+            .collect(),
+        objective: objective.map(str::to_owned),
     }
 }
 
@@ -392,16 +409,9 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
     runtime
         .register_orchestration(OrchestrationDefinition {
             descriptor: descriptor("orchestration.edge", CallableKind::Orchestration),
-            policy: OrchestrationPolicy::Sequential,
             nodes: vec![
-                AgentNode {
-                    callable: CallableId::parse("agent.first").unwrap(),
-                    objective: Some("first".to_owned()),
-                },
-                AgentNode {
-                    callable: CallableId::parse("agent.second").unwrap(),
-                    objective: Some("second".to_owned()),
-                },
+                node("first", "agent.first", &[], Some("first")),
+                node("second", "agent.second", &["first"], Some("second")),
             ],
         })
         .unwrap();

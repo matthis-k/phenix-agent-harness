@@ -40,95 +40,43 @@ use phenix_core::{
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::error::Error;
-use std::fmt::{self, Display, Formatter};
+use thiserror::Error;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum ConductorError {
+    #[error("unknown session: {0}")]
     UnknownSession(SessionId),
+    #[error("session is closed: {0}")]
     ClosedSession(SessionId),
+    #[error("session has active executions and cannot close: {0}")]
     SessionHasActiveExecutions(SessionId),
+    #[error("unknown execution: {0}")]
     UnknownExecution(ExecutionId),
+    #[error("input must not be empty")]
     EmptyInput,
+    #[error("execution is not runnable: {0}")]
     InvalidLifecycle(ExecutionId),
+    #[error("execution is not model-provider backed: {0}")]
     NonModelExecution(ExecutionId),
+    #[error("execution is not non-model-provider backed: {0}")]
     NonProviderExecution(ExecutionId),
+    #[error("{denial}")]
     PolicyDenied {
         execution_id: ExecutionId,
         denial: PolicyDenial,
     },
-    CallableRegistry(CallableRegistryError),
-    ExecutionProvider(ExecutionProviderError),
-    Journal(JournalError),
-    Routing(RoutingRegistryError),
-    Context(ContextError),
-    Backend(BackendError),
-}
-
-impl Display for ConductorError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownSession(id) => write!(f, "unknown session: {id}"),
-            Self::ClosedSession(id) => write!(f, "session is closed: {id}"),
-            Self::SessionHasActiveExecutions(id) => {
-                write!(f, "session has active executions and cannot close: {id}")
-            }
-            Self::UnknownExecution(id) => write!(f, "unknown execution: {id}"),
-            Self::EmptyInput => f.write_str("input must not be empty"),
-            Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
-            Self::NonModelExecution(id) => {
-                write!(f, "execution is not model-provider backed: {id}")
-            }
-            Self::NonProviderExecution(id) => {
-                write!(f, "execution is not non-model-provider backed: {id}")
-            }
-            Self::PolicyDenied { denial, .. } => Display::fmt(denial, f),
-            Self::CallableRegistry(error) => Display::fmt(error, f),
-            Self::ExecutionProvider(error) => Display::fmt(error, f),
-            Self::Journal(error) => Display::fmt(error, f),
-            Self::Routing(error) => Display::fmt(error, f),
-            Self::Context(error) => Display::fmt(error, f),
-            Self::Backend(error) => Display::fmt(error, f),
-        }
-    }
-}
-
-impl Error for ConductorError {}
-
-impl From<BackendError> for ConductorError {
-    fn from(value: BackendError) -> Self {
-        Self::Backend(value)
-    }
-}
-
-impl From<CallableRegistryError> for ConductorError {
-    fn from(value: CallableRegistryError) -> Self {
-        Self::CallableRegistry(value)
-    }
-}
-
-impl From<ExecutionProviderError> for ConductorError {
-    fn from(value: ExecutionProviderError) -> Self {
-        Self::ExecutionProvider(value)
-    }
-}
-
-impl From<JournalError> for ConductorError {
-    fn from(value: JournalError) -> Self {
-        Self::Journal(value)
-    }
-}
-
-impl From<RoutingRegistryError> for ConductorError {
-    fn from(value: RoutingRegistryError) -> Self {
-        Self::Routing(value)
-    }
-}
-
-impl From<ContextError> for ConductorError {
-    fn from(value: ContextError) -> Self {
-        Self::Context(value)
-    }
+    #[error(transparent)]
+    CallableRegistry(#[from] CallableRegistryError),
+    #[error(transparent)]
+    ExecutionProvider(#[from] ExecutionProviderError),
+    #[error(transparent)]
+    Journal(#[from] JournalError),
+    #[error(transparent)]
+    Routing(#[from] RoutingRegistryError),
+    #[error(transparent)]
+    Context(#[from] ContextError),
+    #[error(transparent)]
+    Backend(#[from] BackendError),
 }
 
 #[derive(Clone, Debug)]

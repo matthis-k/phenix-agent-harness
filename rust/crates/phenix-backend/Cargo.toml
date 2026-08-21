@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 phenix-core = { path = "../phenix-core" }
+thiserror.workspace = true

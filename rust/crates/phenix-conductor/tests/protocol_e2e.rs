@@ -5,9 +5,9 @@ use phenix_conductor::{
     InvocationGuard, InvocationPolicyContext, InvocationSubject, PolicyDenial,
 };
 use phenix_core::{
-    AgentNode, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
     ExecutionEventKind, ExecutionState, ExecutionTarget, OrchestrationDefinition,
-    OrchestrationPolicy,
+    OrchestrationNode, OrchestrationNodeId,
 };
 use phenix_protocol::{Command, Reply};
 use serde_json::json;
@@ -38,6 +38,23 @@ fn descriptor(id: &str, kind: CallableKind, requires_permission: bool) -> Callab
     }
 }
 
+fn orchestration_node(
+    id: &str,
+    callable: &str,
+    depends_on: &[&str],
+    objective: Option<&str>,
+) -> OrchestrationNode {
+    OrchestrationNode {
+        id: OrchestrationNodeId::parse(id).unwrap(),
+        callable: CallableId::parse(callable).unwrap(),
+        depends_on: depends_on
+            .iter()
+            .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+            .collect(),
+        objective: objective.map(str::to_owned),
+    }
+}
+
 fn tool_descriptor(id: &str) -> CallableDescriptor {
     descriptor(id, CallableKind::Tool, false)
 }
@@ -61,11 +78,12 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
                         CallableKind::Orchestration,
                         false,
                     ),
-                    policy: OrchestrationPolicy::Sequential,
-                    nodes: vec![AgentNode {
-                        callable: CallableId::parse("agent.catalog").unwrap(),
-                        objective: Some("catalog step".to_owned()),
-                    }],
+                    nodes: vec![orchestration_node(
+                        "catalog",
+                        "agent.catalog",
+                        &[],
+                        Some("catalog step"),
+                    )],
                 })
                 .unwrap();
         })
@@ -417,16 +435,14 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
                         CallableKind::Orchestration,
                         false,
                     ),
-                    policy: OrchestrationPolicy::Sequential,
                     nodes: vec![
-                        AgentNode {
-                            callable: CallableId::parse("agent.first").unwrap(),
-                            objective: Some("first step".to_owned()),
-                        },
-                        AgentNode {
-                            callable: CallableId::parse("agent.second").unwrap(),
-                            objective: Some("second step".to_owned()),
-                        },
+                        orchestration_node("first", "agent.first", &[], Some("first step")),
+                        orchestration_node(
+                            "second",
+                            "agent.second",
+                            &["first"],
+                            Some("second step"),
+                        ),
                     ],
                 })
                 .unwrap();
@@ -668,11 +684,7 @@ fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
     runtime
         .register_orchestration(OrchestrationDefinition {
             descriptor: descriptor("orchestration", CallableKind::Orchestration, false),
-            policy: OrchestrationPolicy::Sequential,
-            nodes: vec![AgentNode {
-                callable: CallableId::parse("guarded-step").unwrap(),
-                objective: None,
-            }],
+            nodes: vec![orchestration_node("guarded", "guarded-step", &[], None)],
         })
         .unwrap();
     let session = runtime
