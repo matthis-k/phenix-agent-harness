@@ -160,7 +160,10 @@ mod tests {
             callable_targets: BTreeMap::from([(agent.id.clone(), target("agent"))]),
         };
         let encoded = serde_json::to_string(&RuntimeConfiguration {
-            agents: vec![agent.clone().into()],
+            agents: vec![AgentDefinition::new(
+                agent.clone(),
+                ExecutionAuthority::read_only(),
+            )],
             orchestrations: vec![orchestration],
             routing_profiles: vec![route],
         })
@@ -231,7 +234,10 @@ mod tests {
         let agent = descriptor("agent.worker", CallableKind::Agent);
         let workflow_id = CallableId::parse("orchestration.implement").unwrap();
         let configuration = RuntimeConfiguration {
-            agents: vec![agent.clone().into()],
+            agents: vec![AgentDefinition::new(
+                agent.clone(),
+                ExecutionAuthority::read_only(),
+            )],
             orchestrations: vec![OrchestrationDefinition {
                 descriptor: descriptor(workflow_id.as_str(), CallableKind::Orchestration),
                 nodes: vec![node(
@@ -268,7 +274,10 @@ mod tests {
     #[test]
     fn application_configuration_rejects_wrong_callable_kinds() {
         let configuration = RuntimeConfiguration {
-            agents: vec![descriptor("tool.not-an-agent", CallableKind::Tool).into()],
+            agents: vec![AgentDefinition::new(
+                descriptor("tool.not-an-agent", CallableKind::Tool),
+                ExecutionAuthority::read_only(),
+            )],
             ..RuntimeConfiguration::default()
         };
         assert!(matches!(

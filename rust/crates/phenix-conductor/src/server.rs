@@ -1803,7 +1803,10 @@ mod tests {
         let unrelated_calls = Arc::new(AtomicUsize::new(0));
         let mut runtime = ConductorRuntime::new();
         runtime
-            .register_agent(descriptor("agent.child", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("agent.child", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
@@ -2074,7 +2077,10 @@ mod tests {
         let mut runtime = ConductorRuntime::new();
         for callable in ["agent.alpha", "agent.beta", "agent.join"] {
             runtime
-                .register_agent(descriptor(callable, CallableKind::Agent))
+                .register_agent(phenix_core::AgentDefinition::new(
+                    descriptor(callable, CallableKind::Agent),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ))
                 .unwrap();
         }
         runtime

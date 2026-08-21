@@ -97,7 +97,10 @@ fn rejected_empty_submit_does_not_consume_execution_identity_or_emit_events() {
 fn frontend_layer_can_start_a_registered_top_level_callable_without_a_wrapper_execution() {
     let mut runtime = ConductorRuntime::new();
     runtime
-        .register_agent(descriptor("scout", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("scout", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     let session = runtime.create_session(None, None, fixed_target()).unwrap();
 
@@ -135,7 +138,10 @@ fn rejected_top_level_callable_does_not_create_durable_execution_state() {
     assert_eq!(runtime.events_since(0), before_events);
 
     runtime
-        .register_agent(descriptor("scout", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("scout", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     let execution = runtime
         .start_session_callable(
@@ -401,10 +407,16 @@ fn separate_sessions_do_not_cross_execution_or_event_ownership() {
 fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
     let mut runtime = ConductorRuntime::new();
     runtime
-        .register_agent(descriptor("agent.first", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.first", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
-        .register_agent(descriptor("agent.second", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.second", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {

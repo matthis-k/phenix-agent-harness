@@ -46,10 +46,16 @@ fn workflow_node(
 
 fn bind_two_step_workflow(runtime: &mut ConductorRuntime) {
     runtime
-        .register_agent(descriptor("agent.first", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.first", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
-        .register_agent(descriptor("agent.second", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.second", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {

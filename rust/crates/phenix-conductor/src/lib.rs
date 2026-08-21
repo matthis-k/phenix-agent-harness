@@ -358,21 +358,17 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    pub fn register_agent<D>(&mut self, definition: D) -> Result<(), ConductorError>
-    where
-        D: Into<AgentDefinition>,
-    {
+    pub fn register_agent(&mut self, definition: AgentDefinition) -> Result<(), ConductorError> {
         self.callables.register_agent(definition)?;
         Ok(())
     }
 
-    pub fn register_provider_agent<D, P>(
+    pub fn register_provider_agent<P>(
         &mut self,
-        definition: D,
+        definition: AgentDefinition,
         provider: P,
     ) -> Result<(), ConductorError>
     where
-        D: Into<AgentDefinition>,
         P: ExecutionProvider + 'static,
     {
         self.callables
@@ -1652,7 +1648,12 @@ mod tests {
     #[test]
     fn fixed_parent_forces_callable_child_target() {
         let mut runtime = ConductorRuntime::new();
-        runtime.register_agent(agent("scout")).unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("scout"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let root = runtime.submit(&session.id, "work").unwrap();
         let child = runtime
@@ -1864,7 +1865,12 @@ mod tests {
     #[test]
     fn cancellation_cascades_to_descendants() {
         let mut runtime = ConductorRuntime::new();
-        runtime.register_agent(agent("scout")).unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("scout"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
         let session = runtime.create_session(None, None, fixed("a")).unwrap();
         let root = runtime.submit(&session.id, "work").unwrap();
         let child = runtime

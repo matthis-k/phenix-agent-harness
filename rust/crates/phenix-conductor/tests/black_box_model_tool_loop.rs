@@ -366,7 +366,10 @@ fn routed_agent_uses_callable_specific_model() {
     let mut runtime = ConductorRuntime::new();
     let scout = CallableId::parse("agent.scout").unwrap();
     runtime
-        .register_agent(descriptor("agent.scout", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.scout", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     let profile = RoutingProfileId::parse("default").unwrap();
     runtime
@@ -398,10 +401,16 @@ fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() 
     let scout = CallableId::parse("agent.scout").unwrap();
     let worker = CallableId::parse("agent.worker").unwrap();
     runtime
-        .register_agent(descriptor("agent.scout", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.scout", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
-        .register_agent(descriptor("agent.worker", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.worker", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {

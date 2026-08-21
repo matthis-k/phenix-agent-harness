@@ -216,12 +216,6 @@ impl AgentDefinition {
     }
 }
 
-impl From<CallableDescriptor> for AgentDefinition {
-    fn from(descriptor: CallableDescriptor) -> Self {
-        Self::new(descriptor, ExecutionAuthority::read_only())
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoutingProfile {
     pub id: RoutingProfileId,
