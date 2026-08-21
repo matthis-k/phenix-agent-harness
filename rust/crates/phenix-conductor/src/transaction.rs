@@ -122,11 +122,10 @@ impl WorkspaceTransaction {
         }
 
         let result_status = self.paths.result_status();
-        let status =
-            fs::read_to_string(&result_status).map_err(|source| TransactionError::Io {
-                path: result_status.clone(),
-                source,
-            })?;
+        let status = fs::read_to_string(&result_status).map_err(|source| TransactionError::Io {
+            path: result_status.clone(),
+            source,
+        })?;
         let exit_code = match status.trim().parse::<i32>() {
             Ok(code) if (0..=255).contains(&code) => code,
             _ => {
