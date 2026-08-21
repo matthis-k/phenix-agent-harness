@@ -36,6 +36,22 @@ jobs:
           ' .github/workflows/grill-workspace-leases.yml > /tmp/grill_workspace_leases.py
           test -s /tmp/grill_workspace_leases.py
           python /tmp/grill_workspace_leases.py
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path("rust/crates/phenix-conductor/src/server.rs")
+          text = path.read_text()
+          replacements = {
+              "    WorkspaceLease(WorkspaceLeaseError),\n": "    WorkspaceLeaseStatePoisoned,\n",
+              "            Self::WorkspaceLease(error) => Display::fmt(error, f),\n": "            Self::WorkspaceLeaseStatePoisoned => {\n                f.write_str(\"workspace lease state lock poisoned\")\n            }\n",
+              "impl From<WorkspaceLeaseError> for ServerError {\n    fn from(value: WorkspaceLeaseError) -> Self {\n        Self::WorkspaceLease(value)\n    }\n}\n": "impl From<WorkspaceLeaseError> for ServerError {\n    fn from(_: WorkspaceLeaseError) -> Self {\n        Self::WorkspaceLeaseStatePoisoned\n    }\n}\n",
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f"expected lease error boundary missing: {old!r}")
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
 
       - name: Apply deterministic maintenance fixes
         run: |
