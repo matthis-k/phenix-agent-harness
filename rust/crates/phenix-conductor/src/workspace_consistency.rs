@@ -7,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 
 const FNV_128_OFFSET: u128 = 0x6c62272e07bb014262b821756295c58d;
 const FNV_128_PRIME: u128 = 0x0000000001000000000000000000013b;
+const DIRECTORY_FINGERPRINT_SOURCE: &[u8] = b"directory";
 
 #[derive(Clone, Debug)]
 pub struct WorkspaceRead {
@@ -43,8 +44,90 @@ impl WorkspaceConsistency {
         &self,
     ) -> Result<BTreeMap<PathBuf, FileVersion>, WorkspaceConsistencyError> {
         let mut files = BTreeMap::new();
-        self.collect_checkpoint_versions(&self.root, Path::new(""), &mut files)?;
+        self.collect_real_versions(&self.root, Path::new(""), &mut files)?;
         Ok(files)
+    }
+
+    pub(super) fn validate_checkpoint_baseline(
+        &self,
+        expected: &BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<(), WorkspaceConsistencyError> {
+        let actual = self.checkpoint_baseline()?;
+        compare_manifests(expected, &actual)
+    }
+
+    pub(super) fn snapshot_manifest(
+        &self,
+        snapshot_root: &Path,
+    ) -> Result<BTreeMap<PathBuf, FileVersion>, WorkspaceConsistencyError> {
+        let snapshot_root = fs::canonicalize(snapshot_root).map_err(|source| {
+            WorkspaceConsistencyError::Io {
+                path: snapshot_root.to_path_buf(),
+                source,
+            }
+        })?;
+        let mut files = BTreeMap::new();
+        self.collect_snapshot_versions(&snapshot_root, Path::new(""), &mut files)?;
+        Ok(files)
+    }
+
+    pub(super) fn prepare_scratch_mounts(
+        &self,
+    ) -> Result<Vec<(PathBuf, PathBuf)>, WorkspaceConsistencyError> {
+        let mut mounts = Vec::new();
+        for scratch in &self.scratch_paths {
+            let relative = normalize_relative(scratch)?;
+            if mounts
+                .iter()
+                .any(|(parent, _): &(PathBuf, PathBuf)| relative.starts_with(parent))
+            {
+                continue;
+            }
+
+            let target = self.root.join(&relative);
+            self.ensure_ancestor_inside(&target)?;
+            match fs::symlink_metadata(&target) {
+                Ok(metadata) => {
+                    let kind = file_kind(&metadata);
+                    if matches!(kind, FileKind::Symlink | FileKind::Other) {
+                        return Err(WorkspaceConsistencyError::UnsupportedScratchRoot {
+                            path: relative,
+                            kind,
+                        });
+                    }
+                    if metadata.is_dir() {
+                        let canonical = fs::canonicalize(&target).map_err(|source| {
+                            WorkspaceConsistencyError::Io {
+                                path: target.clone(),
+                                source,
+                            }
+                        })?;
+                        self.ensure_canonical_inside(&canonical)?;
+                    }
+                }
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                    fs::create_dir_all(&target).map_err(|source| WorkspaceConsistencyError::Io {
+                        path: target.clone(),
+                        source,
+                    })?;
+                    let canonical = fs::canonicalize(&target).map_err(|source| {
+                        WorkspaceConsistencyError::Io {
+                            path: target.clone(),
+                            source,
+                        }
+                    })?;
+                    self.ensure_canonical_inside(&canonical)?;
+                }
+                Err(source) => {
+                    return Err(WorkspaceConsistencyError::Io {
+                        path: target,
+                        source,
+                    });
+                }
+            }
+            mounts.push((relative, target));
+        }
+        Ok(mounts)
     }
 
     pub fn read_utf8(
@@ -157,25 +240,13 @@ impl WorkspaceConsistency {
         Ok(Some(observation))
     }
 
-    fn collect_checkpoint_versions(
+    fn collect_real_versions(
         &self,
         directory: &Path,
         relative_directory: &Path,
         files: &mut BTreeMap<PathBuf, FileVersion>,
     ) -> Result<(), WorkspaceConsistencyError> {
-        let mut entries = fs::read_dir(directory)
-            .map_err(|source| WorkspaceConsistencyError::Io {
-                path: directory.to_path_buf(),
-                source,
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| WorkspaceConsistencyError::Io {
-                path: directory.to_path_buf(),
-                source,
-            })?;
-        entries.sort_by_key(fs::DirEntry::file_name);
-
-        for entry in entries {
+        for entry in sorted_entries(directory)? {
             let relative = relative_directory.join(entry.file_name());
             if is_repository_metadata(&relative) || self.is_scratch(&relative) {
                 continue;
@@ -187,15 +258,71 @@ impl WorkspaceConsistency {
                     source,
                 })?;
             if metadata.is_dir() {
+                files.insert(relative.clone(), directory_version());
                 let canonical =
                     fs::canonicalize(&path).map_err(|source| WorkspaceConsistencyError::Io {
                         path: path.clone(),
                         source,
                     })?;
                 self.ensure_canonical_inside(&canonical)?;
-                self.collect_checkpoint_versions(&canonical, &relative, files)?;
+                self.collect_real_versions(&canonical, &relative, files)?;
             } else {
                 files.insert(relative.clone(), self.version_at(&relative)?);
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_snapshot_versions(
+        &self,
+        snapshot_directory: &Path,
+        relative_directory: &Path,
+        files: &mut BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<(), WorkspaceConsistencyError> {
+        for entry in sorted_entries(snapshot_directory)? {
+            let relative = relative_directory.join(entry.file_name());
+            if is_repository_metadata(&relative) || self.is_scratch(&relative) {
+                continue;
+            }
+            let path = entry.path();
+            let metadata =
+                fs::symlink_metadata(&path).map_err(|source| WorkspaceConsistencyError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+            let kind = file_kind(&metadata);
+            let version = match kind {
+                FileKind::Regular => FileVersion::Present {
+                    content_hash: fingerprint(&fs::read(&path).map_err(|source| {
+                        WorkspaceConsistencyError::Io {
+                            path: path.clone(),
+                            source,
+                        }
+                    })?),
+                    kind,
+                },
+                FileKind::Directory => directory_version(),
+                FileKind::Symlink => {
+                    let target = fs::read_link(&path).map_err(|source| {
+                        WorkspaceConsistencyError::Io {
+                            path: path.clone(),
+                            source,
+                        }
+                    })?;
+                    self.ensure_snapshot_link_inside(&relative, &target)?;
+                    FileVersion::Present {
+                        content_hash: fingerprint(target.to_string_lossy().as_bytes()),
+                        kind,
+                    }
+                }
+                FileKind::Other => FileVersion::Present {
+                    content_hash: fingerprint(metadata.len().to_string().as_bytes()),
+                    kind,
+                },
+            };
+            files.insert(relative.clone(), version);
+            if metadata.is_dir() {
+                self.collect_snapshot_versions(&path, &relative, files)?;
             }
         }
         Ok(())
@@ -213,13 +340,13 @@ impl WorkspaceConsistency {
         let metadata = match fs::symlink_metadata(&target) {
             Ok(metadata) => metadata,
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(FileVersion::Absent)
+                return Ok(FileVersion::Absent);
             }
             Err(source) => {
                 return Err(WorkspaceConsistencyError::Io {
                     path: target,
                     source,
-                })
+                });
             }
         };
         let kind = file_kind(&metadata);
@@ -238,30 +365,7 @@ impl WorkspaceConsistency {
                     }
                 })?)
             }
-            FileKind::Directory => {
-                let canonical =
-                    fs::canonicalize(&target).map_err(|source| WorkspaceConsistencyError::Io {
-                        path: target.clone(),
-                        source,
-                    })?;
-                self.ensure_canonical_inside(&canonical)?;
-                let mut entries = fs::read_dir(&canonical)
-                    .map_err(|source| WorkspaceConsistencyError::Io {
-                        path: canonical.clone(),
-                        source,
-                    })?
-                    .map(|entry| {
-                        entry
-                            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                            .map_err(|source| WorkspaceConsistencyError::Io {
-                                path: canonical.clone(),
-                                source,
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                entries.sort();
-                fingerprint(entries.join("\0").as_bytes())
-            }
+            FileKind::Directory => fingerprint(DIRECTORY_FINGERPRINT_SOURCE),
             FileKind::Symlink => {
                 let link =
                     fs::read_link(&target).map_err(|source| WorkspaceConsistencyError::Io {
@@ -315,7 +419,7 @@ impl WorkspaceConsistency {
                     return Err(WorkspaceConsistencyError::Io {
                         path: candidate.to_path_buf(),
                         source,
-                    })
+                    });
                 }
             }
         }
@@ -330,6 +434,28 @@ impl WorkspaceConsistency {
             ))
         }
     }
+
+    fn ensure_snapshot_link_inside(
+        &self,
+        relative: &Path,
+        link: &Path,
+    ) -> Result<(), WorkspaceConsistencyError> {
+        let candidate = if link.is_absolute() {
+            link.to_path_buf()
+        } else {
+            self.root
+                .join(relative.parent().unwrap_or_else(|| Path::new("")))
+                .join(link)
+        };
+        let normalized = lexical_normalize(&candidate).ok_or_else(|| {
+            WorkspaceConsistencyError::EscapesWorkspace(self.root.join(relative))
+        })?;
+        if normalized == self.root || normalized.starts_with(&self.root) {
+            Ok(())
+        } else {
+            Err(WorkspaceConsistencyError::EscapesWorkspace(normalized))
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -342,6 +468,10 @@ pub enum WorkspaceConsistencyError {
         kind: FileKind,
     },
     UnsupportedWriteTarget {
+        path: PathBuf,
+        kind: FileKind,
+    },
+    UnsupportedScratchRoot {
         path: PathBuf,
         kind: FileKind,
     },
@@ -381,6 +511,11 @@ impl Display for WorkspaceConsistencyError {
                 "versioned source write requires a regular file or absent path, found {kind:?}: {}",
                 path.display()
             ),
+            Self::UnsupportedScratchRoot { path, kind } => write!(
+                f,
+                "workspace scratch root must be a regular file or directory, found {kind:?}: {}",
+                path.display()
+            ),
             Self::NotUtf8 { path } => {
                 write!(f, "workspace text file is not valid UTF-8: {}", path.display())
             }
@@ -405,6 +540,44 @@ impl Error for WorkspaceConsistencyError {
     }
 }
 
+fn compare_manifests(
+    expected: &BTreeMap<PathBuf, FileVersion>,
+    actual: &BTreeMap<PathBuf, FileVersion>,
+) -> Result<(), WorkspaceConsistencyError> {
+    let paths = expected
+        .keys()
+        .chain(actual.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for path in paths {
+        let expected_version = expected.get(&path).cloned().unwrap_or(FileVersion::Absent);
+        let actual_version = actual.get(&path).cloned().unwrap_or(FileVersion::Absent);
+        if expected_version != actual_version {
+            return Err(WorkspaceConsistencyError::Conflict(WorkspaceConflict {
+                path,
+                expected: expected_version,
+                actual: actual_version,
+            }));
+        }
+    }
+    Ok(())
+}
+
+fn sorted_entries(directory: &Path) -> Result<Vec<fs::DirEntry>, WorkspaceConsistencyError> {
+    let mut entries = fs::read_dir(directory)
+        .map_err(|source| WorkspaceConsistencyError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| WorkspaceConsistencyError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?;
+    entries.sort_by_key(fs::DirEntry::file_name);
+    Ok(entries)
+}
+
 fn normalize_relative(path: &Path) -> Result<PathBuf, WorkspaceConsistencyError> {
     let mut relative = PathBuf::new();
     for component in path.components() {
@@ -412,7 +585,7 @@ fn normalize_relative(path: &Path) -> Result<PathBuf, WorkspaceConsistencyError>
             Component::CurDir => {}
             Component::Normal(part) => relative.push(part),
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(WorkspaceConsistencyError::InvalidPath(path.to_path_buf()))
+                return Err(WorkspaceConsistencyError::InvalidPath(path.to_path_buf()));
             }
         }
     }
@@ -420,6 +593,24 @@ fn normalize_relative(path: &Path) -> Result<PathBuf, WorkspaceConsistencyError>
         return Err(WorkspaceConsistencyError::InvalidPath(path.to_path_buf()));
     }
     Ok(relative)
+}
+
+fn lexical_normalize(path: &Path) -> Option<PathBuf> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(Path::new(std::path::MAIN_SEPARATOR_STR)),
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(normalized)
 }
 
 fn is_repository_metadata(path: &Path) -> bool {
@@ -437,6 +628,13 @@ fn file_kind(metadata: &fs::Metadata) -> FileKind {
         FileKind::Symlink
     } else {
         FileKind::Other
+    }
+}
+
+fn directory_version() -> FileVersion {
+    FileVersion::Present {
+        content_hash: fingerprint(DIRECTORY_FINGERPRINT_SOURCE),
+        kind: FileKind::Directory,
     }
 }
 
@@ -508,9 +706,9 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_baseline_tracks_source_and_excludes_scratch_and_git_metadata() {
+    fn checkpoint_baseline_tracks_tree_and_excludes_scratch_and_git_metadata() {
         let fixture = Fixture::new();
-        fs::create_dir_all(fixture.root.join("src")).unwrap();
+        fs::create_dir_all(fixture.root.join("src/nested")).unwrap();
         fs::create_dir_all(fixture.root.join("target")).unwrap();
         fs::create_dir_all(fixture.root.join(".git")).unwrap();
         fs::write(fixture.root.join("src/lib.rs"), "source").unwrap();
@@ -523,6 +721,8 @@ mod tests {
 
         let baseline = guard.checkpoint_baseline().unwrap();
 
+        assert_eq!(baseline.get(Path::new("src")), Some(&directory_version()));
+        assert_eq!(baseline.get(Path::new("src/nested")), Some(&directory_version()));
         assert_eq!(
             baseline.get(Path::new("src/lib.rs")),
             Some(&FileVersion::Present {
@@ -530,8 +730,27 @@ mod tests {
                 kind: FileKind::Regular,
             })
         );
+        assert!(!baseline.contains_key(Path::new("target")));
         assert!(!baseline.contains_key(Path::new("target/cache")));
+        assert!(!baseline.contains_key(Path::new(".git")));
         assert!(!baseline.contains_key(Path::new(".git/index")));
+    }
+
+    #[test]
+    fn full_manifest_validation_detects_new_files_and_directories() {
+        let fixture = Fixture::new();
+        fs::write(fixture.root.join("source.rs"), "v1").unwrap();
+        let guard = WorkspaceConsistency::new(&fixture.descriptor(BTreeSet::new())).unwrap();
+        let baseline = guard.checkpoint_baseline().unwrap();
+
+        fs::create_dir(fixture.root.join("external-dir")).unwrap();
+        let error = guard.validate_checkpoint_baseline(&baseline).unwrap_err();
+        assert!(matches!(error, WorkspaceConsistencyError::Conflict(_)));
+
+        fs::remove_dir(fixture.root.join("external-dir")).unwrap();
+        fs::write(fixture.root.join("external.rs"), "external").unwrap();
+        let error = guard.validate_checkpoint_baseline(&baseline).unwrap_err();
+        assert!(matches!(error, WorkspaceConsistencyError::Conflict(_)));
     }
 
     #[test]
@@ -567,6 +786,22 @@ mod tests {
             fs::read_to_string(fixture.root.join("target/cache")).unwrap(),
             "new"
         );
+    }
+
+    #[test]
+    fn scratch_mounts_create_missing_roots_and_collapse_nested_roots() {
+        let fixture = Fixture::new();
+        let guard = WorkspaceConsistency::new(&fixture.descriptor(BTreeSet::from([
+            PathBuf::from("target"),
+            PathBuf::from("target/nested"),
+        ])))
+        .unwrap();
+
+        let mounts = guard.prepare_scratch_mounts().unwrap();
+
+        assert_eq!(mounts.len(), 1);
+        assert_eq!(mounts[0].0, Path::new("target"));
+        assert!(mounts[0].1.is_dir());
     }
 
     #[test]
@@ -648,6 +883,35 @@ mod tests {
             guard.read_utf8("target/secret"),
             Err(WorkspaceConsistencyError::EscapesWorkspace(_))
         ));
+        assert!(matches!(
+            guard.prepare_scratch_mounts(),
+            Err(WorkspaceConsistencyError::UnsupportedScratchRoot { .. })
+        ));
         let _ = fs::remove_dir_all(outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_manifest_rejects_symlinks_that_would_escape_after_apply() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = Fixture::new();
+        let snapshot = fixture.root.parent().unwrap().join(format!(
+            "phenix-snapshot-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&snapshot).unwrap();
+        symlink("../../outside", snapshot.join("escape")).unwrap();
+        let guard = WorkspaceConsistency::new(&fixture.descriptor(BTreeSet::new())).unwrap();
+
+        assert!(matches!(
+            guard.snapshot_manifest(&snapshot),
+            Err(WorkspaceConsistencyError::EscapesWorkspace(_))
+        ));
+        let _ = fs::remove_dir_all(snapshot);
     }
 }
