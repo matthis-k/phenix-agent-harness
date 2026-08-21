@@ -1,0 +1,69 @@
+name: Runtime authority patch
+
+on:
+  push:
+    branches:
+      - agent/grill-05-workspace-consistency
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/grill-05-workspace-consistency
+          fetch-depth: 0
+      - name: Move capability filtering into the runtime
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          lib = Path("rust/crates/phenix-conductor/src/lib.rs")
+          text = lib.read_text()
+
+          old = """    #[must_use]\n    pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {\n        self.callables.tool_descriptors()\n    }\n\n    pub fn execution_authority(\n"""
+          new = """    #[must_use]\n    pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {\n        self.callables.tool_descriptors()\n    }\n\n    fn permitted_tool_descriptors(\n        &self,\n        execution_id: &ExecutionId,\n    ) -> Result<Vec<CallableDescriptor>, ConductorError> {\n        let authority = self.execution_authority(execution_id)?;\n        Ok(self\n            .callables\n            .tool_descriptors()\n            .into_iter()\n            .filter(|descriptor| {\n                authority\n                    .filesystem\n                    .permits_capabilities(&descriptor.capabilities)\n            })\n            .collect())\n    }\n\n    pub fn execution_authority(\n"""
+          assert text.count(old) == 1, "tool descriptor anchor changed"
+          text = text.replace(old, new)
+
+          old = """            tools: ToolProvision {\n                callables: self.callables.tool_descriptors(),\n            },\n"""
+          new = """            tools: ToolProvision {\n                callables: self.permitted_tool_descriptors(execution_id)?,\n            },\n"""
+          assert text.count(old) == 1, "resolved invocation tool anchor changed"
+          text = text.replace(old, new)
+
+          old = """        BackendId, CallablePolicy, CapabilitySet, FilesystemAuthority, InferenceOptions, ModelId,\n        NetworkAuthority, ProviderId, RepositoryAuthority, RoutingProfileId, WorkspaceId,\n"""
+          new = """        BackendId, CallablePolicy, CapabilitySet, FilesystemAuthority, InferenceOptions, ModelId,\n        NetworkAuthority, ProviderId, RepositoryAuthority, RoutingProfileId, WorkspaceId,\n        CAPABILITY_FILESYSTEM_READ, CAPABILITY_FILESYSTEM_WRITE,\n"""
+          assert text.count(old) == 1, "test import anchor changed"
+          text = text.replace(old, new)
+
+          old = """    fn agent(id: &str) -> CallableDescriptor {\n        CallableDescriptor {\n            id: CallableId::parse(id).unwrap(),\n            kind: CallableKind::Agent,\n            description: \"test agent\".to_owned(),\n            input_schema: json!({\"type\": \"object\"}),\n            output_schema: json!({\"type\": \"object\"}),\n            capabilities: CapabilitySet::default(),\n            policy: CallablePolicy::default(),\n        }\n    }\n\n    fn authority(\n"""
+          new = """    fn agent(id: &str) -> CallableDescriptor {\n        CallableDescriptor {\n            id: CallableId::parse(id).unwrap(),\n            kind: CallableKind::Agent,\n            description: \"test agent\".to_owned(),\n            input_schema: json!({\"type\": \"object\"}),\n            output_schema: json!({\"type\": \"object\"}),\n            capabilities: CapabilitySet::default(),\n            policy: CallablePolicy::default(),\n        }\n    }\n\n    fn tool(id: &str, capabilities: &[&str]) -> CallableDescriptor {\n        CallableDescriptor {\n            id: CallableId::parse(id).unwrap(),\n            kind: CallableKind::Tool,\n            description: \"test tool\".to_owned(),\n            input_schema: json!({\"type\": \"object\"}),\n            output_schema: json!({\"type\": \"object\"}),\n            capabilities: CapabilitySet(\n                capabilities\n                    .iter()\n                    .map(|capability| (*capability).to_owned())\n                    .collect(),\n            ),\n            policy: CallablePolicy::default(),\n        }\n    }\n\n    fn authority(\n"""
+          assert text.count(old) == 1, "test helper anchor changed"
+          text = text.replace(old, new)
+
+          marker = """    #[test]\n    fn cancellation_cascades_to_descendants() {\n"""
+          test = """    #[test]\n    fn resolved_invocation_filters_tools_by_execution_authority() {\n        let mut runtime = ConductorRuntime::new();\n        runtime\n            .register_agent(AgentDefinition::new(\n                agent(\"agent.reader\"),\n                ExecutionAuthority::read_only(),\n            ))\n            .unwrap();\n        runtime\n            .register_tool(tool(\"tool.read\", &[CAPABILITY_FILESYSTEM_READ]), |_| {\n                Ok(\"read\".to_owned())\n            })\n            .unwrap();\n        runtime\n            .register_tool(tool(\"tool.write\", &[CAPABILITY_FILESYSTEM_WRITE]), |_| {\n                Ok(\"write\".to_owned())\n            })\n            .unwrap();\n\n        let session = runtime.create_session(None, None, fixed(\"fixed\")).unwrap();\n        let execution = runtime\n            .start_session_callable(\n                &session.id,\n                &CallableId::parse(\"agent.reader\").unwrap(),\n                \"inspect\",\n            )\n            .unwrap();\n        let resolved = runtime.resolve_invocation(&execution.id).unwrap();\n        let tools = resolved\n            .tools\n            .callables\n            .iter()\n            .map(|descriptor| descriptor.id.as_str())\n            .collect::<Vec<_>>();\n\n        assert_eq!(tools, vec![\"tool.read\"]);\n    }\n\n"""
+          assert text.count(marker) == 1, "test insertion anchor changed"
+          text = text.replace(marker, test + marker)
+          lib.write_text(text)
+
+          semantic = Path("rust/crates/phenix-conductor/src/semantic_tools.rs")
+          text = semantic.read_text()
+          old = """pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut ResolvedInvocation) {\n    let authority = runtime\n        .execution_authority(&resolved.execution_id)\n        .expect(\"resolved invocation execution exists\");\n    resolved.tools.callables.retain(|descriptor| {\n        authority\n            .filesystem\n            .permits_capabilities(&descriptor.capabilities)\n    });\n\n"""
+          new = """pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut ResolvedInvocation) {\n"""
+          assert text.count(old) == 1, "semantic filtering anchor changed"
+          text = text.replace(old, new)
+          semantic.write_text(text)
+          PY
+
+          rm .github/workflows/runtime-authority-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- rust/crates/phenix-conductor/src/lib.rs rust/crates/phenix-conductor/src/semantic_tools.rs .github/workflows/runtime-authority-patch.yml
+          git commit -m "fix: enforce tool authority in conductor runtime"
+          git push origin HEAD:agent/grill-05-workspace-consistency
