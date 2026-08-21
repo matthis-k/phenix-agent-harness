@@ -11,5 +11,7 @@ phenix-backend-acp = { path = "../phenix-backend-acp" }
 phenix-backend-native = { path = "../phenix-backend-native" }
 phenix-core = { path = "../phenix-core" }
 phenix-protocol = { path = "../phenix-protocol" }
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
