@@ -8,7 +8,7 @@ use phenix_backend::{
 };
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget, FileVersion,
+    ExecutionEventKind, ExecutionId, ExecutionState, ExecutionTarget, FileVersion,
     RoutingProfileDescriptor, SessionId, SessionState, WorkspaceDescriptor, WorkspaceId,
     WorkspaceLeaseMode,
 };
@@ -46,6 +46,7 @@ const IN_MEMORY_WORKSPACE_ID: &str = "workspace:in-memory";
 type SharedBackend = Arc<Mutex<Box<dyn Backend>>>;
 type SharedRuntime = Arc<Mutex<ConductorRuntime>>;
 type ActiveScopes = Arc<Mutex<BTreeMap<ExecutionId, LiveExecutionScope>>>;
+type WorkspacePhases = Arc<Mutex<BTreeMap<ExecutionId, WorkspacePhase>>>;
 
 #[derive(Clone)]
 struct ExecutionWorkerContext {
@@ -53,6 +54,7 @@ struct ExecutionWorkerContext {
     backends: BTreeMap<BackendId, SharedBackend>,
     active_scopes: ActiveScopes,
     workspace_leases: WorkspaceLeaseManager,
+    workspace_phases: WorkspacePhases,
     workspace_consistency: Option<WorkspaceConsistency>,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
@@ -61,6 +63,7 @@ struct ExecutionWorkerContext {
 struct ExecutionJob {
     execution_id: ExecutionId,
     session_id: SessionId,
+    group_id: ExecutionId,
 }
 
 #[derive(Default)]
@@ -87,7 +90,10 @@ impl WorkspacePhase {
 #[derive(Default)]
 struct ExecutionQueueState {
     pending: VecDeque<ExecutionJob>,
-    active_sessions: BTreeSet<SessionId>,
+    active_sessions: BTreeMap<SessionId, ExecutionId>,
+    active_groups: BTreeMap<ExecutionId, usize>,
+    scheduled: BTreeSet<ExecutionId>,
+    releasing_groups: BTreeSet<ExecutionId>,
     closed: bool,
 }
 
@@ -102,11 +108,11 @@ impl ExecutionQueue {
         let mut state = lock
             .lock()
             .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
-        if state.closed {
-            return Err(ServerError::StatePoisoned("closed execution queue"));
+        if !state.scheduled.insert(job.execution_id.clone()) {
+            return Ok(());
         }
         state.pending.push_back(job);
-        ready.notify_one();
+        ready.notify_all();
         Ok(())
     }
 
@@ -116,19 +122,24 @@ impl ExecutionQueue {
             .lock()
             .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
         loop {
-            if let Some(index) = state
-                .pending
-                .iter()
-                .position(|job| !state.active_sessions.contains(&job.session_id))
-            {
+            if let Some(index) = state.pending.iter().position(|job| {
+                state
+                    .active_sessions
+                    .get(&job.session_id)
+                    .is_none_or(|group| group == &job.group_id)
+            }) {
                 let job = state
                     .pending
                     .remove(index)
                     .expect("pending execution index was selected");
-                state.active_sessions.insert(job.session_id.clone());
+                state
+                    .active_sessions
+                    .entry(job.session_id.clone())
+                    .or_insert_with(|| job.group_id.clone());
+                *state.active_groups.entry(job.group_id.clone()).or_default() += 1;
                 return Ok(Some(job));
             }
-            if state.closed && state.pending.is_empty() {
+            if state.closed && state.pending.is_empty() && state.active_groups.is_empty() {
                 return Ok(None);
             }
             state = ready
@@ -137,14 +148,38 @@ impl ExecutionQueue {
         }
     }
 
-    fn complete(&self, session_id: &SessionId) -> Result<(), ServerError> {
+    fn complete(&self, job: &ExecutionJob, release_group: bool) -> Result<bool, ServerError> {
         let (lock, ready) = &*self.state;
         let mut state = lock
             .lock()
             .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
-        state.active_sessions.remove(session_id);
+        if release_group {
+            state.releasing_groups.insert(job.group_id.clone());
+        }
+        let remove_group = {
+            let active = state
+                .active_groups
+                .get_mut(&job.group_id)
+                .expect("completed execution belongs to an active group");
+            *active -= 1;
+            *active == 0
+        };
+        if remove_group {
+            state.active_groups.remove(&job.group_id);
+        }
+        let group_released = state.releasing_groups.contains(&job.group_id)
+            && !state.active_groups.contains_key(&job.group_id)
+            && !state
+                .pending
+                .iter()
+                .any(|pending| pending.group_id == job.group_id)
+            && state.active_sessions.get(&job.session_id) == Some(&job.group_id);
+        if group_released {
+            state.active_sessions.remove(&job.session_id);
+            state.releasing_groups.remove(&job.group_id);
+        }
         ready.notify_all();
-        Ok(())
+        Ok(group_released)
     }
 
     fn close(&self) -> Result<(), ServerError> {
@@ -310,6 +345,7 @@ impl ConductorServer {
             backends: self.backends.clone(),
             active_scopes: self.active_scopes.clone(),
             workspace_leases: self.workspace_leases.clone(),
+            workspace_phases: Arc::new(Mutex::new(BTreeMap::new())),
             workspace_consistency: self.workspace_consistency.clone(),
             store: self.store.clone(),
             persist_lock: self.persist_lock.clone(),
@@ -540,10 +576,9 @@ impl ConductorServer {
             }
         };
         let execution_id = execution.id.clone();
-        let execution_session = execution.session_id.clone();
         self.persist()?;
         self.respond(output, request_id, Ok(Reply::Execution { execution }))?;
-        self.enqueue_execution(execution_id, execution_session, executions)
+        enqueue_pending_execution_group(&self.runtime, &execution_id, executions)
     }
 
     fn start_callable(
@@ -567,7 +602,6 @@ impl ConductorServer {
                 }
             };
         let execution_id = execution.id.clone();
-        let execution_kind = execution.kind.clone();
         self.persist()?;
         self.respond(
             output,
@@ -576,40 +610,7 @@ impl ConductorServer {
                 execution: execution.clone(),
             }),
         )?;
-
-        if execution_kind == ExecutionKind::Orchestration {
-            let pending = {
-                let runtime = self.lock_runtime()?;
-                runtime
-                    .snapshot()
-                    .executions
-                    .into_iter()
-                    .filter(|candidate| {
-                        candidate.parent_execution.as_ref() == Some(&execution_id)
-                            && candidate.state == ExecutionState::Pending
-                    })
-                    .map(|candidate| (candidate.id, candidate.session_id))
-                    .collect::<Vec<_>>()
-            };
-            for (child, session_id) in pending {
-                self.enqueue_execution(child, session_id, executions)?;
-            }
-            Ok(())
-        } else {
-            self.enqueue_execution(execution_id, execution.session_id, executions)
-        }
-    }
-
-    fn enqueue_execution(
-        &self,
-        execution_id: ExecutionId,
-        session_id: SessionId,
-        executions: &ExecutionQueue,
-    ) -> Result<(), ServerError> {
-        executions.enqueue(ExecutionJob {
-            execution_id,
-            session_id,
-        })
+        enqueue_pending_execution_group(&self.runtime, &execution_id, executions)
     }
 
     fn cancel_execution(&self, root: &ExecutionId) -> Result<Reply, ProtocolError> {
@@ -759,30 +760,135 @@ fn execution_loop(
     context: ExecutionWorkerContext,
 ) -> Result<(), ServerError> {
     while let Some(job) = executions.next()? {
-        let result = execute_job_chain(job.execution_id, &context);
-        executions.complete(&job.session_id)?;
+        let result = execute_execution(&job.execution_id, &job.group_id, &context).and_then(|()| {
+            enqueue_pending_execution_group(&context.runtime, &job.group_id, &executions)
+        });
+        let group_quiescent = execution_group_quiescent(&context.runtime, &job.group_id);
+        let release_group =
+            result.is_err() || group_quiescent.as_ref().map_or(true, |value| *value);
+        let group_released = executions.complete(&job, release_group)?;
+        if group_released {
+            context
+                .workspace_phases
+                .lock()
+                .map_err(|_| ServerError::StatePoisoned("workspace phases"))?
+                .remove(&job.group_id);
+        }
         result?;
+        group_quiescent?;
     }
     Ok(())
 }
 
-fn execute_job_chain(
-    execution_id: ExecutionId,
-    context: &ExecutionWorkerContext,
+fn enqueue_pending_execution_group(
+    runtime: &SharedRuntime,
+    group_id: &ExecutionId,
+    executions: &ExecutionQueue,
 ) -> Result<(), ServerError> {
-    let mut current = Some(execution_id);
-    let mut workspace_phase = WorkspacePhase::default();
-    while let Some(execution_id) = current {
-        execute_execution(&execution_id, context, &mut workspace_phase)?;
-        current = next_scheduled_execution(&context.runtime, &execution_id)?;
+    for job in pending_execution_jobs(runtime, group_id)? {
+        executions.enqueue(job)?;
     }
     Ok(())
+}
+
+fn pending_execution_jobs(
+    runtime: &SharedRuntime,
+    group_id: &ExecutionId,
+) -> Result<Vec<ExecutionJob>, ServerError> {
+    let snapshot = runtime
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
+        .snapshot();
+    Ok(snapshot
+        .executions
+        .iter()
+        .filter(|execution| {
+            execution.state == ExecutionState::Pending
+                && execution_group_id(&snapshot.executions, &execution.id).as_ref()
+                    == Some(group_id)
+                && !execution_has_blocking_ancestor(&snapshot.executions, &execution.id)
+        })
+        .map(|execution| ExecutionJob {
+            execution_id: execution.id.clone(),
+            session_id: execution.session_id.clone(),
+            group_id: group_id.clone(),
+        })
+        .collect())
+}
+
+fn execution_group_quiescent(
+    runtime: &SharedRuntime,
+    group_id: &ExecutionId,
+) -> Result<bool, ServerError> {
+    let snapshot = runtime
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
+        .snapshot();
+    let mut found = false;
+    for execution in &snapshot.executions {
+        if execution_group_id(&snapshot.executions, &execution.id).as_ref() != Some(group_id) {
+            continue;
+        }
+        found = true;
+        match execution.state {
+            ExecutionState::Running => return Ok(false),
+            ExecutionState::Pending
+                if !execution_has_blocking_ancestor(&snapshot.executions, &execution.id) =>
+            {
+                return Ok(false);
+            }
+            _ => {}
+        }
+    }
+    Ok(found)
+}
+
+fn execution_group_id(
+    executions: &[phenix_core::ExecutionSummary],
+    execution_id: &ExecutionId,
+) -> Option<ExecutionId> {
+    let mut current = execution_id.clone();
+    loop {
+        let execution = executions
+            .iter()
+            .find(|execution| execution.id == current)?;
+        let Some(parent) = execution.parent_execution.as_ref() else {
+            return Some(current);
+        };
+        current = parent.clone();
+    }
+}
+
+fn execution_has_blocking_ancestor(
+    executions: &[phenix_core::ExecutionSummary],
+    execution_id: &ExecutionId,
+) -> bool {
+    let mut parent = executions
+        .iter()
+        .find(|execution| execution.id == *execution_id)
+        .and_then(|execution| execution.parent_execution.clone());
+    while let Some(parent_id) = parent {
+        let Some(parent_execution) = executions
+            .iter()
+            .find(|execution| execution.id == parent_id)
+        else {
+            return true;
+        };
+        if matches!(
+            parent_execution.state,
+            ExecutionState::Failed | ExecutionState::Cancelled | ExecutionState::Interrupted
+        ) {
+            return true;
+        }
+        parent = parent_execution.parent_execution.clone();
+    }
+    false
 }
 
 fn execute_execution(
     execution_id: &ExecutionId,
+    group_id: &ExecutionId,
     context: &ExecutionWorkerContext,
-    workspace_phase: &mut WorkspacePhase,
 ) -> Result<(), ServerError> {
     let runtime = &context.runtime;
     let backends = &context.backends;
@@ -797,7 +903,13 @@ fn execute_execution(
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
         match runtime_guard.execution_state(execution_id) {
-            Some(ExecutionState::Pending) => runtime_guard.workspace_lease_request(execution_id),
+            Some(ExecutionState::Pending) => {
+                let snapshot = runtime_guard.snapshot();
+                if execution_has_blocking_ancestor(&snapshot.executions, execution_id) {
+                    return Ok(());
+                }
+                runtime_guard.workspace_lease_request(execution_id)
+            }
             Some(state) if is_terminal_state(&state) => return Ok(()),
             Some(_) => return Ok(()),
             None => return Ok(()),
@@ -819,8 +931,15 @@ fn execute_execution(
     let workspace_id = lease_request.workspace_id.clone();
     let lease_mode = lease_request.mode;
     let _workspace_lease = workspace_leases.acquire(lease_request)?;
+    let starts_write_phase = context
+        .workspace_phases
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("workspace phases"))?
+        .entry(group_id.clone())
+        .or_default()
+        .enter(lease_mode);
 
-    if workspace_phase.enter(lease_mode) && workspace_id.as_str() != IN_MEMORY_WORKSPACE_ID {
+    if starts_write_phase && workspace_id.as_str() != IN_MEMORY_WORKSPACE_ID {
         let consistency = workspace_consistency
             .ok_or_else(|| ServerError::WorkspaceConsistencyUnavailable(workspace_id.clone()))?;
         let files = consistency.checkpoint_baseline()?;
@@ -1138,61 +1257,6 @@ fn finish_provider_execution(
     }
     persist_shared(runtime, store, persist_lock)?;
     Ok(())
-}
-
-fn next_scheduled_execution(
-    runtime: &SharedRuntime,
-    completed_execution: &ExecutionId,
-) -> Result<Option<ExecutionId>, ServerError> {
-    let snapshot = runtime
-        .lock()
-        .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
-        .snapshot();
-    let mut scope = Some(completed_execution.clone());
-    while let Some(scope_id) = scope {
-        let Some(scope_execution) = snapshot
-            .executions
-            .iter()
-            .find(|execution| execution.id == scope_id)
-        else {
-            return Ok(None);
-        };
-        if matches!(
-            scope_execution.state,
-            ExecutionState::Failed | ExecutionState::Cancelled | ExecutionState::Interrupted
-        ) {
-            return Ok(None);
-        }
-        if let Some(pending) = snapshot.executions.iter().find(|candidate| {
-            candidate.state == ExecutionState::Pending
-                && execution_is_descendant(&snapshot.executions, &candidate.id, &scope_id)
-        }) {
-            return Ok(Some(pending.id.clone()));
-        }
-        scope = scope_execution.parent_execution.clone();
-    }
-    Ok(None)
-}
-
-fn execution_is_descendant(
-    executions: &[phenix_core::ExecutionSummary],
-    candidate: &ExecutionId,
-    ancestor: &ExecutionId,
-) -> bool {
-    let mut parent = executions
-        .iter()
-        .find(|execution| execution.id == *candidate)
-        .and_then(|execution| execution.parent_execution.clone());
-    while let Some(parent_id) = parent {
-        if parent_id == *ancestor {
-            return true;
-        }
-        parent = executions
-            .iter()
-            .find(|execution| execution.id == parent_id)
-            .and_then(|execution| execution.parent_execution.clone());
-    }
-    false
 }
 
 fn fail_shared_execution(
@@ -1659,7 +1723,7 @@ mod tests {
     };
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Condvar;
+    use std::sync::{mpsc, Condvar};
     use std::time::Duration;
 
     struct CancelOnlySession {
@@ -1699,6 +1763,26 @@ mod tests {
             output_schema: json!({"type": "object"}),
             capabilities: CapabilitySet::default(),
             policy: CallablePolicy::default(),
+        }
+    }
+
+    fn node(id: &str, callable: &str, dependencies: &[&str]) -> OrchestrationNode {
+        OrchestrationNode {
+            id: OrchestrationNodeId::parse(id).unwrap(),
+            callable: CallableId::parse(callable).unwrap(),
+            depends_on: dependencies
+                .iter()
+                .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+                .collect(),
+            objective: None,
+        }
+    }
+
+    fn job(execution: &str, session: &SessionId, group: &str) -> ExecutionJob {
+        ExecutionJob {
+            execution_id: ExecutionId::parse(execution).unwrap(),
+            session_id: session.clone(),
+            group_id: ExecutionId::parse(group).unwrap(),
         }
     }
 
@@ -1858,7 +1942,7 @@ mod tests {
                 .unwrap();
             if *active < 2 {
                 return Err(BackendError::Transport(
-                    "independent sessions did not execute concurrently".to_owned(),
+                    "executions did not execute concurrently".to_owned(),
                 ));
             }
             Ok(())
@@ -1870,27 +1954,21 @@ mod tests {
     }
 
     #[test]
-    fn execution_queue_serializes_each_session_without_blocking_independent_sessions() {
+    fn execution_queue_allows_one_group_to_fan_out_without_admitting_another_session_group() {
         let queue = ExecutionQueue::default();
         let first_session = SessionId::parse("session-1").unwrap();
         let second_session = SessionId::parse("session-2").unwrap();
         queue
-            .enqueue(ExecutionJob {
-                execution_id: ExecutionId::parse("execution-1").unwrap(),
-                session_id: first_session.clone(),
-            })
+            .enqueue(job("execution-1", &first_session, "group-1"))
             .unwrap();
         queue
-            .enqueue(ExecutionJob {
-                execution_id: ExecutionId::parse("execution-2").unwrap(),
-                session_id: first_session.clone(),
-            })
+            .enqueue(job("execution-2", &first_session, "group-1"))
             .unwrap();
         queue
-            .enqueue(ExecutionJob {
-                execution_id: ExecutionId::parse("execution-3").unwrap(),
-                session_id: second_session.clone(),
-            })
+            .enqueue(job("execution-3", &first_session, "group-2"))
+            .unwrap();
+        queue
+            .enqueue(job("execution-4", &second_session, "group-3"))
             .unwrap();
 
         let first = queue.next().unwrap().unwrap();
@@ -1898,21 +1976,61 @@ mod tests {
             first.execution_id,
             ExecutionId::parse("execution-1").unwrap()
         );
+        let sibling = queue.next().unwrap().unwrap();
+        assert_eq!(
+            sibling.execution_id,
+            ExecutionId::parse("execution-2").unwrap()
+        );
         let independent = queue.next().unwrap().unwrap();
         assert_eq!(
             independent.execution_id,
+            ExecutionId::parse("execution-4").unwrap()
+        );
+
+        assert!(!queue.complete(&first, false).unwrap());
+        assert!(queue.complete(&sibling, true).unwrap());
+        let next_group = queue.next().unwrap().unwrap();
+        assert_eq!(
+            next_group.execution_id,
             ExecutionId::parse("execution-3").unwrap()
         );
 
-        queue.complete(&first_session).unwrap();
-        let second = queue.next().unwrap().unwrap();
+        assert!(queue.complete(&next_group, true).unwrap());
+        assert!(queue.complete(&independent, true).unwrap());
+        queue.close().unwrap();
+        assert!(queue.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn closed_queue_waits_for_active_group_and_accepts_generated_descendants() {
+        let queue = ExecutionQueue::default();
+        let session = SessionId::parse("session-1").unwrap();
+        queue
+            .enqueue(job("execution-1", &session, "group-1"))
+            .unwrap();
+        let active = queue.next().unwrap().unwrap();
+        queue.close().unwrap();
+
+        let waiter = queue.clone();
+        let (sender, receiver) = mpsc::channel();
+        let thread = std::thread::spawn(move || sender.send(waiter.next().unwrap()).unwrap());
+        assert!(receiver.recv_timeout(Duration::from_millis(100)).is_err());
+
+        queue
+            .enqueue(job("execution-2", &session, "group-1"))
+            .unwrap();
+        let generated = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
         assert_eq!(
-            second.execution_id,
+            generated.execution_id,
             ExecutionId::parse("execution-2").unwrap()
         );
-        queue.complete(&first_session).unwrap();
-        queue.complete(&second_session).unwrap();
-        queue.close().unwrap();
+
+        assert!(!queue.complete(&active, false).unwrap());
+        assert!(queue.complete(&generated, true).unwrap());
+        thread.join().unwrap();
         assert!(queue.next().unwrap().is_none());
     }
 
@@ -1945,6 +2063,54 @@ mod tests {
                 .iter()
                 .all(|execution| execution.state == ExecutionState::Completed),
             "independent execution states: {executions:?}"
+        );
+    }
+
+    #[test]
+    fn ready_dag_siblings_share_workers_and_generated_join_runs_after_input_eof() {
+        let gate = ConcurrentGate {
+            state: Arc::new((Mutex::new(0), Condvar::new())),
+        };
+        let mut runtime = ConductorRuntime::new();
+        for callable in ["agent.alpha", "agent.beta", "agent.join"] {
+            runtime
+                .register_agent(descriptor(callable, CallableKind::Agent))
+                .unwrap();
+        }
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
+                nodes: vec![
+                    node("alpha", "agent.alpha", &[]),
+                    node("beta", "agent.beta", &[]),
+                    node("join", "agent.join", &["alpha", "beta"]),
+                ],
+            })
+            .unwrap();
+
+        let mut server = ConductorServer::new(runtime);
+        server
+            .register_backend(
+                BackendId::parse("fixture").unwrap(),
+                Box::new(ConcurrentBackend { gate }),
+            )
+            .unwrap();
+        let target = serde_json::to_string(&ExecutionTarget::Fixed(model_target())).unwrap();
+        let input = format!(
+            "{{\"id\":1,\"command\":{{\"type\":\"create_session\",\"parent_session\":null,\"name\":\"dag\",\"target\":{target}}}}}\n\\
+             {{\"id\":2,\"command\":{{\"type\":\"start_callable\",\"session_id\":\"session-1\",\"callable\":\"orchestration.parallel\",\"objective\":\"run\"}}}}\n"
+        );
+        server
+            .serve_ndjson(std::io::Cursor::new(input), std::io::sink())
+            .unwrap();
+
+        let executions = server.runtime().snapshot().executions;
+        assert_eq!(executions.len(), 4);
+        assert!(
+            executions
+                .iter()
+                .all(|execution| execution.state == ExecutionState::Completed),
+            "DAG execution states: {executions:?}"
         );
     }
 }
