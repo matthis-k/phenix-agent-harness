@@ -23,6 +23,19 @@ user_command=$7
 command_status=0
 "$bash_path" -c "$user_command" </dev/null || command_status=$?
 
+while :; do
+  descendants=0
+  for process in /proc/[0-9]*; do
+    pid=${process##*/}
+    case "$pid" in
+      1|"$$") continue ;;
+    esac
+    descendants=1
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  [ "$descendants" -eq 0 ] && break
+done
+
 git_dir="$workspace/.git"
 snapshot="$workspace/.git/phenix-transaction/snapshot"
 excludes="$workspace/.git/phenix-transaction/excludes"
@@ -177,6 +190,7 @@ impl WorkspaceTransaction {
         let mut process = Command::new(bwrap);
         process
             .arg("--die-with-parent")
+            .arg("--unshare-pid")
             .arg("--ro-bind")
             .arg("/")
             .arg("/")
@@ -492,6 +506,36 @@ mod tests {
             .execute(
                 &bash(),
                 "rm -rf .git; mkdir -p .git/phenix-transaction/snapshot; printf tamper > .git/phenix-transaction/snapshot/source.txt; printf 99 > .git/phenix-transaction/result-status; printf new > source.txt",
+            )
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(
+            fs::read_to_string(transaction.paths.result_status()).unwrap(),
+            "0\n"
+        );
+        assert_eq!(
+            fs::read_to_string(transaction.paths.snapshot().join("source.txt")).unwrap(),
+            "new"
+        );
+        transaction.commit().unwrap();
+        assert_eq!(
+            fs::read_to_string(fixture.root.join("source.txt")).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn background_user_process_cannot_modify_transaction_control_state() {
+        let fixture = Fixture::new("background-controls");
+        fs::write(fixture.root.join("source.txt"), "old").unwrap();
+        let transaction =
+            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+
+        let output = transaction
+            .execute(
+                &bash(),
+                "printf new > source.txt; (while :; do mkdir -p .git/phenix-transaction/snapshot; printf tamper > .git/phenix-transaction/snapshot/source.txt; printf 99 > .git/phenix-transaction/result-status; done) >/dev/null 2>&1 &",
             )
             .unwrap();
 
