@@ -9,9 +9,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SANDBOX_TRANSACTION_RELATIVE: &str = ".git/phenix-transaction";
 const SANDBOX_SNAPSHOT_RELATIVE: &str = ".git/phenix-transaction/snapshot";
-const SANDBOX_EXCLUDES_RELATIVE: &str = ".git/phenix-transaction/excludes";
 const SANDBOX_RESULT_STATUS_RELATIVE: &str = ".git/phenix-transaction/result-status";
 const COMMAND_SCRIPT: &str = r#"
 bash_path=$1
@@ -26,7 +24,6 @@ command_status=0
 "$bash_path" -c "$user_command" </dev/null || command_status=$?
 
 git_dir="$workspace/.git"
-transaction_dir="$workspace/.git/phenix-transaction"
 snapshot="$workspace/.git/phenix-transaction/snapshot"
 excludes="$workspace/.git/phenix-transaction/excludes"
 result_status="$workspace/.git/phenix-transaction/result-status"
