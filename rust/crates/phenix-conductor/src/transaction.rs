@@ -194,19 +194,16 @@ impl WorkspaceTransaction {
         child: &mut Child,
     ) -> Result<File, TransactionError> {
         loop {
-            let info = fs::read_to_string(&self.paths.info).map_err(|source| {
-                TransactionError::Io {
+            let info =
+                fs::read_to_string(&self.paths.info).map_err(|source| TransactionError::Io {
                     path: self.paths.info.clone(),
                     source,
-                }
-            })?;
+                })?;
             if !info.is_empty() {
                 if let Some(pid) = sandbox_child_pid(&info) {
                     let path = PathBuf::from(format!("/proc/{pid}/ns/user"));
-                    return File::open(&path).map_err(|source| TransactionError::Io {
-                        path,
-                        source,
-                    });
+                    return File::open(&path)
+                        .map_err(|source| TransactionError::Io { path, source });
                 }
                 if info.trim_end().ends_with('}') {
                     return Err(TransactionError::InvalidSandboxInfo {
@@ -216,13 +213,10 @@ impl WorkspaceTransaction {
                 }
             }
 
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|source| TransactionError::Wait {
-                    program: PathBuf::from(bwrap),
-                    source,
-                })?
-            {
+            if let Some(status) = child.try_wait().map_err(|source| TransactionError::Wait {
+                program: PathBuf::from(bwrap),
+                source,
+            })? {
                 let mut stderr = Vec::new();
                 if let Some(stream) = child.stderr.as_mut() {
                     let _ = stream.read_to_end(&mut stderr);
