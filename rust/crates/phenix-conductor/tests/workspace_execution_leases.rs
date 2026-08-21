@@ -6,7 +6,8 @@ use phenix_conductor::{ConductorRuntime, ConductorServer, DomainEvent};
 use phenix_core::{
     AgentDefinition, BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy,
     CapabilitySet, ExecutionAuthority, ExecutionState, ExecutionTarget, FilesystemAuthority,
-    InferenceOptions, ModelId, ModelTarget, ProviderId, SessionId, WorkspaceDescriptor, WorkspaceId,
+    InferenceOptions, ModelId, ModelTarget, ProviderId, SessionId, WorkspaceDescriptor,
+    WorkspaceId,
 };
 use phenix_protocol::{ClientMessage, Command};
 use serde_json::json;

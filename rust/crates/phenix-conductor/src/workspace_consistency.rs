@@ -181,19 +181,17 @@ impl WorkspaceConsistency {
                 continue;
             }
             let path = entry.path();
-            let metadata = fs::symlink_metadata(&path).map_err(|source| {
-                WorkspaceConsistencyError::Io {
+            let metadata =
+                fs::symlink_metadata(&path).map_err(|source| WorkspaceConsistencyError::Io {
                     path: path.clone(),
                     source,
-                }
-            })?;
+                })?;
             if metadata.is_dir() {
-                let canonical = fs::canonicalize(&path).map_err(|source| {
-                    WorkspaceConsistencyError::Io {
+                let canonical =
+                    fs::canonicalize(&path).map_err(|source| WorkspaceConsistencyError::Io {
                         path: path.clone(),
                         source,
-                    }
-                })?;
+                    })?;
                 self.ensure_canonical_inside(&canonical)?;
                 self.collect_checkpoint_versions(&canonical, &relative, files)?;
             } else {

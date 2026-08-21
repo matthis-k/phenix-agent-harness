@@ -637,12 +637,15 @@ pub(crate) fn apply_domain_event(
                     "workspace checkpoint references non-writer execution {execution_id}"
                 )));
             }
-            let session = state.sessions.get(&execution.summary.session_id).ok_or_else(|| {
-                JournalError::InvalidEvent(format!(
+            let session = state
+                .sessions
+                .get(&execution.summary.session_id)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
                     "workspace checkpoint execution {execution_id} references unknown session {}",
                     execution.summary.session_id
                 ))
-            })?;
+                })?;
             if session.summary.workspace_id != *workspace_id {
                 return Err(JournalError::InvalidEvent(format!(
                     "workspace checkpoint for {execution_id} uses workspace {workspace_id} instead of {}",
