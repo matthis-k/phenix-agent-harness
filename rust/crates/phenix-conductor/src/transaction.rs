@@ -161,6 +161,7 @@ impl WorkspaceTransaction {
 
         let output = Command::new(&self.rsync)
             .arg("-rlpt")
+            .arg("--checksum")
             .arg("--delete")
             .arg("--delete-delay")
             .arg("--delay-updates")
@@ -376,7 +377,7 @@ impl Display for TransactionError {
                     "workspace transaction I/O failed for {}: {source}",
                     path.display()
                 )
-            }
+            },
         }
     }
 }
@@ -493,6 +494,30 @@ mod tests {
             fs::read_to_string(fixture.root.join("target/cache")).unwrap(),
             "scratch-new"
         );
+    }
+
+    #[test]
+    fn apply_checks_content_when_size_and_mtime_match() {
+        let fixture = Fixture::new("checksum");
+        let source = fixture.root.join("source.txt");
+        fs::write(&source, "old").unwrap();
+        let transaction =
+            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+        transaction
+            .execute(&bash(), "printf new > source.txt")
+            .unwrap();
+
+        let snapshot = transaction.paths.snapshot().join("source.txt");
+        let snapshot_modified = fs::metadata(snapshot).unwrap().modified().unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(snapshot_modified))
+            .unwrap();
+
+        transaction.commit().unwrap();
+        assert_eq!(fs::read_to_string(source).unwrap(), "new");
     }
 
     #[test]
