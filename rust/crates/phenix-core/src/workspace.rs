@@ -170,7 +170,10 @@ mod tests {
 
     #[test]
     fn authority_defaults_to_read_only() {
-        assert_eq!(ExecutionAuthority::default(), ExecutionAuthority::read_only());
+        assert_eq!(
+            ExecutionAuthority::default(),
+            ExecutionAuthority::read_only()
+        );
     }
 
     #[test]

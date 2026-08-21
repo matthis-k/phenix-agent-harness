@@ -1604,10 +1604,7 @@ mod tests {
             ))
             .unwrap();
         runtime
-            .register_agent(AgentDefinition::new(
-                agent("agent.child"),
-                child_maximum,
-            ))
+            .register_agent(AgentDefinition::new(agent("agent.child"), child_maximum))
             .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let parent = runtime

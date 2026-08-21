@@ -220,7 +220,10 @@ mod tests {
             .start_session_callable(&session.id, &descriptor.id, "write")
             .unwrap();
 
-        assert_eq!(runtime.execution_authority(&execution.id).unwrap(), authority);
+        assert_eq!(
+            runtime.execution_authority(&execution.id).unwrap(),
+            authority
+        );
     }
 
     #[test]
