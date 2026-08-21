@@ -203,7 +203,6 @@ pub struct CallableDescriptor {
 pub struct AgentDefinition {
     #[serde(flatten)]
     pub descriptor: CallableDescriptor,
-    #[serde(default)]
     pub authority: ExecutionAuthority,
 }
 
@@ -380,12 +379,12 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_only_agent_definition_is_read_only() {
+    fn serialized_agent_definition_requires_explicit_authority() {
         let mut descriptor = orchestration_descriptor();
         descriptor.id = CallableId::parse("agent.scout").unwrap();
         descriptor.kind = CallableKind::Agent;
-        let definition = AgentDefinition::from(descriptor);
-        assert_eq!(definition.authority, ExecutionAuthority::read_only());
+        let value = serde_json::to_value(descriptor).unwrap();
+        assert!(serde_json::from_value::<AgentDefinition>(value).is_err());
     }
 
     #[test]
