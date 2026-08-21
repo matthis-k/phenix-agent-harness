@@ -24,7 +24,6 @@ pub enum JournalExecutionPayload {
     #[serde(alias = "workflow")]
     Orchestration {
         objective: String,
-        next_node: usize,
         #[serde(default)]
         authority: ExecutionAuthority,
     },
@@ -57,12 +56,8 @@ impl From<&ExecutionPayload> for JournalExecutionPayload {
                 input: input.clone(),
                 authority: ExecutionAuthority::read_only(),
             },
-            ExecutionPayload::Orchestration {
-                objective,
-                next_node,
-            } => Self::Orchestration {
+            ExecutionPayload::Orchestration { objective } => Self::Orchestration {
                 objective: objective.clone(),
-                next_node: *next_node,
                 authority: ExecutionAuthority::read_only(),
             },
         }
@@ -73,14 +68,9 @@ impl From<JournalExecutionPayload> for ExecutionPayload {
     fn from(value: JournalExecutionPayload) -> Self {
         match value {
             JournalExecutionPayload::Invocation { input, .. } => Self::Invocation { input },
-            JournalExecutionPayload::Orchestration {
-                objective,
-                next_node,
-                ..
-            } => Self::Orchestration {
-                objective,
-                next_node,
-            },
+            JournalExecutionPayload::Orchestration { objective, .. } => {
+                Self::Orchestration { objective }
+            }
         }
     }
 }
@@ -116,11 +106,6 @@ pub enum DomainEvent {
     ExecutionStateChanged {
         execution_id: ExecutionId,
         state: ExecutionState,
-    },
-    #[serde(alias = "workflow_advanced")]
-    OrchestrationAdvanced {
-        execution_id: ExecutionId,
-        next_node: usize,
     },
     OrchestrationNodeStarted {
         execution_id: ExecutionId,
@@ -498,30 +483,6 @@ pub(crate) fn apply_domain_event(
             }
             execution.summary.state = next.clone();
         }
-        DomainEvent::OrchestrationAdvanced {
-            execution_id,
-            next_node,
-        } => {
-            let execution = state.executions.get_mut(execution_id).ok_or_else(|| {
-                JournalError::InvalidEvent(format!(
-                    "orchestration advance references unknown execution {execution_id}"
-                ))
-            })?;
-            let ExecutionPayload::Orchestration {
-                next_node: current, ..
-            } = &mut execution.payload
-            else {
-                return Err(JournalError::InvalidEvent(format!(
-                    "orchestration advance references non-orchestration execution {execution_id}"
-                )));
-            };
-            if *next_node != *current + 1 {
-                return Err(JournalError::InvalidEvent(format!(
-                    "orchestration {execution_id} advanced from {current} to {next_node}"
-                )));
-            }
-            *current = *next_node;
-        }
         DomainEvent::OrchestrationNodeStarted {
             execution_id,
             node_id,
@@ -727,18 +688,16 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn legacy_workflow_tags_decode_but_current_journals_emit_orchestration() {
+    fn legacy_workflow_payload_tag_decodes_but_current_journals_emit_orchestration() {
         let payload: JournalExecutionPayload = serde_json::from_value(json!({
             "kind": "workflow",
-            "objective": "legacy",
-            "next_node": 2
+            "objective": "legacy"
         }))
         .unwrap();
         assert!(matches!(
             payload,
             JournalExecutionPayload::Orchestration {
                 ref objective,
-                next_node: 2,
                 ..
             } if objective == "legacy"
         ));
@@ -746,21 +705,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&payload).unwrap()["kind"],
             "orchestration"
-        );
-
-        let event: DomainEvent = serde_json::from_value(json!({
-            "type": "workflow_advanced",
-            "execution_id": "execution-1",
-            "next_node": 3
-        }))
-        .unwrap();
-        assert!(matches!(
-            event,
-            DomainEvent::OrchestrationAdvanced { next_node: 3, .. }
-        ));
-        assert_eq!(
-            serde_json::to_value(&event).unwrap()["type"],
-            "orchestration_advanced"
         );
     }
 }

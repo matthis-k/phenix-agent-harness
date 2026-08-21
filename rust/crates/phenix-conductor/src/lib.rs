@@ -150,7 +150,7 @@ struct SessionRecord {
 #[derive(Clone, Debug)]
 enum ExecutionPayload {
     Invocation { input: String },
-    Orchestration { objective: String, next_node: usize },
+    Orchestration { objective: String },
 }
 
 #[derive(Clone, Debug)]
@@ -791,7 +791,6 @@ impl ConductorRuntime {
             callable.clone(),
             ExecutionPayload::Orchestration {
                 objective: objective.into(),
-                next_node: 0,
             },
         )?;
         self.set_state(&summary.id, ExecutionState::Running)?;
@@ -1189,7 +1188,7 @@ impl ConductorRuntime {
                 .executions
                 .get(execution_id)
                 .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-            let ExecutionPayload::Orchestration { objective, .. } = &execution.payload else {
+            let ExecutionPayload::Orchestration { objective } = &execution.payload else {
                 return Err(ConductorError::NonModelExecution(execution_id.clone()));
             };
             (

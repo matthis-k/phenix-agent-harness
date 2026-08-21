@@ -529,7 +529,6 @@ impl ConductorRuntime {
                     callable.clone(),
                     ExecutionPayload::Orchestration {
                         objective: objective.clone(),
-                        next_node: 0,
                     },
                     objective,
                 )?;
