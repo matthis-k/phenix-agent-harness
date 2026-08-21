@@ -1,0 +1,78 @@
+name: Grill workspace lease PR patch
+
+on:
+  pull_request:
+    branches:
+      - agent/grill-03-execution-authority
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'agent/grill-04-workspace-leases'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: Extract and apply workspace lease runtime slice
+        run: |
+          set -euo pipefail
+          awk '
+            /^          python <<.PY.$/ { capture=1; next }
+            capture && /^          PY$/ { capture=0; exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/grill-workspace-leases.yml > /tmp/grill_workspace_leases.py
+          test -s /tmp/grill_workspace_leases.py
+          python /tmp/grill_workspace_leases.py
+
+      - name: Apply deterministic maintenance fixes
+        run: |
+          set -euo pipefail
+          nix run .#phenix-maintenance -- fix
+          git diff --check
+
+      - name: Validate focused runtime slice
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: |
+          set -euo pipefail
+          nix run .#phenix-maintenance -- check rust
+          nix run .#phenix-maintenance -- test unit
+
+      - name: Commit tested workspace lease slice
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          rm .github/workflows/grill-workspace-leases.yml
+          rm .github/workflows/grill-workspace-leases-pr.yml
+          rm .github/grill-workspace-leases-trigger
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            .github/workflows/grill-workspace-leases.yml \
+            .github/workflows/grill-workspace-leases-pr.yml \
+            .github/grill-workspace-leases-trigger \
+            rust/crates/phenix-conductor/src/lib.rs \
+            rust/crates/phenix-conductor/src/journal.rs \
+            rust/crates/phenix-conductor/src/persistence.rs \
+            rust/crates/phenix-conductor/src/server.rs \
+            rust/crates/phenix-conductor/src/main.rs \
+            rust/crates/phenix-conductor/src/workspace.rs \
+            rust/crates/phenix-conductor/src/workspace_lease.rs
+          git commit -m "feat: enforce workspace execution leases"
+          git push origin "HEAD:$HEAD_REF"
