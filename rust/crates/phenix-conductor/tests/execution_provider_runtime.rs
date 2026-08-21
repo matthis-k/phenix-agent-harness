@@ -4,10 +4,9 @@ use phenix_conductor::{
     InvocationGuard, InvocationPolicyContext, InvocationSubject, PolicyDenial,
 };
 use phenix_core::{
-    AgentNode, BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy,
-    CapabilitySet, ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget,
-    InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition, OrchestrationPolicy,
-    ProviderId,
+    BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
+    ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
 };
 use serde_json::json;
 use std::sync::{
@@ -96,6 +95,15 @@ fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
         output_schema: json!({"type": "object"}),
         capabilities: CapabilitySet::default(),
         policy: CallablePolicy::default(),
+    }
+}
+
+fn node(id: &str, callable: CallableId, objective: Option<&str>) -> OrchestrationNode {
+    OrchestrationNode {
+        id: OrchestrationNodeId::parse(id).unwrap(),
+        callable,
+        depends_on: Vec::new(),
+        objective: objective.map(str::to_owned),
     }
 }
 
@@ -212,11 +220,7 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
     runtime
         .register_orchestration(OrchestrationDefinition {
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
-            policy: OrchestrationPolicy::Sequential,
-            nodes: vec![AgentNode {
-                callable: step,
-                objective: Some("provider step".to_owned()),
-            }],
+            nodes: vec![node("provider", step, Some("provider step"))],
         })
         .unwrap();
     let root = root(&mut runtime);
@@ -266,11 +270,11 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
     runtime
         .register_orchestration(OrchestrationDefinition {
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
-            policy: OrchestrationPolicy::Sequential,
-            nodes: vec![AgentNode {
-                callable: CallableId::parse("agent.native").unwrap(),
-                objective: None,
-            }],
+            nodes: vec![node(
+                "provider",
+                CallableId::parse("agent.native").unwrap(),
+                None,
+            )],
         })
         .unwrap();
     let root = root(&mut runtime);

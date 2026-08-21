@@ -4,10 +4,10 @@ use phenix_backend::{
 };
 use phenix_conductor::{ConductorError, ConductorRuntime};
 use phenix_core::{
-    AgentNode, BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy,
-    CapabilitySet, ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget,
-    InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition, OrchestrationPolicy,
-    ProviderId, RoutingProfile, RoutingProfileId,
+    BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
+    ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
+    RoutingProfile, RoutingProfileId,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -204,6 +204,23 @@ fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
     }
 }
 
+fn node(
+    id: &str,
+    callable: CallableId,
+    depends_on: &[&str],
+    objective: Option<&str>,
+) -> OrchestrationNode {
+    OrchestrationNode {
+        id: OrchestrationNodeId::parse(id).unwrap(),
+        callable,
+        depends_on: depends_on
+            .iter()
+            .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+            .collect(),
+        objective: objective.map(str::to_owned),
+    }
+}
+
 fn echo_descriptor() -> CallableDescriptor {
     descriptor("echo", CallableKind::Tool)
 }
@@ -297,7 +314,7 @@ fn routed_agent_uses_callable_specific_model() {
 }
 
 #[test]
-fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
+fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() {
     let mut runtime = ConductorRuntime::new();
     let scout = CallableId::parse("agent.scout").unwrap();
     let worker = CallableId::parse("agent.worker").unwrap();
@@ -310,16 +327,9 @@ fn sequential_workflow_is_conductor_owned_and_advances_agent_children() {
     runtime
         .register_orchestration(OrchestrationDefinition {
             descriptor: descriptor("orchestration.implement", CallableKind::Orchestration),
-            policy: OrchestrationPolicy::Sequential,
             nodes: vec![
-                AgentNode {
-                    callable: scout,
-                    objective: Some("inspect".to_owned()),
-                },
-                AgentNode {
-                    callable: worker,
-                    objective: None,
-                },
+                node("scout", scout, &[], Some("inspect")),
+                node("worker", worker, &["scout"], None),
             ],
         })
         .unwrap();
