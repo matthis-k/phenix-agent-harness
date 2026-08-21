@@ -81,6 +81,29 @@ where
     left.intersection(right).cloned().collect()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceLeaseMode {
+    Read,
+    Write,
+}
+
+impl From<FilesystemAuthority> for WorkspaceLeaseMode {
+    fn from(authority: FilesystemAuthority) -> Self {
+        match authority {
+            FilesystemAuthority::ReadOnly => Self::Read,
+            FilesystemAuthority::Write => Self::Write,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceLeaseRequest {
+    pub workspace_id: WorkspaceId,
+    pub execution_id: ExecutionId,
+    pub mode: WorkspaceLeaseMode,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceDescriptor {
     pub id: WorkspaceId,
@@ -204,6 +227,18 @@ mod tests {
         assert_eq!(child.callables, BTreeSet::from([callable("tool.read")]));
         assert!(parent.permits(&child));
         assert!(!parent.permits(&requested));
+    }
+
+    #[test]
+    fn filesystem_authority_selects_workspace_lease_mode() {
+        assert_eq!(
+            WorkspaceLeaseMode::from(FilesystemAuthority::ReadOnly),
+            WorkspaceLeaseMode::Read
+        );
+        assert_eq!(
+            WorkspaceLeaseMode::from(FilesystemAuthority::Write),
+            WorkspaceLeaseMode::Write
+        );
     }
 
     #[test]
