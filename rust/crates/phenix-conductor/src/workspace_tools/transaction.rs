@@ -1,5 +1,5 @@
+use super::super::workspace_consistency::WorkspaceConsistencyError;
 use super::WorkspaceConsistency;
-use super::workspace_consistency::WorkspaceConsistencyError;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display, Formatter};
