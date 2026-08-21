@@ -1,8 +1,16 @@
+use crate::workspace_consistency::{WorkspaceConsistency, WorkspaceConsistencyError};
 use phenix_conductor::{ConductorError, ConductorRuntime};
-use phenix_core::{CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet};
+use phenix_core::{
+    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, FileVersion,
+    FilesystemAuthority, WorkspaceDescriptor, CAPABILITY_FILESYSTEM_READ,
+    CAPABILITY_FILESYSTEM_WRITE,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
+use std::error::Error;
 use std::ffi::OsString;
+use std::fmt::{self, Display, Formatter};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -30,6 +38,7 @@ struct ReadInput {
 struct WriteInput {
     path: String,
     content: String,
+    expected_version: Option<FileVersion>,
 }
 
 #[derive(Deserialize)]
@@ -39,6 +48,7 @@ struct EditInput {
     old_text: String,
     new_text: String,
     replace_all: Option<bool>,
+    expected_version: Option<FileVersion>,
 }
 
 #[derive(Deserialize)]
@@ -49,14 +59,56 @@ struct GrepInput {
     case_sensitive: Option<bool>,
 }
 
-pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<(), ConductorError> {
-    let bash_workspace = workspace.clone();
+#[derive(Debug)]
+pub enum RegisterError {
+    Conductor(ConductorError),
+    Workspace(WorkspaceConsistencyError),
+}
+
+impl Display for RegisterError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Conductor(error) => Display::fmt(error, f),
+            Self::Workspace(error) => Display::fmt(error, f),
+        }
+    }
+}
+
+impl Error for RegisterError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Conductor(error) => Some(error),
+            Self::Workspace(error) => Some(error),
+        }
+    }
+}
+
+impl From<ConductorError> for RegisterError {
+    fn from(value: ConductorError) -> Self {
+        Self::Conductor(value)
+    }
+}
+
+impl From<WorkspaceConsistencyError> for RegisterError {
+    fn from(value: WorkspaceConsistencyError) -> Self {
+        Self::Workspace(value)
+    }
+}
+
+pub fn register(
+    runtime: &mut ConductorRuntime,
+    workspace: WorkspaceDescriptor,
+) -> Result<(), RegisterError> {
+    let consistency = WorkspaceConsistency::new(&workspace)?;
+    let root = consistency.root().to_path_buf();
+
+    let bash_workspace = root.clone();
     runtime.register_tool(
         tool_descriptor(
             "bash",
             format!(
-                "Execute a Bash command in the current Phenix workspace ({}). Use this for shell commands, builds, tests, and operations not covered by the dedicated workspace tools.",
-                workspace.display()
+                "Execute a Bash command in the current Phenix workspace ({}). This tool requires filesystem write authority until shell writes are isolated by the workspace sandbox.",
+                root.display()
             ),
             json!({
                 "type": "object",
@@ -79,17 +131,18 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                     "stderr": { "type": "string" }
                 }
             }),
+            FilesystemAuthority::Write,
         ),
         move |arguments| execute_bash(&bash_workspace, arguments),
     )?;
 
-    let read_workspace = workspace.clone();
+    let read_consistency = consistency.clone();
     runtime.register_tool(
         tool_descriptor(
             "read",
             format!(
-                "Read a UTF-8 text file from the current Phenix workspace ({}). Paths are workspace-relative. Use offset and limit for large files.",
-                workspace.display()
+                "Read a UTF-8 text file from the current Phenix workspace ({}). Source reads return a version token. Pass that exact token to write or edit. Scratch reads return version=null.",
+                root.display()
             ),
             json!({
                 "type": "object",
@@ -116,27 +169,29 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
             }),
             json!({
                 "type": "object",
-                "required": ["path", "content", "start_line", "end_line", "total_lines", "truncated"],
+                "required": ["path", "content", "start_line", "end_line", "total_lines", "truncated", "version"],
                 "properties": {
                     "path": { "type": "string" },
                     "content": { "type": "string" },
                     "start_line": { "type": ["integer", "null"] },
                     "end_line": { "type": ["integer", "null"] },
                     "total_lines": { "type": "integer" },
-                    "truncated": { "type": "boolean" }
+                    "truncated": { "type": "boolean" },
+                    "version": nullable_file_version_schema()
                 }
             }),
+            FilesystemAuthority::ReadOnly,
         ),
-        move |arguments| execute_read(&read_workspace, arguments),
+        move |arguments| execute_read(&read_consistency, arguments),
     )?;
 
-    let write_workspace = workspace.clone();
+    let write_consistency = consistency.clone();
     runtime.register_tool(
         tool_descriptor(
             "write",
             format!(
-                "Create or replace a UTF-8 text file in the current Phenix workspace ({}). Paths are workspace-relative and missing parent directories are created.",
-                workspace.display()
+                "Create or replace a UTF-8 text file in the current Phenix workspace ({}). Source writes require expected_version from read. For a new source file use state=absent. Scratch writes omit expected_version.",
+                root.display()
             ),
             json!({
                 "type": "object",
@@ -151,28 +206,31 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                     "content": {
                         "type": "string",
                         "description": "Complete UTF-8 file contents"
-                    }
+                    },
+                    "expected_version": file_version_schema()
                 }
             }),
             json!({
                 "type": "object",
-                "required": ["path", "bytes_written"],
+                "required": ["path", "bytes_written", "version"],
                 "properties": {
                     "path": { "type": "string" },
-                    "bytes_written": { "type": "integer" }
+                    "bytes_written": { "type": "integer" },
+                    "version": nullable_file_version_schema()
                 }
             }),
+            FilesystemAuthority::Write,
         ),
-        move |arguments| execute_write(&write_workspace, arguments),
+        move |arguments| execute_write(&write_consistency, arguments),
     )?;
 
-    let edit_workspace = workspace.clone();
+    let edit_consistency = consistency.clone();
     runtime.register_tool(
         tool_descriptor(
             "edit",
             format!(
-                "Edit a UTF-8 text file in the current Phenix workspace ({}). The old_text match must be unique unless replace_all is explicitly true.",
-                workspace.display()
+                "Edit a UTF-8 text file in the current Phenix workspace ({}). Source edits require expected_version from read. The old_text match must be unique unless replace_all is true. Scratch edits omit expected_version.",
+                root.display()
             ),
             json!({
                 "type": "object",
@@ -196,28 +254,31 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                     "replace_all": {
                         "type": "boolean",
                         "description": "Replace every exact match; defaults to false and requires a unique match"
-                    }
+                    },
+                    "expected_version": file_version_schema()
                 }
             }),
             json!({
                 "type": "object",
-                "required": ["path", "replacements", "bytes_written"],
+                "required": ["path", "replacements", "bytes_written", "version"],
                 "properties": {
                     "path": { "type": "string" },
                     "replacements": { "type": "integer" },
-                    "bytes_written": { "type": "integer" }
+                    "bytes_written": { "type": "integer" },
+                    "version": nullable_file_version_schema()
                 }
             }),
+            FilesystemAuthority::Write,
         ),
-        move |arguments| execute_edit(&edit_workspace, arguments),
+        move |arguments| execute_edit(&edit_consistency, arguments),
     )?;
 
     runtime.register_tool(
         tool_descriptor(
             "grep",
             format!(
-                "Search text recursively in the current Phenix workspace ({}). The pattern uses ripgrep regular-expression syntax; .git is excluded.",
-                workspace.display()
+                "Search text recursively in the current Phenix workspace ({}). The pattern uses ripgrep regular-expression syntax. .git is excluded. Grep results are not yet recorded as exact file observations.",
+                root.display()
             ),
             json!({
                 "type": "object",
@@ -250,8 +311,9 @@ pub fn register(runtime: &mut ConductorRuntime, workspace: PathBuf) -> Result<()
                     "stderr": { "type": "string" }
                 }
             }),
+            FilesystemAuthority::ReadOnly,
         ),
-        move |arguments| execute_grep(&workspace, arguments),
+        move |arguments| execute_grep(&root, arguments),
     )?;
 
     Ok(())
@@ -262,18 +324,60 @@ fn tool_descriptor(
     description: String,
     input_schema: Value,
     output_schema: Value,
+    filesystem: FilesystemAuthority,
 ) -> CallableDescriptor {
+    let capability = match filesystem {
+        FilesystemAuthority::ReadOnly => CAPABILITY_FILESYSTEM_READ,
+        FilesystemAuthority::Write => CAPABILITY_FILESYSTEM_WRITE,
+    };
     CallableDescriptor {
         id: CallableId::parse(id).expect("static callable id"),
         kind: CallableKind::Tool,
         description,
         input_schema,
         output_schema,
-        capabilities: CapabilitySet::default(),
+        capabilities: CapabilitySet(BTreeSet::from([capability.to_owned()])),
         policy: CallablePolicy {
             requires_permission: false,
         },
     }
+}
+
+fn file_version_schema() -> Value {
+    json!({
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state"],
+                "properties": {
+                    "state": { "const": "absent" }
+                }
+            },
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state", "content_hash", "kind"],
+                "properties": {
+                    "state": { "const": "present" },
+                    "content_hash": { "type": "string", "minLength": 1 },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["regular", "directory", "symlink", "other"]
+                    }
+                }
+            }
+        ]
+    })
+}
+
+fn nullable_file_version_schema() -> Value {
+    json!({
+        "anyOf": [
+            file_version_schema(),
+            { "type": "null" }
+        ]
+    })
 }
 
 fn execute_bash(workspace: &Path, arguments: &str) -> Result<String, String> {
@@ -299,11 +403,9 @@ fn execute_bash(workspace: &Path, arguments: &str) -> Result<String, String> {
     .to_string())
 }
 
-fn execute_read(workspace: &Path, arguments: &str) -> Result<String, String> {
+fn execute_read(consistency: &WorkspaceConsistency, arguments: &str) -> Result<String, String> {
     let input: ReadInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid read arguments: {error}"))?;
-    let relative = relative_workspace_path(&input.path)?;
-    let path = workspace.join(&relative);
     let offset = input.offset.unwrap_or(1);
     let limit = input.limit.unwrap_or(DEFAULT_READ_LINES);
     if offset == 0 {
@@ -313,63 +415,59 @@ fn execute_read(workspace: &Path, arguments: &str) -> Result<String, String> {
         return Err(format!("read limit must be between 1 and {MAX_READ_LINES}"));
     }
 
-    let content = fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read {}: {error}", input.path))?;
-    let lines = content.lines().collect::<Vec<_>>();
+    let read = consistency
+        .read_utf8(&input.path)
+        .map_err(|error| error.to_string())?;
+    let lines = read.content.lines().collect::<Vec<_>>();
     let total_lines = lines.len();
     let start_index = offset.saturating_sub(1).min(total_lines);
     let end_index = start_index.saturating_add(limit).min(total_lines);
     let mut selected = lines[start_index..end_index].join("\n");
-    if end_index > start_index && (end_index < total_lines || content.ends_with('\n')) {
+    if end_index > start_index && (end_index < total_lines || read.content.ends_with('\n')) {
         selected.push('\n');
     }
     let returned_lines = end_index.saturating_sub(start_index);
+    let version = read.observation.as_ref().map(|observation| &observation.version);
 
     Ok(json!({
-        "path": relative.to_string_lossy().into_owned(),
+        "path": read.path.to_string_lossy().into_owned(),
         "content": selected,
         "start_line": (returned_lines > 0).then_some(start_index + 1),
         "end_line": (returned_lines > 0).then_some(end_index),
         "total_lines": total_lines,
         "truncated": end_index < total_lines,
+        "version": version,
     })
     .to_string())
 }
 
-fn execute_write(workspace: &Path, arguments: &str) -> Result<String, String> {
+fn execute_write(consistency: &WorkspaceConsistency, arguments: &str) -> Result<String, String> {
     let input: WriteInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid write arguments: {error}"))?;
     let relative = relative_workspace_path(&input.path)?;
-    let path = workspace.join(&relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "failed to create parent directory for {}: {error}",
-                input.path
-            )
-        })?;
-    }
-    fs::write(&path, input.content.as_bytes())
-        .map_err(|error| format!("failed to write {}: {error}", input.path))?;
+    let observation = consistency
+        .write_utf8(&relative, input.expected_version.as_ref(), &input.content)
+        .map_err(|error| error.to_string())?;
+    let version = observation.as_ref().map(|observation| &observation.version);
 
     Ok(json!({
         "path": relative.to_string_lossy().into_owned(),
         "bytes_written": input.content.len(),
+        "version": version,
     })
     .to_string())
 }
 
-fn execute_edit(workspace: &Path, arguments: &str) -> Result<String, String> {
+fn execute_edit(consistency: &WorkspaceConsistency, arguments: &str) -> Result<String, String> {
     let input: EditInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid edit arguments: {error}"))?;
     if input.old_text.is_empty() {
         return Err("edit old_text must not be empty".to_owned());
     }
-    let relative = relative_workspace_path(&input.path)?;
-    let path = workspace.join(&relative);
-    let content = fs::read_to_string(&path)
+    let read = consistency
+        .read_utf8(&input.path)
         .map_err(|error| format!("failed to read {} for edit: {error}", input.path))?;
-    let matches = content.match_indices(&input.old_text).count();
+    let matches = read.content.match_indices(&input.old_text).count();
     if matches == 0 {
         return Err(format!("edit old_text did not match {}", input.path));
     }
@@ -382,17 +480,20 @@ fn execute_edit(workspace: &Path, arguments: &str) -> Result<String, String> {
     }
     let replacements = if replace_all { matches } else { 1 };
     let updated = if replace_all {
-        content.replace(&input.old_text, &input.new_text)
+        read.content.replace(&input.old_text, &input.new_text)
     } else {
-        content.replacen(&input.old_text, &input.new_text, 1)
+        read.content.replacen(&input.old_text, &input.new_text, 1)
     };
-    fs::write(&path, updated.as_bytes())
-        .map_err(|error| format!("failed to write edited {}: {error}", input.path))?;
+    let observation = consistency
+        .write_utf8(&read.path, input.expected_version.as_ref(), &updated)
+        .map_err(|error| error.to_string())?;
+    let version = observation.as_ref().map(|observation| &observation.version);
 
     Ok(json!({
-        "path": relative.to_string_lossy().into_owned(),
+        "path": read.path.to_string_lossy().into_owned(),
         "replacements": replacements,
         "bytes_written": updated.len(),
+        "version": version,
     })
     .to_string())
 }
@@ -514,7 +615,7 @@ fn relative_workspace_path(raw: &str) -> Result<PathBuf, String> {
         }
     }
     if relative.as_os_str().is_empty() {
-        relative.push(".");
+        return Err("workspace path must name a file".to_owned());
     }
     Ok(relative)
 }
@@ -538,9 +639,9 @@ mod tests {
     use phenix_core::{
         BackendId, ExecutionId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
         OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
-        RoutingProfile, RoutingProfileId,
+        RoutingProfile, RoutingProfileId, WorkspaceId,
     };
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -663,6 +764,18 @@ mod tests {
         workspace
     }
 
+    fn descriptor(root: &Path, scratch_paths: BTreeSet<PathBuf>) -> WorkspaceDescriptor {
+        WorkspaceDescriptor {
+            id: WorkspaceId::parse("workspace:test").unwrap(),
+            root: root.to_path_buf(),
+            scratch_paths,
+        }
+    }
+
+    fn consistency(root: &Path, scratch_paths: BTreeSet<PathBuf>) -> WorkspaceConsistency {
+        WorkspaceConsistency::new(&descriptor(root, scratch_paths)).unwrap()
+    }
+
     #[test]
     fn bash_executes_in_the_bound_workspace() {
         let workspace = temp_workspace("bash-tool");
@@ -673,7 +786,7 @@ mod tests {
             r#"{"command":"printf '%s\\n' \"$(cat marker.txt)\" \"$PWD\""}"#,
         )
         .unwrap();
-        let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let output: Value = serde_json::from_str(&output).unwrap();
         let stdout = output["stdout"].as_str().unwrap();
         assert!(stdout.contains("workspace-marker"));
         assert!(stdout.contains(workspace.to_string_lossy().as_ref()));
@@ -688,57 +801,119 @@ mod tests {
             r#"{"command":"printf failure >&2; exit 7"}"#,
         )
         .unwrap();
-        let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let output: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(output["exit_code"], 7);
         assert_eq!(output["stderr"], "failure");
     }
 
     #[test]
-    fn read_and_write_are_workspace_relative_and_line_bounded() {
+    fn read_and_write_return_source_versions_and_bound_lines() {
         let workspace = temp_workspace("file-tools");
+        let consistency = consistency(&workspace, BTreeSet::new());
         let write = execute_write(
-            &workspace,
-            r#"{"path":"nested/example.txt","content":"one\ntwo\nthree\n"}"#,
+            &consistency,
+            r#"{"path":"nested/example.txt","content":"one\ntwo\nthree\n","expected_version":{"state":"absent"}}"#,
         )
         .unwrap();
-        let write: serde_json::Value = serde_json::from_str(&write).unwrap();
+        let write: Value = serde_json::from_str(&write).unwrap();
         assert_eq!(write["path"], "nested/example.txt");
         assert_eq!(write["bytes_written"], 14);
+        assert_eq!(write["version"]["state"], "present");
 
         let read = execute_read(
-            &workspace,
+            &consistency,
             r#"{"path":"nested/example.txt","offset":2,"limit":1}"#,
         )
         .unwrap();
-        let read: serde_json::Value = serde_json::from_str(&read).unwrap();
+        let read: Value = serde_json::from_str(&read).unwrap();
         assert_eq!(read["content"], "two\n");
         assert_eq!(read["start_line"], 2);
         assert_eq!(read["end_line"], 2);
         assert_eq!(read["total_lines"], 3);
         assert_eq!(read["truncated"], true);
+        assert_eq!(read["version"], write["version"]);
 
         let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]
-    fn edit_requires_a_unique_match_unless_replace_all_is_explicit() {
+    fn stale_source_write_is_rejected() {
+        let workspace = temp_workspace("stale-write");
+        fs::write(workspace.join("example.txt"), "v1").unwrap();
+        let consistency = consistency(&workspace, BTreeSet::new());
+        let read: Value = serde_json::from_str(
+            &execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap(),
+        )
+        .unwrap();
+        fs::write(workspace.join("example.txt"), "external-v2").unwrap();
+
+        let arguments = json!({
+            "path": "example.txt",
+            "content": "agent-v3",
+            "expected_version": read["version"].clone(),
+        })
+        .to_string();
+        let error = execute_write(&consistency, &arguments).unwrap_err();
+
+        assert!(error.contains("changed since it was observed"));
+        assert_eq!(
+            fs::read_to_string(workspace.join("example.txt")).unwrap(),
+            "external-v2"
+        );
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn scratch_write_does_not_require_a_source_version() {
+        let workspace = temp_workspace("scratch-write");
+        let consistency = consistency(
+            &workspace,
+            BTreeSet::from([PathBuf::from("target")]),
+        );
+
+        let write = execute_write(
+            &consistency,
+            r#"{"path":"target/cache.txt","content":"cache"}"#,
+        )
+        .unwrap();
+        let write: Value = serde_json::from_str(&write).unwrap();
+        assert_eq!(write["version"], Value::Null);
+        assert_eq!(
+            fs::read_to_string(workspace.join("target/cache.txt")).unwrap(),
+            "cache"
+        );
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn edit_requires_a_unique_match_and_the_read_version() {
         let workspace = temp_workspace("edit-tool");
         fs::write(workspace.join("example.txt"), "alpha beta alpha\n").unwrap();
+        let consistency = consistency(&workspace, BTreeSet::new());
 
         let error = execute_edit(
-            &workspace,
+            &consistency,
             r#"{"path":"example.txt","old_text":"alpha","new_text":"omega"}"#,
         )
         .unwrap_err();
         assert!(error.contains("matched 2 occurrences"));
 
-        let result = execute_edit(
-            &workspace,
-            r#"{"path":"example.txt","old_text":"alpha","new_text":"omega","replace_all":true}"#,
+        let read: Value = serde_json::from_str(
+            &execute_read(&consistency, r#"{"path":"example.txt"}"#).unwrap(),
         )
         .unwrap();
-        let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let arguments = json!({
+            "path": "example.txt",
+            "old_text": "alpha",
+            "new_text": "omega",
+            "replace_all": true,
+            "expected_version": read["version"].clone(),
+        })
+        .to_string();
+        let result = execute_edit(&consistency, &arguments).unwrap();
+        let result: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(result["replacements"], 2);
+        assert_eq!(result["version"]["state"], "present");
         assert_eq!(
             fs::read_to_string(workspace.join("example.txt")).unwrap(),
             "omega beta omega\n"
@@ -783,9 +958,30 @@ mod tests {
     }
 
     #[test]
-    fn default_tool_surface_reaches_root_and_every_agent_in_a_workflow() {
+    fn workspace_tools_declare_filesystem_requirements() {
+        let workspace = temp_workspace("tool-capabilities");
         let mut runtime = ConductorRuntime::new();
-        register(&mut runtime, PathBuf::from(".")).unwrap();
+        register(&mut runtime, descriptor(&workspace, BTreeSet::new())).unwrap();
+        let descriptors = runtime
+            .tool_descriptors()
+            .into_iter()
+            .map(|descriptor| (descriptor.id.as_str().to_owned(), descriptor.capabilities))
+            .collect::<BTreeMap<_, _>>();
+
+        for id in ["read", "grep"] {
+            assert!(descriptors[id].0.contains(CAPABILITY_FILESYSTEM_READ));
+        }
+        for id in ["bash", "write", "edit"] {
+            assert!(descriptors[id].0.contains(CAPABILITY_FILESYSTEM_WRITE));
+        }
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn default_tool_registry_reaches_root_and_every_agent_in_an_orchestration() {
+        let workspace = temp_workspace("tool-surface");
+        let mut runtime = ConductorRuntime::new();
+        register(&mut runtime, descriptor(&workspace, BTreeSet::new())).unwrap();
         assert_eq!(
             runtime
                 .tool_descriptors()
@@ -810,10 +1006,13 @@ mod tests {
                 .unwrap();
         }
 
-        let workflow_id = CallableId::parse("orchestration.tool-surface").unwrap();
+        let orchestration_id = CallableId::parse("orchestration.tool-surface").unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
-                descriptor: fixture_descriptor(workflow_id.as_str(), CallableKind::Orchestration),
+                descriptor: fixture_descriptor(
+                    orchestration_id.as_str(),
+                    CallableKind::Orchestration,
+                ),
                 nodes: vec![
                     orchestration_node("scout", scout.clone(), &[], "inspect the workspace"),
                     orchestration_node(
@@ -852,7 +1051,7 @@ mod tests {
             .submit(&session.id, "exercise the orchestration")
             .unwrap();
         let orchestration = runtime
-            .start_orchestration(&root.id, &workflow_id, "change and verify")
+            .start_orchestration(&root.id, &orchestration_id, "change and verify")
             .unwrap();
 
         let recorder = ToolSurfaceRecorder::default();
@@ -880,5 +1079,6 @@ mod tests {
         }
 
         recorder.assert_model_tools("root", &["bash", "edit", "grep", "read", "write"]);
+        let _ = fs::remove_dir_all(workspace);
     }
 }
