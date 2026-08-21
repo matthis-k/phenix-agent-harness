@@ -377,7 +377,7 @@ impl Display for TransactionError {
                     "workspace transaction I/O failed for {}: {source}",
                     path.display()
                 )
-            },
+            }
         }
     }
 }
