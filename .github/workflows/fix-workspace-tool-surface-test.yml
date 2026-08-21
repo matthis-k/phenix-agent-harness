@@ -1,6 +1,5 @@
 name: Fix workspace tool surface test
 
-# Trigger the patch from the existing stacked PR event.
 on:
   pull_request:
     branches:
@@ -26,15 +25,12 @@ jobs:
 
           path = Path('rust/crates/phenix-conductor/src/workspace_tools.rs')
           text = path.read_text()
-          old = '''        BackendId, ExecutionId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
-              OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
-              RoutingProfile, RoutingProfileId, WorkspaceId,
-          };'''
-          new = '''        AgentDefinition, BackendId, ExecutionAuthority, ExecutionId, ExecutionTarget,
-              FilesystemAuthority, InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition,
-              OrchestrationNode, OrchestrationNodeId, ProviderId, RoutingProfile, RoutingProfileId,
-              WorkspaceId,
-          };'''
+
+          old = '        BackendId, ExecutionId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,\n'
+          new = (
+              '        AgentDefinition, BackendId, ExecutionAuthority, ExecutionId, ExecutionTarget,\n'
+              '        FilesystemAuthority, InferenceOptions, ModelId, ModelTarget,\n'
+          )
           assert text.count(old) == 1
           text = text.replace(old, new, 1)
 
