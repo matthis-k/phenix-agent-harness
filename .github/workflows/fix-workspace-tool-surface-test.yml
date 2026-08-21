@@ -34,21 +34,23 @@ jobs:
           assert text.count(old) == 1
           text = text.replace(old, new, 1)
 
-          old = '''        for agent in [&scout, &implementer, &verifier] {
-              runtime
-                  .register_agent(fixture_descriptor(agent.as_str(), CallableKind::Agent))
-                  .unwrap();
-          }'''
-          new = '''        for agent in [&scout, &implementer, &verifier] {
-              let mut authority = ExecutionAuthority::read_only();
-              authority.filesystem = FilesystemAuthority::Write;
-              runtime
-                  .register_agent(AgentDefinition::new(
-                      fixture_descriptor(agent.as_str(), CallableKind::Agent),
-                      authority,
-                  ))
-                  .unwrap();
-          }'''
+          old = '        for agent in [&scout, &implementer, &verifier] {\n            runtime\n'
+          new = (
+              '        for agent in [&scout, &implementer, &verifier] {\n'
+              '            let mut authority = ExecutionAuthority::read_only();\n'
+              '            authority.filesystem = FilesystemAuthority::Write;\n'
+              '            runtime\n'
+          )
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+
+          old = '                .register_agent(fixture_descriptor(agent.as_str(), CallableKind::Agent))\n'
+          new = (
+              '                .register_agent(AgentDefinition::new(\n'
+              '                    fixture_descriptor(agent.as_str(), CallableKind::Agent),\n'
+              '                    authority,\n'
+              '                ))\n'
+          )
           assert text.count(old) == 1
           path.write_text(text.replace(old, new, 1))
           PY
