@@ -6,9 +6,9 @@ use crate::{
 use phenix_backend::ToolResult;
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, OrchestrationDefinition, SessionId,
+    ExecutionState, ExecutionSummary, OrchestrationDefinition, OrchestrationNodeId, SessionId,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
@@ -26,8 +26,19 @@ pub enum CallableRegistryError {
     },
     NotExecutable(CallableId),
     EmptyOrchestration(CallableId),
-    InvalidAgentNode {
+    DuplicateOrchestrationNode {
         orchestration: CallableId,
+        node: OrchestrationNodeId,
+    },
+    UnknownOrchestrationDependency {
+        orchestration: CallableId,
+        node: OrchestrationNodeId,
+        dependency: OrchestrationNodeId,
+    },
+    CyclicOrchestration(CallableId),
+    InvalidOrchestrationNode {
+        orchestration: CallableId,
+        node: OrchestrationNodeId,
         callable: CallableId,
     },
 }
@@ -47,9 +58,31 @@ impl Display for CallableRegistryError {
             ),
             Self::NotExecutable(id) => write!(f, "callable is not execution-provider backed: {id}"),
             Self::EmptyOrchestration(id) => write!(f, "orchestration has no nodes: {id}"),
-            Self::InvalidAgentNode { orchestration, callable } => write!(
+            Self::DuplicateOrchestrationNode {
+                orchestration,
+                node,
+            } => write!(
                 f,
-                "orchestration {orchestration} references non-executable or unknown callable {callable}"
+                "orchestration {orchestration} contains duplicate node id {node}"
+            ),
+            Self::UnknownOrchestrationDependency {
+                orchestration,
+                node,
+                dependency,
+            } => write!(
+                f,
+                "orchestration {orchestration} node {node} depends on unknown node {dependency}"
+            ),
+            Self::CyclicOrchestration(orchestration) => {
+                write!(f, "orchestration {orchestration} contains a dependency cycle")
+            }
+            Self::InvalidOrchestrationNode {
+                orchestration,
+                node,
+                callable,
+            } => write!(
+                f,
+                "orchestration {orchestration} node {node} references non-executable or unknown callable {callable}"
             ),
         }
     }
@@ -145,7 +178,7 @@ impl CallableRegistry {
 
     pub fn register_orchestration(
         &mut self,
-        definition: OrchestrationDefinition,
+        mut definition: OrchestrationDefinition,
     ) -> Result<(), CallableRegistryError> {
         if definition.descriptor.kind != CallableKind::Orchestration {
             return Err(CallableRegistryError::WrongKind {
@@ -159,20 +192,91 @@ impl CallableRegistry {
                 definition.descriptor.id,
             ));
         }
-        for step in &definition.nodes {
-            let Some(entry) = self.entries.get(&step.callable) else {
-                return Err(CallableRegistryError::InvalidAgentNode {
-                    orchestration: definition.descriptor.id.clone(),
-                    callable: step.callable.clone(),
-                });
-            };
-            if !entry.is_executable() {
-                return Err(CallableRegistryError::InvalidAgentNode {
-                    orchestration: definition.descriptor.id.clone(),
-                    callable: step.callable.clone(),
+
+        let orchestration = definition.descriptor.id.clone();
+        let mut nodes = BTreeMap::new();
+        for mut node in definition.nodes.drain(..) {
+            node.depends_on.sort();
+            node.depends_on.dedup();
+            let node_id = node.id.clone();
+            if nodes.insert(node_id.clone(), node).is_some() {
+                return Err(CallableRegistryError::DuplicateOrchestrationNode {
+                    orchestration,
+                    node: node_id,
                 });
             }
         }
+
+        for node in nodes.values() {
+            let Some(entry) = self.entries.get(&node.callable) else {
+                return Err(CallableRegistryError::InvalidOrchestrationNode {
+                    orchestration: orchestration.clone(),
+                    node: node.id.clone(),
+                    callable: node.callable.clone(),
+                });
+            };
+            if !entry.is_executable() {
+                return Err(CallableRegistryError::InvalidOrchestrationNode {
+                    orchestration: orchestration.clone(),
+                    node: node.id.clone(),
+                    callable: node.callable.clone(),
+                });
+            }
+            for dependency in &node.depends_on {
+                if !nodes.contains_key(dependency) {
+                    return Err(CallableRegistryError::UnknownOrchestrationDependency {
+                        orchestration: orchestration.clone(),
+                        node: node.id.clone(),
+                        dependency: dependency.clone(),
+                    });
+                }
+            }
+        }
+
+        let mut indegree = nodes
+            .iter()
+            .map(|(id, node)| (id.clone(), node.depends_on.len()))
+            .collect::<BTreeMap<_, _>>();
+        let mut dependents = BTreeMap::<OrchestrationNodeId, Vec<OrchestrationNodeId>>::new();
+        for node in nodes.values() {
+            for dependency in &node.depends_on {
+                dependents
+                    .entry(dependency.clone())
+                    .or_default()
+                    .push(node.id.clone());
+            }
+        }
+        for children in dependents.values_mut() {
+            children.sort();
+        }
+        let mut ready = indegree
+            .iter()
+            .filter_map(|(id, count)| (*count == 0).then_some(id.clone()))
+            .collect::<BTreeSet<_>>();
+        let expected = nodes.len();
+        let mut normalized = Vec::with_capacity(expected);
+        while let Some(id) = ready.pop_first() {
+            let node = nodes
+                .remove(&id)
+                .expect("ready node must exist in orchestration node map");
+            if let Some(children) = dependents.get(&id) {
+                for child in children {
+                    let count = indegree
+                        .get_mut(child)
+                        .expect("dependent node must have indegree");
+                    *count -= 1;
+                    if *count == 0 {
+                        ready.insert(child.clone());
+                    }
+                }
+            }
+            normalized.push(node);
+        }
+        if normalized.len() != expected {
+            return Err(CallableRegistryError::CyclicOrchestration(orchestration));
+        }
+        definition.nodes = normalized;
+
         let descriptor = definition.descriptor.clone();
         self.register(
             descriptor,
@@ -345,13 +449,13 @@ impl ConductorRuntime {
                     &definition.descriptor,
                     CallableOperation::StartOrchestration,
                 )?;
-                for step in &definition.nodes {
-                    let step_descriptor = self.callables.descriptor(&step.callable)?.clone();
-                    self.callables.execution_provider(&step.callable)?;
+                for node in &definition.nodes {
+                    let node_descriptor = self.callables.descriptor(&node.callable)?.clone();
+                    self.callables.execution_provider(&node.callable)?;
                     self.check_session_callable_policy(
                         session_id,
                         &execution_id,
-                        &step_descriptor,
+                        &node_descriptor,
                         CallableOperation::StartAgentNode,
                     )?;
                 }
@@ -460,8 +564,8 @@ mod tests {
         ExecutionProviderRequest,
     };
     use phenix_core::{
-        AgentNode, BackendId, CallablePolicy, CapabilitySet, ExecutionTarget, InferenceOptions,
-        ModelId, ModelTarget, OrchestrationPolicy, ProviderId,
+        BackendId, CallablePolicy, CapabilitySet, ExecutionTarget, InferenceOptions, ModelId,
+        ModelTarget, OrchestrationNode, ProviderId,
     };
     use serde_json::json;
 
@@ -474,6 +578,23 @@ mod tests {
             output_schema: json!({"type": "object"}),
             capabilities: CapabilitySet::default(),
             policy: CallablePolicy::default(),
+        }
+    }
+
+    fn node(
+        id: &str,
+        callable: &str,
+        depends_on: &[&str],
+        objective: Option<&str>,
+    ) -> OrchestrationNode {
+        OrchestrationNode {
+            id: OrchestrationNodeId::parse(id).unwrap(),
+            callable: CallableId::parse(callable).unwrap(),
+            depends_on: depends_on
+                .iter()
+                .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+                .collect(),
+            objective: objective.map(str::to_owned),
         }
     }
 
@@ -544,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn workflows_validate_executable_binding_not_agent_marker_implementation() {
+    fn orchestrations_validate_executable_callable_references() {
         let mut registry = CallableRegistry::default();
         registry
             .register_provider_agent(descriptor("native", CallableKind::Agent), TestProvider)
@@ -552,13 +673,104 @@ mod tests {
         registry
             .register_orchestration(OrchestrationDefinition {
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
-                policy: OrchestrationPolicy::Sequential,
-                nodes: vec![AgentNode {
-                    callable: CallableId::parse("native").unwrap(),
-                    objective: None,
-                }],
+                nodes: vec![node("run", "native", &[], None)],
             })
             .unwrap();
+    }
+
+    #[test]
+    fn orchestrations_reject_duplicate_node_ids() {
+        let mut registry = CallableRegistry::default();
+        registry
+            .register_agent(descriptor("worker", CallableKind::Agent))
+            .unwrap();
+        let error = registry
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor("orchestration", CallableKind::Orchestration),
+                nodes: vec![
+                    node("work", "worker", &[], None),
+                    node("work", "worker", &[], None),
+                ],
+            })
+            .unwrap_err();
+        assert_eq!(
+            error,
+            CallableRegistryError::DuplicateOrchestrationNode {
+                orchestration: CallableId::parse("orchestration").unwrap(),
+                node: OrchestrationNodeId::parse("work").unwrap(),
+            }
+        );
+    }
+
+    #[test]
+    fn orchestrations_reject_unknown_dependencies() {
+        let mut registry = CallableRegistry::default();
+        registry
+            .register_agent(descriptor("worker", CallableKind::Agent))
+            .unwrap();
+        let error = registry
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor("orchestration", CallableKind::Orchestration),
+                nodes: vec![node("work", "worker", &["missing"], None)],
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CallableRegistryError::UnknownOrchestrationDependency { .. }
+        ));
+    }
+
+    #[test]
+    fn orchestrations_reject_dependency_cycles() {
+        let mut registry = CallableRegistry::default();
+        registry
+            .register_agent(descriptor("worker", CallableKind::Agent))
+            .unwrap();
+        let error = registry
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor("orchestration", CallableKind::Orchestration),
+                nodes: vec![
+                    node("first", "worker", &["second"], None),
+                    node("second", "worker", &["first"], None),
+                ],
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CallableRegistryError::CyclicOrchestration(_)
+        ));
+    }
+
+    #[test]
+    fn orchestrations_normalize_to_deterministic_topological_order() {
+        let mut registry = CallableRegistry::default();
+        for callable in ["alpha", "beta", "gamma"] {
+            registry
+                .register_agent(descriptor(callable, CallableKind::Agent))
+                .unwrap();
+        }
+        let orchestration = CallableId::parse("orchestration").unwrap();
+        registry
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
+                nodes: vec![
+                    node("gamma", "gamma", &["alpha"], None),
+                    node("beta", "beta", &["alpha"], None),
+                    node("alpha", "alpha", &[], None),
+                ],
+            })
+            .unwrap();
+
+        assert_eq!(
+            registry
+                .orchestration(&orchestration)
+                .unwrap()
+                .nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta", "gamma"]
+        );
     }
 
     #[test]
@@ -620,11 +832,7 @@ mod tests {
         runtime
             .register_orchestration(OrchestrationDefinition {
                 descriptor: descriptor("implement", CallableKind::Orchestration),
-                policy: OrchestrationPolicy::Sequential,
-                nodes: vec![AgentNode {
-                    callable: CallableId::parse("worker").unwrap(),
-                    objective: None,
-                }],
+                nodes: vec![node("worker", "worker", &[], None)],
             })
             .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();

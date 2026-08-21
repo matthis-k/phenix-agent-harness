@@ -536,8 +536,9 @@ mod tests {
         BackendSession, BackendSessionRequest, ToolPresentation,
     };
     use phenix_core::{
-        AgentNode, BackendId, ExecutionId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
-        OrchestrationDefinition, OrchestrationPolicy, ProviderId, RoutingProfile, RoutingProfileId,
+        BackendId, ExecutionId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
+        OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
+        RoutingProfile, RoutingProfileId,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::{Arc, Mutex};
@@ -622,6 +623,23 @@ mod tests {
             output_schema: json!({"type": "object"}),
             capabilities: CapabilitySet::default(),
             policy: CallablePolicy::default(),
+        }
+    }
+
+    fn orchestration_node(
+        id: &str,
+        callable: CallableId,
+        depends_on: &[&str],
+        objective: &str,
+    ) -> OrchestrationNode {
+        OrchestrationNode {
+            id: OrchestrationNodeId::parse(id).unwrap(),
+            callable,
+            depends_on: depends_on
+                .iter()
+                .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+                .collect(),
+            objective: Some(objective.to_owned()),
         }
     }
 
@@ -796,20 +814,20 @@ mod tests {
         runtime
             .register_orchestration(OrchestrationDefinition {
                 descriptor: fixture_descriptor(workflow_id.as_str(), CallableKind::Orchestration),
-                policy: OrchestrationPolicy::Sequential,
                 nodes: vec![
-                    AgentNode {
-                        callable: scout.clone(),
-                        objective: Some("inspect the workspace".to_owned()),
-                    },
-                    AgentNode {
-                        callable: implementer.clone(),
-                        objective: Some("make the bounded change".to_owned()),
-                    },
-                    AgentNode {
-                        callable: verifier.clone(),
-                        objective: Some("verify the result".to_owned()),
-                    },
+                    orchestration_node("scout", scout.clone(), &[], "inspect the workspace"),
+                    orchestration_node(
+                        "implement",
+                        implementer.clone(),
+                        &["scout"],
+                        "make the bounded change",
+                    ),
+                    orchestration_node(
+                        "verify",
+                        verifier.clone(),
+                        &["implement"],
+                        "verify the result",
+                    ),
                 ],
             })
             .unwrap();
