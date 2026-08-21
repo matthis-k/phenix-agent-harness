@@ -640,9 +640,10 @@ mod tests {
         BackendSession, BackendSessionRequest, ToolPresentation,
     };
     use phenix_core::{
-        BackendId, ExecutionId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
-        OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
-        RoutingProfile, RoutingProfileId, WorkspaceId,
+        AgentDefinition, BackendId, ExecutionAuthority, ExecutionId, ExecutionTarget,
+        FilesystemAuthority, InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition,
+        OrchestrationNode, OrchestrationNodeId, ProviderId, RoutingProfile, RoutingProfileId,
+        WorkspaceId,
     };
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
@@ -999,8 +1000,13 @@ mod tests {
         let implementer = CallableId::parse("agent.implementer").unwrap();
         let verifier = CallableId::parse("agent.verifier").unwrap();
         for agent in [&scout, &implementer, &verifier] {
+            let mut authority = ExecutionAuthority::read_only();
+            authority.filesystem = FilesystemAuthority::Write;
             runtime
-                .register_agent(fixture_descriptor(agent.as_str(), CallableKind::Agent))
+                .register_agent(AgentDefinition::new(
+                    fixture_descriptor(agent.as_str(), CallableKind::Agent),
+                    authority,
+                ))
                 .unwrap();
         }
 
