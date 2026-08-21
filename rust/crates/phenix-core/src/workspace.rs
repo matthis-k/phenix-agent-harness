@@ -1,13 +1,24 @@
-use crate::{CallableId, ExecutionId, WorkspaceId};
+use crate::{CallableId, CapabilitySet, ExecutionId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+
+pub const CAPABILITY_FILESYSTEM_READ: &str = "filesystem.read";
+pub const CAPABILITY_FILESYSTEM_WRITE: &str = "filesystem.write";
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilesystemAuthority {
     ReadOnly,
     Write,
+}
+
+impl FilesystemAuthority {
+    #[must_use]
+    pub fn permits_capabilities(self, capabilities: &CapabilitySet) -> bool {
+        !capabilities.0.contains(CAPABILITY_FILESYSTEM_WRITE)
+            || self == FilesystemAuthority::Write
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -239,6 +250,16 @@ mod tests {
             WorkspaceLeaseMode::from(FilesystemAuthority::Write),
             WorkspaceLeaseMode::Write
         );
+    }
+
+    #[test]
+    fn filesystem_authority_filters_write_capabilities() {
+        let read = CapabilitySet(BTreeSet::from([CAPABILITY_FILESYSTEM_READ.to_owned()]));
+        let write = CapabilitySet(BTreeSet::from([CAPABILITY_FILESYSTEM_WRITE.to_owned()]));
+
+        assert!(FilesystemAuthority::ReadOnly.permits_capabilities(&read));
+        assert!(!FilesystemAuthority::ReadOnly.permits_capabilities(&write));
+        assert!(FilesystemAuthority::Write.permits_capabilities(&write));
     }
 
     #[test]
