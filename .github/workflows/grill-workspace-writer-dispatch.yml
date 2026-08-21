@@ -1,0 +1,200 @@
+name: Grill workspace writer dispatch
+
+on:
+  pull_request:
+    branches:
+      - agent/grill-03-execution-authority
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'agent/grill-04-workspace-leases'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: Add dispatch-level writer exclusion regression
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path("rust/crates/phenix-conductor/src/server.rs")
+          text = path.read_text()
+
+          old = '''    use phenix_core::{
+        CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet, InferenceOptions, ModelId,
+        ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
+    };
+'''
+          new = '''    use phenix_core::{
+        AgentDefinition, CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet,
+        ExecutionAuthority, FilesystemAuthority, InferenceOptions, ModelId, ModelTarget,
+        OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
+        WorkspaceLeaseMode, WorkspaceLeaseRequest,
+    };
+'''
+          if old not in text:
+              raise SystemExit("server test import anchor missing")
+          text = text.replace(old, new, 1)
+
+          anchor = '''    #[test]
+    fn execution_queue_serializes_each_session_without_blocking_independent_sessions() {
+'''
+          insertion = r'''    struct EntrySignalBackend {
+        entered: std::sync::mpsc::Sender<()>,
+    }
+
+    struct EntrySignalSession {
+        entered: std::sync::mpsc::Sender<()>,
+    }
+
+    impl Backend for EntrySignalBackend {
+        fn capabilities(&self) -> phenix_backend::BackendCapabilities {
+            phenix_backend::BackendCapabilities {
+                tool_presentations: BTreeSet::new(),
+                images: false,
+                persistent_sessions: false,
+            }
+        }
+
+        fn open_session(
+            &mut self,
+            _request: BackendSessionRequest,
+        ) -> Result<Arc<dyn BackendSession>, BackendError> {
+            Ok(Arc::new(EntrySignalSession {
+                entered: self.entered.clone(),
+            }))
+        }
+    }
+
+    impl BackendSession for EntrySignalSession {
+        fn execute(
+            &self,
+            _request: BackendExecutionRequest,
+            _host: &mut dyn BackendHost,
+        ) -> Result<(), BackendError> {
+            self.entered
+                .send(())
+                .map_err(|_| BackendError::Transport("entry observer closed".to_owned()))
+        }
+
+        fn cancel(&self, _execution_id: &ExecutionId) -> Result<(), BackendError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_execution_waits_for_existing_workspace_reader_before_dispatch() {
+        let mut runtime = ConductorRuntime::new();
+        let mut authority = ExecutionAuthority::read_only();
+        authority.filesystem = FilesystemAuthority::Write;
+        runtime
+            .register_agent(AgentDefinition::new(
+                descriptor("agent.writer", CallableKind::Agent),
+                authority,
+            ))
+            .unwrap();
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(model_target()))
+            .unwrap();
+        let execution = runtime.submit(&session.id, "write").unwrap();
+        assert_eq!(
+            runtime
+                .workspace_lease_request(&execution.id)
+                .unwrap()
+                .mode,
+            WorkspaceLeaseMode::Write
+        );
+
+        let (entered, observed) = std::sync::mpsc::channel();
+        let mut server = ConductorServer::new(runtime);
+        server
+            .register_backend(
+                BackendId::parse("fixture").unwrap(),
+                Box::new(EntrySignalBackend { entered }),
+            )
+            .unwrap();
+
+        let request = {
+            let runtime = server.runtime.lock().unwrap();
+            let request = runtime.workspace_lease_request(&execution.id).unwrap();
+            WorkspaceLeaseRequest {
+                workspace_id: request.workspace_id,
+                execution_id: ExecutionId::parse("execution-reader").unwrap(),
+                mode: WorkspaceLeaseMode::Read,
+            }
+        };
+        let reader = server.workspace_leases.acquire(request).unwrap();
+
+        let execution_id = execution.id.clone();
+        let runtime = server.runtime.clone();
+        let backends = server.backends.clone();
+        let active_scopes = server.active_scopes.clone();
+        let workspace_leases = server.workspace_leases.clone();
+        let persist_lock = server.persist_lock.clone();
+        let worker = thread::spawn(move || {
+            execute_execution(
+                &execution_id,
+                &runtime,
+                &backends,
+                &active_scopes,
+                &workspace_leases,
+                None,
+                &persist_lock,
+            )
+        });
+
+        assert!(observed.recv_timeout(Duration::from_millis(100)).is_err());
+        drop(reader);
+        observed.recv_timeout(Duration::from_secs(1)).unwrap();
+        worker.join().unwrap().unwrap();
+        assert_eq!(
+            server.runtime().execution_state(&execution.id),
+            Some(ExecutionState::Completed)
+        );
+    }
+
+'''
+          if anchor not in text:
+              raise SystemExit("server queue test anchor missing")
+          text = text.replace(anchor, insertion + anchor, 1)
+          path.write_text(text)
+          PY
+
+      - name: Fix and validate Rust slice
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: |
+          set -euo pipefail
+          nix run .#phenix-maintenance -- fix
+          git diff --check
+          nix run .#phenix-maintenance -- check rust
+          nix run .#phenix-maintenance -- test unit
+
+      - name: Commit tested regression
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          rm .github/workflows/grill-workspace-writer-dispatch.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- .github/workflows/grill-workspace-writer-dispatch.yml rust/crates/phenix-conductor/src/server.rs
+          git commit -m "test: cover workspace writer dispatch"
+          git push origin "HEAD:$HEAD_REF"
