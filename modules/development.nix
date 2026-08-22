@@ -411,7 +411,7 @@
                       -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null
                   fi
 
-                  cargo test --workspace --lib --bins --locked
+                  timeout --signal=KILL 180 cargo test --workspace --lib --bins --locked -- --nocapture --test-threads=1
                 '';
               };
 
