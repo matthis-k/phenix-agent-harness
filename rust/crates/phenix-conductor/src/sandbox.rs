@@ -437,6 +437,7 @@ fi
 
 "$slirp" \
   --configure \
+  --userns-path="/proc/$child_pid/ns/user" \
   --mtu=65520 \
   --disable-host-loopback \
   --enable-sandbox \
