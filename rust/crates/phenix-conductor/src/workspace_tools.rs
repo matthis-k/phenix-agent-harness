@@ -463,9 +463,8 @@ fn execute_read_only_bash(
     let scratch_mounts = consistency
         .prepare_scratch_mounts()
         .map_err(|error| error.to_string())?;
-    let mut process = Command::new(&bwrap);
-    ExecutionSandbox::new(authority, sandbox_state).configure_bwrap(
-        &mut process,
+    let mut process = ExecutionSandbox::new(authority, sandbox_state).configure_bwrap(
+        &bwrap,
         consistency.root(),
         &scratch_mounts,
         WorkspaceMount::ReadOnly,
@@ -479,7 +478,12 @@ fn execute_read_only_bash(
         .arg(bash)
         .arg(command)
         .output()
-        .map_err(|error| format!("failed to execute {}: {error}", Path::new(&bwrap).display()))?;
+        .map_err(|error| {
+            format!(
+                "failed to execute sandbox through {}: {error}",
+                Path::new(&bwrap).display()
+            )
+        })?;
 
     Ok(TransactionOutput {
         exit_code: output.status.code().unwrap_or(-1),
@@ -995,7 +999,6 @@ mod tests {
         )
         .unwrap();
         let output: Value = serde_json::from_str(&output.output).unwrap();
-
         assert_ne!(output["exit_code"], 0);
         assert_eq!(output["stdout"], "tmp");
         assert_eq!(
