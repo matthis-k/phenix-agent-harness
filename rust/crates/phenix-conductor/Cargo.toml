@@ -13,3 +13,4 @@ phenix-core = { path = "../phenix-core" }
 phenix-protocol = { path = "../phenix-protocol" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true

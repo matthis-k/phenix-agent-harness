@@ -1,6 +1,6 @@
 use crate::{
     journal::{apply_domain_event, DurableProjection},
-    ConductorRuntime, RuntimeJournal,
+    ConductorRuntime, ConfigRevisionSlot, RuntimeJournal,
 };
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -122,19 +122,37 @@ impl ConductorRuntime {
             .map_err(|error| PersistenceError::InvalidJournal(error.to_string()))?;
 
         let config_revision = journal.config_revision.clone();
+        let config_fingerprint = journal.config_fingerprint.clone();
         let mut runtime = Self::new();
         runtime.config_revision = config_revision.clone();
-        runtime.journal = RuntimeJournal::new(config_revision);
+        runtime.config_revisions.clear();
+        runtime.config_revisions.insert(
+            config_revision.clone(),
+            ConfigRevisionSlot {
+                fingerprint: config_fingerprint.clone(),
+                configuration: None,
+            },
+        );
+        runtime.next_config_revision = 1;
+        runtime.journal = RuntimeJournal::new(config_revision, config_fingerprint);
 
         for entry in &journal.entries {
             let mut projection = DurableProjection {
-                config_revision: &runtime.config_revision,
+                config_revisions: &mut runtime.config_revisions,
+                current_config_revision: &mut runtime.config_revision,
                 sessions: &mut runtime.sessions,
                 executions: &mut runtime.executions,
+                attempt_groups: &mut runtime.attempt_groups,
+                orchestration_decisions: &mut runtime.orchestration_decisions,
+                orchestration_interfaces: &mut runtime.orchestration_interfaces,
+                orchestration_nodes: &mut runtime.orchestration_nodes,
                 resolved_routes: &mut runtime.resolved_routes,
+                read_sets: &mut runtime.read_sets,
                 events: &mut runtime.events,
+                next_config_revision: &mut runtime.next_config_revision,
                 next_session: &mut runtime.next_session,
                 next_execution: &mut runtime.next_execution,
+                next_attempt_group: &mut runtime.next_attempt_group,
                 next_event: &mut runtime.next_event,
                 next_tool_call: &mut runtime.next_tool_call,
             };
@@ -142,6 +160,14 @@ impl ConductorRuntime {
                 .map_err(|error| PersistenceError::InvalidJournal(error.to_string()))?;
         }
 
+        if let Some(workspace_id) = runtime
+            .sessions
+            .values()
+            .next()
+            .map(|session| session.summary.workspace_id.clone())
+        {
+            runtime.workspace_id = workspace_id;
+        }
         runtime.journal = journal;
         Ok(runtime)
     }
@@ -150,12 +176,12 @@ impl ConductorRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DomainEvent;
+    use crate::{ConductorError, DomainEvent};
     use phenix_core::{
         BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
         ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
         OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
-        RoutingProfile, RoutingProfileId, SessionId,
+        RoutingProfile, RoutingProfileId, SessionId, WorkspaceId,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -201,13 +227,20 @@ mod tests {
 
     fn bind_workflow_config(runtime: &mut ConductorRuntime) {
         runtime
-            .register_agent(descriptor("agent.first", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("agent.first", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         runtime
-            .register_agent(descriptor("agent.second", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("agent.second", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration.test", CallableKind::Orchestration),
                 nodes: vec![
                     node("first", "agent.first", &[], Some("first")),
@@ -242,6 +275,8 @@ mod tests {
                 "orchestration objective",
             )
             .unwrap();
+        let revision = runtime.current_config_revision().clone();
+        let configuration = runtime.current_compiled_configuration().unwrap();
         let before_snapshot = runtime.snapshot();
         let before_events = runtime.events_since(0);
         let cursor = before_snapshot.last_event_sequence;
@@ -254,9 +289,13 @@ mod tests {
         let mut restored = ConductorRuntime::restore(journal).unwrap();
         assert_eq!(restored.snapshot(), before_snapshot);
         assert_eq!(restored.events_since(0), before_events);
-        assert!(restored.callable_descriptors().is_empty());
-
-        bind_workflow_config(&mut restored);
+        assert!(matches!(
+            restored.callable_descriptors(),
+            Err(ConductorError::UnboundConfigRevision(id)) if id == revision
+        ));
+        restored
+            .bind_configuration_revision(&revision, configuration)
+            .unwrap();
         let first_child = restored
             .snapshot()
             .executions
@@ -286,6 +325,38 @@ mod tests {
     }
 
     #[test]
+    fn replay_preserves_workspace_binding_and_rejects_mixed_workspaces() {
+        let mut runtime = ConductorRuntime::new();
+        let workspace = WorkspaceId::parse("workspace:/repo").unwrap();
+        runtime.bind_workspace(workspace.clone()).unwrap();
+        runtime.create_session(None, None, fixed()).unwrap();
+        runtime.create_session(None, None, fixed()).unwrap();
+
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert!(restored
+            .snapshot()
+            .sessions
+            .iter()
+            .all(|session| session.workspace_id == workspace));
+
+        let mut corrupted = runtime.journal().clone();
+        let session = corrupted
+            .entries
+            .iter_mut()
+            .filter_map(|entry| match &mut entry.event {
+                DomainEvent::SessionCreated { session } => Some(session),
+                _ => None,
+            })
+            .nth(1)
+            .unwrap();
+        session.workspace_id = WorkspaceId::parse("workspace:/other").unwrap();
+        assert!(matches!(
+            ConductorRuntime::restore(corrupted),
+            Err(PersistenceError::InvalidJournal(_))
+        ));
+    }
+
+    #[test]
     fn replay_preserves_resolved_routing_without_rebinding_router() {
         let mut runtime = ConductorRuntime::new();
         let profile = RoutingProfileId::parse("default").unwrap();
@@ -308,8 +379,11 @@ mod tests {
         let execution = runtime.submit(&session.id, "work").unwrap();
         runtime.resolve_invocation(&execution.id).unwrap();
 
-        let mut restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
-        let resolved = restored.resolve_invocation(&execution.id).unwrap();
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        let resolved = restored
+            .resolved_routes
+            .get(&execution.id)
+            .expect("resolved route survives journal replay");
         assert_eq!(resolved.model, concrete);
     }
 

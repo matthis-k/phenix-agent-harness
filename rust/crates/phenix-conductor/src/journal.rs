@@ -1,27 +1,56 @@
-use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
+use crate::{
+    ConfigRevisionFingerprint, ConfigRevisionSlot, ExecutionPayload, ExecutionRecord, SessionRecord,
+};
 use phenix_core::{
-    ConfigRevisionId, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, ExecutionTarget, ModelTarget, SessionId, SessionState,
-    SessionSummary, ToolCallId,
+    AttemptGroup, AttemptGroupId, ConfigRevisionId, ExecutionAuthority, ExecutionEvent,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet, ExecutionState,
+    ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation, FileVersion,
+    FilesystemAuthority, ModelTarget, OrchestrationFailureDecision,
+    OrchestrationFailureDecisionRecord, OrchestrationNodeId, SessionId, SessionState,
+    SessionSummary, ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::path::PathBuf;
 
-pub const JOURNAL_FORMAT_VERSION: u64 = 1;
+pub const JOURNAL_FORMAT_VERSION: u64 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JournalExecutionPayload {
     Invocation {
         input: String,
+        #[serde(default)]
+        authority: ExecutionAuthority,
     },
     #[serde(alias = "workflow")]
     Orchestration {
         objective: String,
-        next_node: usize,
+        #[serde(default)]
+        authority: ExecutionAuthority,
     },
+}
+
+impl JournalExecutionPayload {
+    #[must_use]
+    pub(crate) fn authority(&self) -> &ExecutionAuthority {
+        match self {
+            Self::Invocation { authority, .. } | Self::Orchestration { authority, .. } => authority,
+        }
+    }
+
+    pub(crate) fn set_authority(&mut self, authority: ExecutionAuthority) {
+        match self {
+            Self::Invocation {
+                authority: current, ..
+            }
+            | Self::Orchestration {
+                authority: current, ..
+            } => *current = authority,
+        }
+    }
 }
 
 impl From<&ExecutionPayload> for JournalExecutionPayload {
@@ -29,13 +58,11 @@ impl From<&ExecutionPayload> for JournalExecutionPayload {
         match value {
             ExecutionPayload::Invocation { input } => Self::Invocation {
                 input: input.clone(),
+                authority: ExecutionAuthority::read_only(),
             },
-            ExecutionPayload::Orchestration {
-                objective,
-                next_node,
-            } => Self::Orchestration {
+            ExecutionPayload::Orchestration { objective } => Self::Orchestration {
                 objective: objective.clone(),
-                next_node: *next_node,
+                authority: ExecutionAuthority::read_only(),
             },
         }
     }
@@ -44,14 +71,10 @@ impl From<&ExecutionPayload> for JournalExecutionPayload {
 impl From<JournalExecutionPayload> for ExecutionPayload {
     fn from(value: JournalExecutionPayload) -> Self {
         match value {
-            JournalExecutionPayload::Invocation { input } => Self::Invocation { input },
-            JournalExecutionPayload::Orchestration {
-                objective,
-                next_node,
-            } => Self::Orchestration {
-                objective,
-                next_node,
-            },
+            JournalExecutionPayload::Invocation { input, .. } => Self::Invocation { input },
+            JournalExecutionPayload::Orchestration { objective, .. } => {
+                Self::Orchestration { objective }
+            }
         }
     }
 }
@@ -66,8 +89,16 @@ pub struct ResolvedRoute {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DomainEvent {
+    ConfigurationRevisionActivated {
+        revision: ConfigRevisionId,
+        fingerprint: ConfigRevisionFingerprint,
+    },
     SessionCreated {
         session: SessionSummary,
+    },
+    SessionConfigRebased {
+        session_id: SessionId,
+        config_revision: ConfigRevisionId,
     },
     SessionRenamed {
         session_id: SessionId,
@@ -88,14 +119,43 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         state: ExecutionState,
     },
-    #[serde(alias = "workflow_advanced")]
-    OrchestrationAdvanced {
+    AttemptGroupCreated {
+        group: AttemptGroup,
+    },
+    AttemptFailureRecorded {
+        group_id: AttemptGroupId,
+        failure: FailureAttemptSummary,
+    },
+    AttemptRetryStarted {
+        group_id: AttemptGroupId,
         execution_id: ExecutionId,
-        next_node: usize,
+    },
+    OrchestrationFailureInterfaceStarted {
+        parent_execution: ExecutionId,
+        failed_child: ExecutionId,
+        interface_execution: ExecutionId,
+    },
+    OrchestrationDecisionMade {
+        decision: OrchestrationFailureDecisionRecord,
+    },
+    OrchestrationNodeStarted {
+        execution_id: ExecutionId,
+        node_id: OrchestrationNodeId,
+        child_execution_id: ExecutionId,
     },
     InvocationResolved {
         execution_id: ExecutionId,
         route: ResolvedRoute,
+    },
+    WorkspaceCheckpointCaptured {
+        execution_id: ExecutionId,
+        workspace_id: WorkspaceId,
+        #[serde(default)]
+        files: BTreeMap<PathBuf, FileVersion>,
+    },
+    WorkspaceFileObserved {
+        execution_id: ExecutionId,
+        observation: FileObservation,
     },
     FrontendEvent {
         event: ExecutionEvent,
@@ -112,15 +172,20 @@ pub struct JournalEntry {
 pub struct RuntimeJournal {
     pub format_version: u64,
     pub config_revision: ConfigRevisionId,
+    pub config_fingerprint: ConfigRevisionFingerprint,
     pub entries: Vec<JournalEntry>,
 }
 
 impl RuntimeJournal {
     #[must_use]
-    pub fn new(config_revision: ConfigRevisionId) -> Self {
+    pub fn new(
+        config_revision: ConfigRevisionId,
+        config_fingerprint: ConfigRevisionFingerprint,
+    ) -> Self {
         Self {
             format_version: JOURNAL_FORMAT_VERSION,
             config_revision,
+            config_fingerprint,
             entries: Vec::new(),
         }
     }
@@ -172,13 +237,21 @@ impl Display for JournalError {
 impl Error for JournalError {}
 
 pub(crate) struct DurableProjection<'a> {
-    pub config_revision: &'a ConfigRevisionId,
+    pub config_revisions: &'a mut BTreeMap<ConfigRevisionId, ConfigRevisionSlot>,
+    pub current_config_revision: &'a mut ConfigRevisionId,
     pub sessions: &'a mut BTreeMap<SessionId, SessionRecord>,
     pub executions: &'a mut BTreeMap<ExecutionId, ExecutionRecord>,
+    pub attempt_groups: &'a mut BTreeMap<AttemptGroupId, AttemptGroup>,
+    pub orchestration_decisions: &'a mut BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
+    pub orchestration_interfaces: &'a mut BTreeMap<ExecutionId, ExecutionId>,
+    pub orchestration_nodes: &'a mut BTreeMap<ExecutionId, OrchestrationNodeId>,
     pub resolved_routes: &'a mut BTreeMap<ExecutionId, ResolvedRoute>,
+    pub read_sets: &'a mut BTreeMap<ExecutionId, ExecutionReadSet>,
     pub events: &'a mut Vec<ExecutionEvent>,
+    pub next_config_revision: &'a mut u64,
     pub next_session: &'a mut u64,
     pub next_execution: &'a mut u64,
+    pub next_attempt_group: &'a mut u64,
     pub next_event: &'a mut u64,
     pub next_tool_call: &'a mut u64,
 }
@@ -201,7 +274,7 @@ fn materialize_execution_payload(
     payload: &JournalExecutionPayload,
 ) -> ExecutionPayload {
     match payload {
-        JournalExecutionPayload::Invocation { input }
+        JournalExecutionPayload::Invocation { input, .. }
             if execution.kind == ExecutionKind::Root
                 && matches!(execution.target, ExecutionTarget::Routed(_)) =>
         {
@@ -280,11 +353,36 @@ pub(crate) fn apply_domain_event(
     event: &DomainEvent,
 ) -> Result<(), JournalError> {
     match event {
-        DomainEvent::SessionCreated { session } => {
-            if session.config_revision != *state.config_revision {
+        DomainEvent::ConfigurationRevisionActivated {
+            revision,
+            fingerprint,
+        } => {
+            let expected =
+                ConfigRevisionId::parse(format!("config-{}", *state.next_config_revision + 1))
+                    .expect("generated config revision id");
+            if revision != &expected || state.config_revisions.contains_key(revision) {
                 return Err(JournalError::InvalidEvent(format!(
-                    "session {} uses config revision {}, expected {}",
-                    session.id, session.config_revision, state.config_revision
+                    "configuration revision activation expected {expected}, found {revision}"
+                )));
+            }
+            state.config_revisions.insert(
+                revision.clone(),
+                ConfigRevisionSlot {
+                    fingerprint: fingerprint.clone(),
+                    configuration: None,
+                },
+            );
+            *state.current_config_revision = revision.clone();
+            *state.next_config_revision += 1;
+        }
+        DomainEvent::SessionCreated { session } => {
+            if !state
+                .config_revisions
+                .contains_key(&session.config_revision)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "session {} references unknown config revision {}",
+                    session.id, session.config_revision
                 )));
             }
             if session.state != SessionState::Active {
@@ -302,10 +400,23 @@ pub(crate) fn apply_domain_event(
                 )));
             }
             if let Some(parent) = &session.parent_session {
-                if !state.sessions.contains_key(parent) {
-                    return Err(JournalError::InvalidEvent(format!(
+                let parent = state.sessions.get(parent).ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
                         "session {} references unknown parent {parent}",
                         session.id
+                    ))
+                })?;
+                if parent.summary.workspace_id != session.workspace_id {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "session {} workspace {} does not match parent workspace {}",
+                        session.id, session.workspace_id, parent.summary.workspace_id
+                    )));
+                }
+            } else if let Some(existing) = state.sessions.values().next() {
+                if existing.summary.workspace_id != session.workspace_id {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "root session {} workspace {} does not match runtime workspace {}",
+                        session.id, session.workspace_id, existing.summary.workspace_id
                     )));
                 }
             }
@@ -323,6 +434,27 @@ pub(crate) fn apply_domain_event(
                 }
             }
             *state.next_session += 1;
+        }
+        DomainEvent::SessionConfigRebased {
+            session_id,
+            config_revision,
+        } => {
+            if !state.config_revisions.contains_key(config_revision) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "session {session_id} rebase references unknown config revision {config_revision}"
+                )));
+            }
+            let session = state.sessions.get_mut(session_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "rebase references unknown session {session_id}"
+                ))
+            })?;
+            if session.summary.state == SessionState::Closed {
+                return Err(JournalError::InvalidEvent(format!(
+                    "closed session {session_id} cannot be rebased"
+                )));
+            }
+            session.summary.config_revision = config_revision.clone();
         }
         DomainEvent::SessionRenamed { session_id, name } => {
             let session = state.sessions.get_mut(session_id).ok_or_else(|| {
@@ -391,10 +523,26 @@ pub(crate) fn apply_domain_event(
                     execution.id
                 )));
             }
-            if let Some(parent) = &execution.parent_execution {
-                if !state.executions.contains_key(parent) {
+            let mut config_revision = session.summary.config_revision.clone();
+            if let Some(parent_id) = &execution.parent_execution {
+                let parent = state.executions.get(parent_id).ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "execution {} references unknown parent {parent_id}",
+                        execution.id
+                    ))
+                })?;
+                config_revision = parent.config_revision.clone();
+                if let Some(callable) = execution.callable.as_ref() {
+                    if !parent.authority.callables.contains(callable) {
+                        return Err(JournalError::InvalidEvent(format!(
+            "execution {} callable {callable} is not delegated by parent {parent_id}",
+            execution.id
+        )));
+                    }
+                }
+                if !parent.authority.permits(payload.authority()) {
                     return Err(JournalError::InvalidEvent(format!(
-                        "execution {} references unknown parent {parent}",
+                        "execution {} authority exceeds parent {parent_id}",
                         execution.id
                     )));
                 }
@@ -405,6 +553,8 @@ pub(crate) fn apply_domain_event(
                     entry.insert(ExecutionRecord {
                         summary: execution.clone(),
                         payload: materialized_payload,
+                        authority: payload.authority().clone(),
+                        config_revision,
                     });
                 }
                 Entry::Occupied(_) => {
@@ -432,29 +582,405 @@ pub(crate) fn apply_domain_event(
             }
             execution.summary.state = next.clone();
         }
-        DomainEvent::OrchestrationAdvanced {
-            execution_id,
-            next_node,
-        } => {
-            let execution = state.executions.get_mut(execution_id).ok_or_else(|| {
-                JournalError::InvalidEvent(format!(
-                    "orchestration advance references unknown execution {execution_id}"
-                ))
-            })?;
-            let ExecutionPayload::Orchestration {
-                next_node: current, ..
-            } = &mut execution.payload
-            else {
+        DomainEvent::AttemptGroupCreated { group } => {
+            let expected_id =
+                AttemptGroupId::parse(format!("attempt-group-{}", *state.next_attempt_group + 1))
+                    .expect("generated attempt group id");
+            if group.id != expected_id {
                 return Err(JournalError::InvalidEvent(format!(
-                    "orchestration advance references non-orchestration execution {execution_id}"
-                )));
-            };
-            if *next_node != *current + 1 {
-                return Err(JournalError::InvalidEvent(format!(
-                    "orchestration {execution_id} advanced from {current} to {next_node}"
+                    "attempt group identity cursor mismatch: expected {expected_id}, found {}",
+                    group.id
                 )));
             }
-            *current = *next_node;
+            if group.attempts.len() != 1 || group.failures.len() != 1 {
+                return Err(JournalError::InvalidEvent(format!(
+                    "new attempt group {} must contain exactly one failed first attempt",
+                    group.id
+                )));
+            }
+            let first_execution_id = &group.attempts[0];
+            let first_failure = &group.failures[0];
+            if first_failure.execution_id != *first_execution_id || first_failure.attempt != 1 {
+                return Err(JournalError::InvalidEvent(format!(
+                    "attempt group {} has an invalid first failure",
+                    group.id
+                )));
+            }
+            let execution = state.executions.get(first_execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "attempt group {} references unknown execution {first_execution_id}",
+                    group.id
+                ))
+            })?;
+            if execution.summary.kind != ExecutionKind::Agent
+                || execution.summary.state != ExecutionState::Failed
+                || execution.summary.parent_execution.as_ref() != Some(&group.parent_execution)
+                || execution.summary.callable.as_ref() != Some(&group.callable)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "attempt group {} does not match its first failed agent execution",
+                    group.id
+                )));
+            }
+            if state
+                .attempt_groups
+                .values()
+                .any(|existing| existing.contains_execution(first_execution_id))
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "execution {first_execution_id} belongs to more than one attempt group"
+                )));
+            }
+            if state
+                .attempt_groups
+                .insert(group.id.clone(), group.clone())
+                .is_some()
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "duplicate attempt group id: {}",
+                    group.id
+                )));
+            }
+            *state.next_attempt_group += 1;
+        }
+        DomainEvent::AttemptFailureRecorded { group_id, failure } => {
+            let group = state.attempt_groups.get(group_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "attempt failure references unknown group {group_id}"
+                ))
+            })?;
+            if group.latest_execution() != Some(&failure.execution_id) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "attempt failure for {} is not the latest execution in group {group_id}",
+                    failure.execution_id
+                )));
+            }
+            let expected_attempt = group
+                .attempt_for_execution(&failure.execution_id)
+                .expect("latest execution belongs to its attempt group");
+            if failure.attempt != expected_attempt {
+                return Err(JournalError::InvalidEvent(format!(
+                    "attempt failure for {} uses number {}, expected {expected_attempt}",
+                    failure.execution_id, failure.attempt
+                )));
+            }
+            if group
+                .failures
+                .iter()
+                .any(|existing| existing.execution_id == failure.execution_id)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "attempt failure for {} was recorded more than once",
+                    failure.execution_id
+                )));
+            }
+            let execution = state.executions.get(&failure.execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "attempt failure references unknown execution {}",
+                    failure.execution_id
+                ))
+            })?;
+            if execution.summary.state != ExecutionState::Failed {
+                return Err(JournalError::InvalidEvent(format!(
+                    "attempt failure references non-failed execution {}",
+                    failure.execution_id
+                )));
+            }
+            state
+                .attempt_groups
+                .get_mut(group_id)
+                .expect("validated attempt group exists")
+                .record_failure(failure.clone());
+        }
+        DomainEvent::AttemptRetryStarted {
+            group_id,
+            execution_id,
+        } => {
+            let group = state.attempt_groups.get(group_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "attempt retry references unknown group {group_id}"
+                ))
+            })?;
+            let previous = group.latest_execution().ok_or_else(|| {
+                JournalError::InvalidEvent(format!("attempt group {group_id} has no attempts"))
+            })?;
+            if !group
+                .failures
+                .iter()
+                .any(|failure| &failure.execution_id == previous)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "attempt group {group_id} retried before its latest execution failed"
+                )));
+            }
+            if state
+                .attempt_groups
+                .values()
+                .any(|existing| existing.contains_execution(execution_id))
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "execution {execution_id} belongs to more than one attempt group"
+                )));
+            }
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "attempt retry references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.kind != ExecutionKind::Agent
+                || execution.summary.state != ExecutionState::Pending
+                || execution.summary.parent_execution.as_ref() != Some(&group.parent_execution)
+                || execution.summary.callable.as_ref() != Some(&group.callable)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "retry execution {execution_id} does not match attempt group {group_id}"
+                )));
+            }
+            state
+                .attempt_groups
+                .get_mut(group_id)
+                .expect("validated attempt group exists")
+                .record_retry(execution_id.clone());
+        }
+        DomainEvent::OrchestrationFailureInterfaceStarted {
+            parent_execution,
+            failed_child,
+            interface_execution,
+        } => {
+            if state.orchestration_interfaces.contains_key(failed_child) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "failed child {failed_child} received more than one interface execution"
+                )));
+            }
+            let parent = state.executions.get(parent_execution).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "failure interface references unknown parent {parent_execution}"
+                ))
+            })?;
+            let failed = state.executions.get(failed_child).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "failure interface references unknown failed child {failed_child}"
+                ))
+            })?;
+            let interface = state.executions.get(interface_execution).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "failure interface references unknown execution {interface_execution}"
+                ))
+            })?;
+            let expected_latest =
+                ExecutionId::parse(format!("execution-{}", *state.next_execution))
+                    .expect("generated execution id");
+            if parent.summary.kind != ExecutionKind::Orchestration
+                || parent.summary.state != ExecutionState::Running
+                || failed.summary.parent_execution.as_ref() != Some(parent_execution)
+                || failed.summary.kind != ExecutionKind::Agent
+                || failed.summary.state != ExecutionState::Failed
+                || interface.summary.parent_execution.as_ref() != Some(parent_execution)
+                || interface.summary.kind != ExecutionKind::Agent
+                || interface.summary.state != ExecutionState::Pending
+                || *interface_execution != expected_latest
+                || state.orchestration_nodes.contains_key(interface_execution)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "invalid failure interface binding for child {failed_child}"
+                )));
+            }
+            state
+                .orchestration_interfaces
+                .insert(failed_child.clone(), interface_execution.clone());
+        }
+        DomainEvent::OrchestrationDecisionMade { decision } => {
+            if state
+                .orchestration_decisions
+                .contains_key(&decision.failed_child)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "child {} received more than one orchestration failure decision",
+                    decision.failed_child
+                )));
+            }
+            let parent = state
+                .executions
+                .get(&decision.parent_execution)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "orchestration decision references unknown parent {}",
+                        decision.parent_execution
+                    ))
+                })?;
+            let failed = state
+                .executions
+                .get(&decision.failed_child)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "orchestration decision references unknown failed child {}",
+                        decision.failed_child
+                    ))
+                })?;
+            if parent.summary.kind != ExecutionKind::Orchestration
+                || parent.summary.state != ExecutionState::Running
+                || failed.summary.parent_execution.as_ref() != Some(&decision.parent_execution)
+                || failed.summary.kind != ExecutionKind::Agent
+                || failed.summary.state != ExecutionState::Failed
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "invalid orchestration decision relation for child {}",
+                    decision.failed_child
+                )));
+            }
+            match decision.decider_execution.as_ref() {
+                Some(decider_id) => {
+                    if state.orchestration_interfaces.get(&decision.failed_child)
+                        != Some(decider_id)
+                    {
+                        return Err(JournalError::InvalidEvent(format!(
+                            "orchestration decision decider {decider_id} is not bound to failed child {}",
+                            decision.failed_child
+                        )));
+                    }
+                    let decider = state.executions.get(decider_id).ok_or_else(|| {
+                        JournalError::InvalidEvent(format!(
+                            "orchestration decision references unknown decider {decider_id}"
+                        ))
+                    })?;
+                    if decider.summary.parent_execution.as_ref() != Some(&decision.parent_execution)
+                        || decider.summary.kind != ExecutionKind::Agent
+                        || !matches!(
+                            decider.summary.state,
+                            ExecutionState::Running | ExecutionState::Completed
+                        )
+                    {
+                        return Err(JournalError::InvalidEvent(format!(
+                            "orchestration decision decider {decider_id} is not an active interface agent"
+                        )));
+                    }
+                }
+                None if !matches!(decision.decision, OrchestrationFailureDecision::Fail) => {
+                    return Err(JournalError::InvalidEvent(
+                        "only fail decisions may omit a decider execution".to_owned(),
+                    ));
+                }
+                None => {}
+            }
+            if let Some(recovery_id) = decision.decision.recovery_execution() {
+                let expected_latest =
+                    ExecutionId::parse(format!("execution-{}", *state.next_execution))
+                        .expect("generated execution id");
+                let recovery = state.executions.get(recovery_id).ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "orchestration decision references unknown recovery execution {recovery_id}"
+                    ))
+                })?;
+                if *recovery_id != expected_latest
+                    || recovery.summary.parent_execution.as_ref()
+                        != Some(&decision.parent_execution)
+                    || recovery.summary.kind != ExecutionKind::Agent
+                    || recovery.summary.state != ExecutionState::Pending
+                    || state.orchestration_nodes.contains_key(recovery_id)
+                    || state
+                        .orchestration_interfaces
+                        .values()
+                        .any(|id| id == recovery_id)
+                    || state
+                        .orchestration_decisions
+                        .values()
+                        .any(|existing| existing.decision.recovery_execution() == Some(recovery_id))
+                {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "orchestration recovery {recovery_id} is not a fresh pending recovery child"
+                    )));
+                }
+            }
+            match &decision.decision {
+                OrchestrationFailureDecision::Retry { execution_id } => {
+                    let group = state
+                        .attempt_groups
+                        .values()
+                        .find(|group| {
+                            group.contains_execution(&decision.failed_child)
+                                && group.contains_execution(execution_id)
+                        })
+                        .ok_or_else(|| {
+                            JournalError::InvalidEvent(format!(
+                                "retry decision for {} is not backed by one attempt group",
+                                decision.failed_child
+                            ))
+                        })?;
+                    if group.latest_execution() != Some(execution_id) {
+                        return Err(JournalError::InvalidEvent(format!(
+                            "retry decision recovery {execution_id} is not the latest attempt"
+                        )));
+                    }
+                }
+                OrchestrationFailureDecision::ChooseAnotherChild { execution_id } => {
+                    let recovery = state
+                        .executions
+                        .get(execution_id)
+                        .expect("recovery reference validated above");
+                    if recovery.summary.callable == failed.summary.callable {
+                        return Err(JournalError::InvalidEvent(format!(
+                            "replacement decision for {} reuses the failed callable",
+                            decision.failed_child
+                        )));
+                    }
+                }
+                OrchestrationFailureDecision::Continue | OrchestrationFailureDecision::Fail => {}
+            }
+            state
+                .orchestration_decisions
+                .insert(decision.failed_child.clone(), decision.clone());
+        }
+        DomainEvent::OrchestrationNodeStarted {
+            execution_id,
+            node_id,
+            child_execution_id,
+        } => {
+            let orchestration = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "orchestration node references unknown execution {execution_id}"
+                ))
+            })?;
+            if orchestration.summary.kind != ExecutionKind::Orchestration {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration node references non-orchestration execution {execution_id}"
+                )));
+            }
+            let child = state.executions.get(child_execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "orchestration node {node_id} references unknown child {child_execution_id}"
+                ))
+            })?;
+            if child.summary.parent_execution.as_ref() != Some(execution_id) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration node {node_id} child {child_execution_id} has the wrong parent"
+                )));
+            }
+            if state
+                .orchestration_nodes
+                .iter()
+                .any(|(child_id, existing_node)| {
+                    existing_node == node_id
+                        && state
+                            .executions
+                            .get(child_id)
+                            .and_then(|execution| execution.summary.parent_execution.as_ref())
+                            == Some(execution_id)
+                })
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration {execution_id} started node {node_id} more than once"
+                )));
+            }
+            match state.orchestration_nodes.entry(child_execution_id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(node_id.clone());
+                }
+                Entry::Occupied(_) => {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "child execution {child_execution_id} was assigned to more than one orchestration node"
+                    )));
+                }
+            }
         }
         DomainEvent::InvocationResolved {
             execution_id,
@@ -470,10 +996,10 @@ pub(crate) fn apply_domain_event(
                     "resolved route references non-invocation execution {execution_id}"
                 )));
             }
-            if route.config_revision != *state.config_revision {
+            if route.config_revision != execution.config_revision {
                 return Err(JournalError::InvalidEvent(format!(
-                    "resolved route for {execution_id} uses config revision {} instead of {}",
-                    route.config_revision, state.config_revision
+                    "resolved route for {execution_id} uses config revision {} instead of pinned {}",
+                    route.config_revision, execution.config_revision
                 )));
             }
             if route.requested_target != execution.summary.target {
@@ -498,6 +1024,62 @@ pub(crate) fn apply_domain_event(
                     )));
                 }
             }
+        }
+        DomainEvent::WorkspaceCheckpointCaptured {
+            execution_id,
+            workspace_id,
+            files: _,
+        } => {
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.state != ExecutionState::Pending {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references non-pending execution {execution_id}"
+                )));
+            }
+            if execution.authority.filesystem != FilesystemAuthority::Write {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint references non-writer execution {execution_id}"
+                )));
+            }
+            let session = state
+                .sessions
+                .get(&execution.summary.session_id)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "workspace checkpoint execution {execution_id} references unknown session {}",
+                        execution.summary.session_id
+                    ))
+                })?;
+            if session.summary.workspace_id != *workspace_id {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace checkpoint for {execution_id} uses workspace {workspace_id} instead of {}",
+                    session.summary.workspace_id
+                )));
+            }
+        }
+        DomainEvent::WorkspaceFileObserved {
+            execution_id,
+            observation,
+        } => {
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "workspace observation references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.state != ExecutionState::Running {
+                return Err(JournalError::InvalidEvent(format!(
+                    "workspace observation references non-running execution {execution_id}"
+                )));
+            }
+            state
+                .read_sets
+                .entry(execution_id.clone())
+                .or_insert_with(|| ExecutionReadSet::new(execution_id.clone()))
+                .observe(observation.clone());
         }
         DomainEvent::FrontendEvent { event } => {
             let expected = *state.next_event + 1;
@@ -553,38 +1135,23 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn legacy_workflow_tags_decode_but_current_journals_emit_orchestration() {
+    fn legacy_workflow_payload_tag_decodes_but_current_journals_emit_orchestration() {
         let payload: JournalExecutionPayload = serde_json::from_value(json!({
             "kind": "workflow",
-            "objective": "legacy",
-            "next_node": 2
+            "objective": "legacy"
         }))
         .unwrap();
         assert!(matches!(
             payload,
             JournalExecutionPayload::Orchestration {
                 ref objective,
-                next_node: 2
+                ..
             } if objective == "legacy"
         ));
+        assert_eq!(payload.authority(), &ExecutionAuthority::read_only());
         assert_eq!(
             serde_json::to_value(&payload).unwrap()["kind"],
             "orchestration"
-        );
-
-        let event: DomainEvent = serde_json::from_value(json!({
-            "type": "workflow_advanced",
-            "execution_id": "execution-1",
-            "next_node": 3
-        }))
-        .unwrap();
-        assert!(matches!(
-            event,
-            DomainEvent::OrchestrationAdvanced { next_node: 3, .. }
-        ));
-        assert_eq!(
-            serde_json::to_value(&event).unwrap()["type"],
-            "orchestration_advanced"
         );
     }
 }

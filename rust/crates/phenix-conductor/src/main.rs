@@ -1,7 +1,10 @@
 use clap::Parser;
 use phenix_backend_acp::{AcpBackend, AcpBackendConfig};
 use phenix_backend_native::{PhenixBackend, BACKEND_ID as PHENIX_BACKEND_ID};
-use phenix_conductor::{ConductorRuntime, ConductorServer, ContextRegistry, JsonFileStore};
+use phenix_conductor::{
+    CompiledConfiguration, ConductorError, ConductorRuntime, ConductorServer, ContextRegistry,
+    JsonFileStore, SkillRegistry,
+};
 use phenix_core::{BackendId, ProviderId};
 use std::error::Error;
 use std::io;
@@ -11,7 +14,6 @@ mod configuration;
 #[cfg(unix)]
 mod local_service;
 mod workspace;
-mod workspace_tools;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -64,21 +66,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let workspace = workspace::Workspace::discover(&cwd)?;
     let mut server = match arguments.state {
-        Some(path) => ConductorServer::load_or_new(JsonFileStore::new(path))?,
-        None => ConductorServer::new(ConductorRuntime::new()),
+        Some(path) => {
+            ConductorServer::load_or_new(JsonFileStore::new(path), workspace.id().clone())?
+        }
+        None => {
+            let mut runtime = ConductorRuntime::new();
+            runtime.bind_workspace(workspace.id().clone())?;
+            ConductorServer::new(runtime)
+        }
     };
+    server.install_workspace_consistency(workspace.descriptor().clone())?;
 
-    {
-        let context = ContextRegistry::discover(workspace.root())?;
-        let mut runtime = server.runtime();
-        runtime.install_context_registry(context);
-        workspace_tools::register(&mut runtime, workspace.root().to_path_buf())?;
-    }
-
+    let mut configuration = CompiledConfiguration::default();
+    configuration.install_context_registry(ContextRegistry::discover(workspace.root())?);
+    configuration.install_skill_registry(SkillRegistry::discover(workspace.root())?);
+    server.install_workspace_tools_into(&mut configuration)?;
     if let Some(path) = arguments.configuration {
-        let configuration = configuration::RuntimeConfiguration::load(path)?;
+        configuration = configuration::RuntimeConfiguration::load(path)?.compile(configuration)?;
+    }
+    {
         let mut runtime = server.runtime();
-        configuration.apply(&mut runtime)?;
+        let revision = runtime.current_config_revision().clone();
+        match runtime.current_compiled_configuration() {
+            Ok(_) => {
+                runtime.reload_configuration(configuration)?;
+            }
+            Err(ConductorError::UnboundConfigRevision(id)) if id == revision => {
+                runtime.bind_configuration_revision(&revision, configuration)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
 
     // Product invariant: a bare conductor is immediately usable. External ACP

@@ -120,7 +120,10 @@ fn provider_backed_agent_is_not_reinterpreted_as_model_execution() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state),
         )
         .unwrap();
@@ -149,10 +152,14 @@ fn mock_provider_executes_an_ordinary_child_and_emits_canonical_events() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state.clone()),
         )
         .unwrap();
+    let revision = runtime.current_config_revision().clone();
     let root = root(&mut runtime);
     let callable = CallableId::parse("agent.native").unwrap();
     let child = runtime
@@ -168,7 +175,7 @@ fn mock_provider_executes_an_ordinary_child_and_emits_canonical_events() {
     assert_eq!(requests[0].parent_execution.as_ref(), Some(&root.id));
     assert_eq!(requests[0].callable, callable);
     assert_eq!(requests[0].objective, "native objective");
-    assert_eq!(requests[0].config_revision.as_str(), "config-1");
+    assert_eq!(requests[0].config_revision, revision);
     drop(requests);
 
     let snapshot = runtime.snapshot();
@@ -213,12 +220,16 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
     let step = CallableId::parse("agent.native").unwrap();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state.clone()),
         )
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             nodes: vec![node("provider", step, Some("provider step"))],
         })
@@ -263,12 +274,16 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::failing(state.clone()),
         )
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             nodes: vec![node(
                 "provider",
@@ -343,7 +358,10 @@ fn policy_runs_before_provider_code_and_leaves_no_execution_side_effect() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state.clone()),
         )
         .unwrap();
@@ -384,7 +402,10 @@ fn cancelled_provider_child_cannot_be_dispatched_after_cancellation() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state.clone()),
         )
         .unwrap();

@@ -76,6 +76,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn fixture() -> SessionDebugBundle {
+        let workspace_id = WorkspaceId::parse("workspace-1").unwrap();
         let target = ExecutionTarget::Fixed(ModelTarget {
             backend: BackendId::parse("mock").unwrap(),
             provider: ProviderId::parse("mock").unwrap(),
@@ -87,12 +88,13 @@ mod tests {
                 id: SessionId::parse("session-1").unwrap(),
                 parent_session: None,
                 name: Some("debug fixture".to_owned()),
+                workspace_id: workspace_id.clone(),
                 config_revision: ConfigRevisionId::parse("config-1").unwrap(),
                 default_target: target,
                 state: SessionState::Active,
             },
             WorkspaceDescriptor {
-                id: WorkspaceId::parse("workspace-1").unwrap(),
+                id: workspace_id,
                 root: PathBuf::from("/repo"),
                 scratch_paths: Default::default(),
             },
@@ -109,6 +111,7 @@ mod tests {
         assert_eq!(serializer.media_type(), "application/json");
         assert_eq!(value["schema_version"], SESSION_DEBUG_SCHEMA_VERSION);
         assert_eq!(value["session"]["id"], "session-1");
+        assert_eq!(value["session"]["workspace_id"], "workspace-1");
         assert_eq!(value["workspace"]["id"], "workspace-1");
     }
 

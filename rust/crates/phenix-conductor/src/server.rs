@@ -1,15 +1,15 @@
 use crate::{
-    ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload, ExecutionProvider,
-    ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost, ExecutionProviderKind,
-    JsonFileStore, PersistenceError,
+    CompiledConfiguration, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
+    ExecutionProvider, ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost,
+    ExecutionProviderKind, JsonFileStore, PersistenceError,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
 };
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionTarget,
-    RoutingProfileDescriptor, SessionId, SessionState,
+    ExecutionEventKind, ExecutionId, ExecutionState, ExecutionTarget, FileVersion, SessionId,
+    SessionState, WorkspaceDescriptor, WorkspaceId, WorkspaceLeaseMode,
 };
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 use std::sync::{
     mpsc::{self, SyncSender},
     Arc, Condvar, Mutex, MutexGuard,
@@ -26,24 +27,72 @@ use std::thread;
 
 #[path = "semantic_tools.rs"]
 mod semantic_tools;
+#[path = "workspace_consistency.rs"]
+mod workspace_consistency;
+#[path = "workspace_lease.rs"]
+mod workspace_lease;
+#[path = "workspace_tools.rs"]
+mod workspace_tools;
+
+use workspace_consistency::{WorkspaceConsistency, WorkspaceConsistencyError};
+use workspace_lease::{WorkspaceLeaseError, WorkspaceLeaseManager};
 
 const EVENT_BUFFER: usize = 256;
 const OUTPUT_BUFFER: usize = 256;
 const EXECUTION_WORKERS: usize = 4;
+const IN_MEMORY_WORKSPACE_ID: &str = "workspace:in-memory";
 
 type SharedBackend = Arc<Mutex<Box<dyn Backend>>>;
 type SharedRuntime = Arc<Mutex<ConductorRuntime>>;
 type ActiveScopes = Arc<Mutex<BTreeMap<ExecutionId, LiveExecutionScope>>>;
+type WorkspacePhases = Arc<Mutex<BTreeMap<ExecutionId, WorkspacePhase>>>;
+
+#[derive(Clone)]
+struct ExecutionWorkerContext {
+    runtime: SharedRuntime,
+    backends: BTreeMap<BackendId, SharedBackend>,
+    active_scopes: ActiveScopes,
+    workspace_leases: WorkspaceLeaseManager,
+    workspace_phases: WorkspacePhases,
+    workspace_consistency: Option<WorkspaceConsistency>,
+    store: Option<JsonFileStore>,
+    persist_lock: Arc<Mutex<()>>,
+}
 
 struct ExecutionJob {
     execution_id: ExecutionId,
     session_id: SessionId,
+    group_id: ExecutionId,
+}
+
+#[derive(Default)]
+struct WorkspacePhase {
+    writing: bool,
+}
+
+impl WorkspacePhase {
+    fn enter(&mut self, mode: WorkspaceLeaseMode) -> bool {
+        match mode {
+            WorkspaceLeaseMode::Read => {
+                self.writing = false;
+                false
+            }
+            WorkspaceLeaseMode::Write => {
+                let starts_write_phase = !self.writing;
+                self.writing = true;
+                starts_write_phase
+            }
+        }
+    }
 }
 
 #[derive(Default)]
 struct ExecutionQueueState {
     pending: VecDeque<ExecutionJob>,
-    active_sessions: BTreeSet<SessionId>,
+    active_sessions: BTreeMap<SessionId, ExecutionId>,
+    active_groups: BTreeMap<ExecutionId, usize>,
+    scheduled: BTreeSet<ExecutionId>,
+    releasing_groups: BTreeSet<ExecutionId>,
     closed: bool,
 }
 
@@ -58,11 +107,11 @@ impl ExecutionQueue {
         let mut state = lock
             .lock()
             .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
-        if state.closed {
-            return Err(ServerError::StatePoisoned("closed execution queue"));
+        if !state.scheduled.insert(job.execution_id.clone()) {
+            return Ok(());
         }
         state.pending.push_back(job);
-        ready.notify_one();
+        ready.notify_all();
         Ok(())
     }
 
@@ -72,19 +121,24 @@ impl ExecutionQueue {
             .lock()
             .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
         loop {
-            if let Some(index) = state
-                .pending
-                .iter()
-                .position(|job| !state.active_sessions.contains(&job.session_id))
-            {
+            if let Some(index) = state.pending.iter().position(|job| {
+                state
+                    .active_sessions
+                    .get(&job.session_id)
+                    .is_none_or(|group| group == &job.group_id)
+            }) {
                 let job = state
                     .pending
                     .remove(index)
                     .expect("pending execution index was selected");
-                state.active_sessions.insert(job.session_id.clone());
+                state
+                    .active_sessions
+                    .entry(job.session_id.clone())
+                    .or_insert_with(|| job.group_id.clone());
+                *state.active_groups.entry(job.group_id.clone()).or_default() += 1;
                 return Ok(Some(job));
             }
-            if state.closed && state.pending.is_empty() {
+            if state.closed && state.pending.is_empty() && state.active_groups.is_empty() {
                 return Ok(None);
             }
             state = ready
@@ -93,14 +147,38 @@ impl ExecutionQueue {
         }
     }
 
-    fn complete(&self, session_id: &SessionId) -> Result<(), ServerError> {
+    fn complete(&self, job: &ExecutionJob, release_group: bool) -> Result<bool, ServerError> {
         let (lock, ready) = &*self.state;
         let mut state = lock
             .lock()
             .map_err(|_| ServerError::StatePoisoned("execution queue"))?;
-        state.active_sessions.remove(session_id);
+        if release_group {
+            state.releasing_groups.insert(job.group_id.clone());
+        }
+        let remove_group = {
+            let active = state
+                .active_groups
+                .get_mut(&job.group_id)
+                .expect("completed execution belongs to an active group");
+            *active -= 1;
+            *active == 0
+        };
+        if remove_group {
+            state.active_groups.remove(&job.group_id);
+        }
+        let group_released = state.releasing_groups.contains(&job.group_id)
+            && !state.active_groups.contains_key(&job.group_id)
+            && !state
+                .pending
+                .iter()
+                .any(|pending| pending.group_id == job.group_id)
+            && state.active_sessions.get(&job.session_id) == Some(&job.group_id);
+        if group_released {
+            state.active_sessions.remove(&job.session_id);
+            state.releasing_groups.remove(&job.group_id);
+        }
         ready.notify_all();
-        Ok(())
+        Ok(group_released)
     }
 
     fn close(&self) -> Result<(), ServerError> {
@@ -158,6 +236,8 @@ pub struct ConductorServer {
     backends: BTreeMap<BackendId, SharedBackend>,
     catalogs: BTreeMap<BackendId, BackendCatalog>,
     active_scopes: ActiveScopes,
+    workspace_leases: WorkspaceLeaseManager,
+    workspace_consistency: Option<WorkspaceConsistency>,
     store: Option<JsonFileStore>,
     persist_lock: Arc<Mutex<()>>,
 }
@@ -170,16 +250,27 @@ impl ConductorServer {
             backends: BTreeMap::new(),
             catalogs: BTreeMap::new(),
             active_scopes: Arc::new(Mutex::new(BTreeMap::new())),
+            workspace_leases: WorkspaceLeaseManager::default(),
+            workspace_consistency: None,
             store: None,
             persist_lock: Arc::new(Mutex::new(())),
         }
     }
 
-    pub fn load_or_new(store: JsonFileStore) -> Result<Self, ServerError> {
+    pub fn load_or_new(
+        store: JsonFileStore,
+        workspace_id: WorkspaceId,
+    ) -> Result<Self, ServerError> {
         let runtime = match store.load() {
-            Ok(journal) => ConductorRuntime::restore(journal)?,
+            Ok(journal) => {
+                let mut runtime = ConductorRuntime::restore(journal)?;
+                runtime.bind_workspace(workspace_id.clone())?;
+                runtime
+            }
             Err(PersistenceError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-                ConductorRuntime::new()
+                let mut runtime = ConductorRuntime::new();
+                runtime.bind_workspace(workspace_id)?;
+                runtime
             }
             Err(error) => return Err(error.into()),
         };
@@ -191,6 +282,38 @@ impl ConductorServer {
         }
         server.persist()?;
         Ok(server)
+    }
+
+    pub fn install_workspace_consistency(
+        &mut self,
+        descriptor: WorkspaceDescriptor,
+    ) -> Result<(), ServerError> {
+        let consistency = WorkspaceConsistency::new(&descriptor)?;
+        self.lock_runtime()?.bind_workspace(descriptor.id)?;
+        self.workspace_consistency = Some(consistency);
+        Ok(())
+    }
+
+    pub fn install_workspace_tools_into(
+        &self,
+        configuration: &mut CompiledConfiguration,
+    ) -> Result<(), ServerError> {
+        let consistency = self
+            .workspace_consistency
+            .clone()
+            .ok_or(ServerError::WorkspaceConsistencyNotInstalled)?;
+        workspace_tools::register_into(configuration, consistency)?;
+        Ok(())
+    }
+
+    pub fn install_workspace_tools(&mut self) -> Result<(), ServerError> {
+        let consistency = self
+            .workspace_consistency
+            .clone()
+            .ok_or(ServerError::WorkspaceConsistencyNotInstalled)?;
+        let mut runtime = self.lock_runtime()?;
+        workspace_tools::register(&mut runtime, consistency)?;
+        Ok(())
     }
 
     pub fn register_backend(
@@ -228,12 +351,16 @@ impl ConductorServer {
         };
         let (output_sender, output_receiver) = mpsc::sync_channel(OUTPUT_BUFFER);
         let executions = ExecutionQueue::default();
-
-        let runtime = self.runtime.clone();
-        let backends = self.backends.clone();
-        let active_scopes = self.active_scopes.clone();
-        let store = self.store.clone();
-        let persist_lock = self.persist_lock.clone();
+        let worker_context = ExecutionWorkerContext {
+            runtime: self.runtime.clone(),
+            backends: self.backends.clone(),
+            active_scopes: self.active_scopes.clone(),
+            workspace_leases: self.workspace_leases.clone(),
+            workspace_phases: Arc::new(Mutex::new(BTreeMap::new())),
+            workspace_consistency: self.workspace_consistency.clone(),
+            store: self.store.clone(),
+            persist_lock: self.persist_lock.clone(),
+        };
 
         thread::scope(|scope| {
             let writer = scope.spawn(move || -> Result<(), ServerError> {
@@ -258,21 +385,8 @@ impl ConductorServer {
             let executors = (0..EXECUTION_WORKERS)
                 .map(|_| {
                     let executions = executions.clone();
-                    let runtime = runtime.clone();
-                    let backends = backends.clone();
-                    let active_scopes = active_scopes.clone();
-                    let store = store.clone();
-                    let persist_lock = persist_lock.clone();
-                    scope.spawn(move || {
-                        execution_loop(
-                            executions,
-                            runtime,
-                            backends,
-                            active_scopes,
-                            store,
-                            persist_lock,
-                        )
-                    })
+                    let context = worker_context.clone();
+                    scope.spawn(move || execution_loop(executions, context))
                 })
                 .collect::<Vec<_>>();
 
@@ -350,17 +464,17 @@ impl ConductorServer {
                 );
             }
             Command::GetCallableCatalog => {
-                let callables = self.lock_runtime()?.callable_descriptors();
+                let callables = self.lock_runtime()?.callable_descriptors()?;
                 self.respond(output, id, Ok(Reply::CallableCatalog { callables }))?;
                 return Ok(());
             }
             Command::GetRoutingCatalog => {
-                let profiles = self.lock_runtime()?.routing_profiles();
+                let profiles = self.lock_runtime()?.routing_profiles()?;
                 self.respond(output, id, Ok(Reply::RoutingCatalog { profiles }))?;
                 return Ok(());
             }
             Command::GetSkillCatalog => {
-                let skills = self.lock_runtime()?.skill_descriptors();
+                let skills = self.lock_runtime()?.skill_descriptors()?;
                 self.respond(output, id, Ok(Reply::SkillCatalog { skills }))?;
                 return Ok(());
             }
@@ -473,10 +587,9 @@ impl ConductorServer {
             }
         };
         let execution_id = execution.id.clone();
-        let execution_session = execution.session_id.clone();
         self.persist()?;
         self.respond(output, request_id, Ok(Reply::Execution { execution }))?;
-        self.enqueue_execution(execution_id, execution_session, executions)
+        enqueue_pending_execution_group(&self.runtime, &execution_id, executions)
     }
 
     fn start_callable(
@@ -500,7 +613,6 @@ impl ConductorServer {
                 }
             };
         let execution_id = execution.id.clone();
-        let execution_kind = execution.kind.clone();
         self.persist()?;
         self.respond(
             output,
@@ -509,40 +621,7 @@ impl ConductorServer {
                 execution: execution.clone(),
             }),
         )?;
-
-        if execution_kind == ExecutionKind::Orchestration {
-            let pending = {
-                let runtime = self.lock_runtime()?;
-                runtime
-                    .snapshot()
-                    .executions
-                    .into_iter()
-                    .filter(|candidate| {
-                        candidate.parent_execution.as_ref() == Some(&execution_id)
-                            && candidate.state == ExecutionState::Pending
-                    })
-                    .map(|candidate| (candidate.id, candidate.session_id))
-                    .collect::<Vec<_>>()
-            };
-            for (child, session_id) in pending {
-                self.enqueue_execution(child, session_id, executions)?;
-            }
-            Ok(())
-        } else {
-            self.enqueue_execution(execution_id, execution.session_id, executions)
-        }
-    }
-
-    fn enqueue_execution(
-        &self,
-        execution_id: ExecutionId,
-        session_id: SessionId,
-        executions: &ExecutionQueue,
-    ) -> Result<(), ServerError> {
-        executions.enqueue(ExecutionJob {
-            execution_id,
-            session_id,
-        })
+        enqueue_pending_execution_group(&self.runtime, &execution_id, executions)
     }
 
     fn cancel_execution(&self, root: &ExecutionId) -> Result<Reply, ProtocolError> {
@@ -689,58 +768,201 @@ impl ConductorServer {
 
 fn execution_loop(
     executions: ExecutionQueue,
-    runtime: SharedRuntime,
-    backends: BTreeMap<BackendId, SharedBackend>,
-    active_scopes: ActiveScopes,
-    store: Option<JsonFileStore>,
-    persist_lock: Arc<Mutex<()>>,
+    context: ExecutionWorkerContext,
 ) -> Result<(), ServerError> {
     while let Some(job) = executions.next()? {
-        let result = execute_job_chain(
-            job.execution_id,
-            &runtime,
-            &backends,
-            &active_scopes,
-            store.as_ref(),
-            &persist_lock,
-        );
-        executions.complete(&job.session_id)?;
+        let result = execute_execution(&job.execution_id, &job.group_id, &context).and_then(|()| {
+            enqueue_pending_execution_group(&context.runtime, &job.group_id, &executions)
+        });
+        let group_quiescent = execution_group_quiescent(&context.runtime, &job.group_id);
+        let release_group =
+            result.is_err() || group_quiescent.as_ref().map_or(true, |value| *value);
+        let group_released = executions.complete(&job, release_group)?;
+        if group_released {
+            context
+                .workspace_phases
+                .lock()
+                .map_err(|_| ServerError::StatePoisoned("workspace phases"))?
+                .remove(&job.group_id);
+        }
         result?;
+        group_quiescent?;
     }
     Ok(())
 }
 
-fn execute_job_chain(
-    execution_id: ExecutionId,
+fn enqueue_pending_execution_group(
     runtime: &SharedRuntime,
-    backends: &BTreeMap<BackendId, SharedBackend>,
-    active_scopes: &ActiveScopes,
-    store: Option<&JsonFileStore>,
-    persist_lock: &Arc<Mutex<()>>,
+    group_id: &ExecutionId,
+    executions: &ExecutionQueue,
 ) -> Result<(), ServerError> {
-    let mut current = Some(execution_id);
-    while let Some(execution_id) = current {
-        execute_execution(
-            &execution_id,
-            runtime,
-            backends,
-            active_scopes,
-            store,
-            persist_lock,
-        )?;
-        current = next_scheduled_execution(runtime, &execution_id)?;
+    for job in pending_execution_jobs(runtime, group_id)? {
+        executions.enqueue(job)?;
     }
     Ok(())
+}
+
+fn pending_execution_jobs(
+    runtime: &SharedRuntime,
+    group_id: &ExecutionId,
+) -> Result<Vec<ExecutionJob>, ServerError> {
+    let snapshot = runtime
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
+        .snapshot();
+    Ok(snapshot
+        .executions
+        .iter()
+        .filter(|execution| {
+            execution.state == ExecutionState::Pending
+                && execution_group_id(&snapshot.executions, &execution.id).as_ref()
+                    == Some(group_id)
+                && !execution_has_blocking_ancestor(&snapshot.executions, &execution.id)
+        })
+        .map(|execution| ExecutionJob {
+            execution_id: execution.id.clone(),
+            session_id: execution.session_id.clone(),
+            group_id: group_id.clone(),
+        })
+        .collect())
+}
+
+fn execution_group_quiescent(
+    runtime: &SharedRuntime,
+    group_id: &ExecutionId,
+) -> Result<bool, ServerError> {
+    let snapshot = runtime
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
+        .snapshot();
+    let mut found = false;
+    for execution in &snapshot.executions {
+        if execution_group_id(&snapshot.executions, &execution.id).as_ref() != Some(group_id) {
+            continue;
+        }
+        found = true;
+        match execution.state {
+            ExecutionState::Running => return Ok(false),
+            ExecutionState::Pending
+                if !execution_has_blocking_ancestor(&snapshot.executions, &execution.id) =>
+            {
+                return Ok(false);
+            }
+            _ => {}
+        }
+    }
+    Ok(found)
+}
+
+fn execution_group_id(
+    executions: &[phenix_core::ExecutionSummary],
+    execution_id: &ExecutionId,
+) -> Option<ExecutionId> {
+    let mut current = execution_id.clone();
+    loop {
+        let execution = executions
+            .iter()
+            .find(|execution| execution.id == current)?;
+        let Some(parent) = execution.parent_execution.as_ref() else {
+            return Some(current);
+        };
+        current = parent.clone();
+    }
+}
+
+fn execution_has_blocking_ancestor(
+    executions: &[phenix_core::ExecutionSummary],
+    execution_id: &ExecutionId,
+) -> bool {
+    let mut parent = executions
+        .iter()
+        .find(|execution| execution.id == *execution_id)
+        .and_then(|execution| execution.parent_execution.clone());
+    while let Some(parent_id) = parent {
+        let Some(parent_execution) = executions
+            .iter()
+            .find(|execution| execution.id == parent_id)
+        else {
+            return true;
+        };
+        if matches!(
+            parent_execution.state,
+            ExecutionState::Failed | ExecutionState::Cancelled | ExecutionState::Interrupted
+        ) {
+            return true;
+        }
+        parent = parent_execution.parent_execution.clone();
+    }
+    false
 }
 
 fn execute_execution(
     execution_id: &ExecutionId,
-    runtime: &SharedRuntime,
-    backends: &BTreeMap<BackendId, SharedBackend>,
-    active_scopes: &ActiveScopes,
-    store: Option<&JsonFileStore>,
-    persist_lock: &Arc<Mutex<()>>,
+    group_id: &ExecutionId,
+    context: &ExecutionWorkerContext,
 ) -> Result<(), ServerError> {
+    let runtime = &context.runtime;
+    let backends = &context.backends;
+    let active_scopes = &context.active_scopes;
+    let workspace_leases = &context.workspace_leases;
+    let workspace_consistency = context.workspace_consistency.as_ref();
+    let store = context.store.as_ref();
+    let persist_lock = &context.persist_lock;
+
+    let lease_request = {
+        let runtime_guard = runtime
+            .lock()
+            .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
+        match runtime_guard.execution_state(execution_id) {
+            Some(ExecutionState::Pending) => {
+                let snapshot = runtime_guard.snapshot();
+                if execution_has_blocking_ancestor(&snapshot.executions, execution_id) {
+                    return Ok(());
+                }
+                runtime_guard.workspace_lease_request(execution_id)
+            }
+            Some(state) if is_terminal_state(&state) => return Ok(()),
+            Some(_) => return Ok(()),
+            None => return Ok(()),
+        }
+    };
+    let lease_request = match lease_request {
+        Ok(request) => request,
+        Err(error) => {
+            fail_shared_execution(
+                runtime,
+                execution_id,
+                map_conductor_error(error),
+                store,
+                persist_lock,
+            )?;
+            return Ok(());
+        }
+    };
+    let workspace_id = lease_request.workspace_id.clone();
+    let lease_mode = lease_request.mode;
+    let _workspace_lease = workspace_leases.acquire(lease_request)?;
+    let starts_write_phase = context
+        .workspace_phases
+        .lock()
+        .map_err(|_| ServerError::StatePoisoned("workspace phases"))?
+        .entry(group_id.clone())
+        .or_default()
+        .enter(lease_mode);
+
+    if starts_write_phase && workspace_id.as_str() != IN_MEMORY_WORKSPACE_ID {
+        let consistency = workspace_consistency
+            .ok_or_else(|| ServerError::WorkspaceConsistencyUnavailable(workspace_id.clone()))?;
+        let files = consistency.checkpoint_baseline()?;
+        {
+            let mut runtime_guard = runtime
+                .lock()
+                .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
+            runtime_guard.record_workspace_checkpoint(execution_id, workspace_id, files)?;
+        }
+        persist_shared(runtime, store, persist_lock)?;
+    }
+
     let provider_kind = {
         let runtime_guard = runtime
             .lock()
@@ -792,8 +1014,10 @@ fn execute_model_execution(
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
         let mut resolved = runtime_guard.resolve_invocation(execution_id);
-        if let Ok(resolved) = &mut resolved {
-            semantic_tools::extend_semantic_tools(&runtime_guard, resolved);
+        if let Ok(invocation) = &mut resolved {
+            if let Err(error) = semantic_tools::extend_semantic_tools(&runtime_guard, invocation) {
+                resolved = Err(error);
+            }
         }
         resolved
     };
@@ -1048,61 +1272,6 @@ fn finish_provider_execution(
     Ok(())
 }
 
-fn next_scheduled_execution(
-    runtime: &SharedRuntime,
-    completed_execution: &ExecutionId,
-) -> Result<Option<ExecutionId>, ServerError> {
-    let snapshot = runtime
-        .lock()
-        .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
-        .snapshot();
-    let mut scope = Some(completed_execution.clone());
-    while let Some(scope_id) = scope {
-        let Some(scope_execution) = snapshot
-            .executions
-            .iter()
-            .find(|execution| execution.id == scope_id)
-        else {
-            return Ok(None);
-        };
-        if matches!(
-            scope_execution.state,
-            ExecutionState::Failed | ExecutionState::Cancelled | ExecutionState::Interrupted
-        ) {
-            return Ok(None);
-        }
-        if let Some(pending) = snapshot.executions.iter().find(|candidate| {
-            candidate.state == ExecutionState::Pending
-                && execution_is_descendant(&snapshot.executions, &candidate.id, &scope_id)
-        }) {
-            return Ok(Some(pending.id.clone()));
-        }
-        scope = scope_execution.parent_execution.clone();
-    }
-    Ok(None)
-}
-
-fn execution_is_descendant(
-    executions: &[phenix_core::ExecutionSummary],
-    candidate: &ExecutionId,
-    ancestor: &ExecutionId,
-) -> bool {
-    let mut parent = executions
-        .iter()
-        .find(|execution| execution.id == *candidate)
-        .and_then(|execution| execution.parent_execution.clone());
-    while let Some(parent_id) = parent {
-        if parent_id == *ancestor {
-            return true;
-        }
-        parent = executions
-            .iter()
-            .find(|execution| execution.id == parent_id)
-            .and_then(|execution| execution.parent_execution.clone());
-    }
-    false
-}
-
 fn fail_shared_execution(
     runtime: &SharedRuntime,
     execution_id: &ExecutionId,
@@ -1314,6 +1483,19 @@ impl ConductorRuntime {
             .clone())
     }
 
+    fn record_workspace_checkpoint(
+        &mut self,
+        execution_id: &ExecutionId,
+        workspace_id: WorkspaceId,
+        files: BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<(), ConductorError> {
+        self.record_domain_event(DomainEvent::WorkspaceCheckpointCaptured {
+            execution_id: execution_id.clone(),
+            workspace_id,
+            files,
+        })
+    }
+
     fn interrupt_non_resumable_executions(&mut self) -> Result<(), ConductorError> {
         let running_invocations = self
             .executions
@@ -1335,10 +1517,6 @@ impl ConductorRuntime {
             .get(execution_id)
             .map(|record| record.summary.state.clone())
     }
-
-    fn routing_profiles(&self) -> Vec<RoutingProfileDescriptor> {
-        self.routing.descriptors()
-    }
 }
 
 fn is_terminal_state(state: &ExecutionState) -> bool {
@@ -1357,6 +1535,10 @@ pub enum ServerError {
     Json(serde_json::Error),
     Persistence(PersistenceError),
     Runtime(ConductorError),
+    WorkspaceConsistency(WorkspaceConsistencyError),
+    WorkspaceConsistencyNotInstalled,
+    WorkspaceConsistencyUnavailable(WorkspaceId),
+    WorkspaceLeaseStatePoisoned,
     DuplicateBackend(BackendId),
     OutputClosed,
     StatePoisoned(&'static str),
@@ -1370,6 +1552,15 @@ impl Display for ServerError {
             Self::Json(error) => Display::fmt(error, f),
             Self::Persistence(error) => Display::fmt(error, f),
             Self::Runtime(error) => Display::fmt(error, f),
+            Self::WorkspaceConsistency(error) => Display::fmt(error, f),
+            Self::WorkspaceConsistencyNotInstalled => {
+                f.write_str("workspace consistency is not installed")
+            }
+            Self::WorkspaceConsistencyUnavailable(workspace_id) => write!(
+                f,
+                "workspace consistency is not installed for writable workspace {workspace_id}"
+            ),
+            Self::WorkspaceLeaseStatePoisoned => f.write_str("workspace lease state lock poisoned"),
             Self::DuplicateBackend(id) => write!(f, "backend already registered: {id}"),
             Self::OutputClosed => f.write_str("frontend output channel closed"),
             Self::StatePoisoned(name) => write!(f, "{name} lock poisoned"),
@@ -1401,6 +1592,18 @@ impl From<PersistenceError> for ServerError {
 impl From<ConductorError> for ServerError {
     fn from(value: ConductorError) -> Self {
         Self::Runtime(value)
+    }
+}
+
+impl From<WorkspaceConsistencyError> for ServerError {
+    fn from(value: WorkspaceConsistencyError) -> Self {
+        Self::WorkspaceConsistency(value)
+    }
+}
+
+impl From<WorkspaceLeaseError> for ServerError {
+    fn from(_: WorkspaceLeaseError) -> Self {
+        Self::WorkspaceLeaseStatePoisoned
     }
 }
 
@@ -1441,6 +1644,28 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.session_id = Some(id);
             error
         }
+        ConductorError::UnknownConfigRevision(id) => protocol_error(
+            ErrorCode::UnknownId,
+            format!("unknown configuration revision: {id}"),
+        ),
+        ConductorError::UnboundConfigRevision(id) => protocol_error(
+            ErrorCode::InvalidRequest,
+            format!("configuration revision is not bound in this process: {id}"),
+        ),
+        ConductorError::ConfigRevisionAlreadyBound(id) => protocol_error(
+            ErrorCode::InvalidRequest,
+            format!("configuration revision is already bound: {id}"),
+        ),
+        ConductorError::ConfigRevisionFingerprintMismatch {
+            revision,
+            expected,
+            actual,
+        } => protocol_error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "configuration revision fingerprint mismatch for {revision}: expected {expected}, found {actual}"
+            ),
+        ),
         ConductorError::ClosedSession(id) => {
             let mut error = protocol_error(
                 ErrorCode::InvalidRequest,
@@ -1463,6 +1688,10 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.execution_id = Some(id);
             error
         }
+        ConductorError::WorkspaceMismatch { expected, actual } => protocol_error(
+            ErrorCode::InvalidRequest,
+            format!("workspace binding mismatch: persisted {expected}, discovered {actual}"),
+        ),
         ConductorError::EmptyInput => {
             protocol_error(ErrorCode::InvalidRequest, "input must not be empty")
         }
@@ -1472,6 +1701,43 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
                 format!("invalid execution lifecycle: {id}"),
             );
             error.execution_id = Some(id);
+            error
+        }
+        ConductorError::InvalidFailureDecision {
+            parent_execution,
+            failed_child,
+        } => {
+            let mut error = protocol_error(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "invalid failure decision for child {failed_child} of orchestration {parent_execution}"
+                ),
+            );
+            error.execution_id = Some(parent_execution);
+            error
+        }
+        ConductorError::FailureDecisionDenied {
+            parent_execution,
+            decider_execution,
+        } => {
+            let mut error = protocol_error(
+                ErrorCode::PolicyDenied,
+                format!(
+                    "execution {decider_execution} may not decide failures for orchestration {parent_execution}"
+                ),
+            );
+            error.execution_id = Some(decider_execution);
+            error
+        }
+        ConductorError::DelegationDenied {
+            parent_execution,
+            callable,
+        } => {
+            let mut error = protocol_error(
+                ErrorCode::PolicyDenied,
+                format!("execution {parent_execution} may not delegate callable {callable}"),
+            );
+            error.execution_id = Some(parent_execution);
             error
         }
         ConductorError::NonModelExecution(id) => {
@@ -1525,7 +1791,7 @@ mod tests {
     };
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Condvar;
+    use std::sync::{mpsc, Condvar};
     use std::time::Duration;
 
     struct CancelOnlySession {
@@ -1568,16 +1834,51 @@ mod tests {
         }
     }
 
+    fn node(id: &str, callable: &str, dependencies: &[&str]) -> OrchestrationNode {
+        OrchestrationNode {
+            id: OrchestrationNodeId::parse(id).unwrap(),
+            callable: CallableId::parse(callable).unwrap(),
+            depends_on: dependencies
+                .iter()
+                .map(|dependency| OrchestrationNodeId::parse(*dependency).unwrap())
+                .collect(),
+            objective: None,
+        }
+    }
+
+    fn job(execution: &str, session: &SessionId, group: &str) -> ExecutionJob {
+        ExecutionJob {
+            execution_id: ExecutionId::parse(execution).unwrap(),
+            session_id: session.clone(),
+            group_id: ExecutionId::parse(group).unwrap(),
+        }
+    }
+
+    #[test]
+    fn workspace_phase_checkpoints_only_the_first_writer_after_a_read_boundary() {
+        let mut phase = WorkspacePhase::default();
+
+        assert!(!phase.enter(WorkspaceLeaseMode::Read));
+        assert!(phase.enter(WorkspaceLeaseMode::Write));
+        assert!(!phase.enter(WorkspaceLeaseMode::Write));
+        assert!(!phase.enter(WorkspaceLeaseMode::Read));
+        assert!(phase.enter(WorkspaceLeaseMode::Write));
+    }
+
     #[test]
     fn cancelling_root_reaches_active_descendant_scope_without_crossing_unrelated_execution() {
         let descendant_calls = Arc::new(AtomicUsize::new(0));
         let unrelated_calls = Arc::new(AtomicUsize::new(0));
         let mut runtime = ConductorRuntime::new();
         runtime
-            .register_agent(descriptor("agent.child", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("agent.child", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration.tree", CallableKind::Orchestration),
                 nodes: vec![OrchestrationNode {
                     id: OrchestrationNodeId::parse("child").unwrap(),
@@ -1713,7 +2014,7 @@ mod tests {
                 .unwrap();
             if *active < 2 {
                 return Err(BackendError::Transport(
-                    "independent sessions did not execute concurrently".to_owned(),
+                    "executions did not execute concurrently".to_owned(),
                 ));
             }
             Ok(())
@@ -1725,27 +2026,21 @@ mod tests {
     }
 
     #[test]
-    fn execution_queue_serializes_each_session_without_blocking_independent_sessions() {
+    fn execution_queue_allows_one_group_to_fan_out_without_admitting_another_session_group() {
         let queue = ExecutionQueue::default();
         let first_session = SessionId::parse("session-1").unwrap();
         let second_session = SessionId::parse("session-2").unwrap();
         queue
-            .enqueue(ExecutionJob {
-                execution_id: ExecutionId::parse("execution-1").unwrap(),
-                session_id: first_session.clone(),
-            })
+            .enqueue(job("execution-1", &first_session, "group-1"))
             .unwrap();
         queue
-            .enqueue(ExecutionJob {
-                execution_id: ExecutionId::parse("execution-2").unwrap(),
-                session_id: first_session.clone(),
-            })
+            .enqueue(job("execution-2", &first_session, "group-1"))
             .unwrap();
         queue
-            .enqueue(ExecutionJob {
-                execution_id: ExecutionId::parse("execution-3").unwrap(),
-                session_id: second_session.clone(),
-            })
+            .enqueue(job("execution-3", &first_session, "group-2"))
+            .unwrap();
+        queue
+            .enqueue(job("execution-4", &second_session, "group-3"))
             .unwrap();
 
         let first = queue.next().unwrap().unwrap();
@@ -1753,26 +2048,66 @@ mod tests {
             first.execution_id,
             ExecutionId::parse("execution-1").unwrap()
         );
+        let sibling = queue.next().unwrap().unwrap();
+        assert_eq!(
+            sibling.execution_id,
+            ExecutionId::parse("execution-2").unwrap()
+        );
         let independent = queue.next().unwrap().unwrap();
         assert_eq!(
             independent.execution_id,
+            ExecutionId::parse("execution-4").unwrap()
+        );
+
+        assert!(!queue.complete(&first, false).unwrap());
+        assert!(queue.complete(&sibling, true).unwrap());
+        let next_group = queue.next().unwrap().unwrap();
+        assert_eq!(
+            next_group.execution_id,
             ExecutionId::parse("execution-3").unwrap()
         );
 
-        queue.complete(&first_session).unwrap();
-        let second = queue.next().unwrap().unwrap();
-        assert_eq!(
-            second.execution_id,
-            ExecutionId::parse("execution-2").unwrap()
-        );
-        queue.complete(&first_session).unwrap();
-        queue.complete(&second_session).unwrap();
+        assert!(queue.complete(&next_group, true).unwrap());
+        assert!(queue.complete(&independent, true).unwrap());
         queue.close().unwrap();
         assert!(queue.next().unwrap().is_none());
     }
 
     #[test]
-    fn independent_sessions_use_bounded_parallel_execution_lanes() {
+    fn closed_queue_waits_for_active_group_and_accepts_generated_descendants() {
+        let queue = ExecutionQueue::default();
+        let session = SessionId::parse("session-1").unwrap();
+        queue
+            .enqueue(job("execution-1", &session, "group-1"))
+            .unwrap();
+        let active = queue.next().unwrap().unwrap();
+        queue.close().unwrap();
+
+        let waiter = queue.clone();
+        let (sender, receiver) = mpsc::channel();
+        let thread = std::thread::spawn(move || sender.send(waiter.next().unwrap()).unwrap());
+        assert!(receiver.recv_timeout(Duration::from_millis(100)).is_err());
+
+        queue
+            .enqueue(job("execution-2", &session, "group-1"))
+            .unwrap();
+        let generated = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            generated.execution_id,
+            ExecutionId::parse("execution-2").unwrap()
+        );
+
+        assert!(!queue.complete(&active, false).unwrap());
+        assert!(queue.complete(&generated, true).unwrap());
+        thread.join().unwrap();
+        assert!(queue.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn read_only_sessions_share_workspace_and_execute_concurrently() {
         let gate = ConcurrentGate {
             state: Arc::new((Mutex::new(0), Condvar::new())),
         };
@@ -1800,6 +2135,58 @@ mod tests {
                 .iter()
                 .all(|execution| execution.state == ExecutionState::Completed),
             "independent execution states: {executions:?}"
+        );
+    }
+
+    #[test]
+    fn ready_dag_siblings_share_workers_and_generated_join_runs_after_input_eof() {
+        let gate = ConcurrentGate {
+            state: Arc::new((Mutex::new(0), Condvar::new())),
+        };
+        let mut runtime = ConductorRuntime::new();
+        for callable in ["agent.alpha", "agent.beta", "agent.join"] {
+            runtime
+                .register_agent(phenix_core::AgentDefinition::new(
+                    descriptor(callable, CallableKind::Agent),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ))
+                .unwrap();
+        }
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
+                descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
+                nodes: vec![
+                    node("alpha", "agent.alpha", &[]),
+                    node("beta", "agent.beta", &[]),
+                    node("join", "agent.join", &["alpha", "beta"]),
+                ],
+            })
+            .unwrap();
+
+        let mut server = ConductorServer::new(runtime);
+        server
+            .register_backend(
+                BackendId::parse("fixture").unwrap(),
+                Box::new(ConcurrentBackend { gate }),
+            )
+            .unwrap();
+        let target = serde_json::to_string(&ExecutionTarget::Fixed(model_target())).unwrap();
+        let input = format!(
+            "{{\"id\":1,\"command\":{{\"type\":\"create_session\",\"parent_session\":null,\"name\":\"dag\",\"target\":{target}}}}}\n\\
+             {{\"id\":2,\"command\":{{\"type\":\"start_callable\",\"session_id\":\"session-1\",\"callable\":\"orchestration.parallel\",\"objective\":\"run\"}}}}\n"
+        );
+        server
+            .serve_ndjson(std::io::Cursor::new(input), std::io::sink())
+            .unwrap();
+
+        let executions = server.runtime().snapshot().executions;
+        assert_eq!(executions.len(), 4);
+        assert!(
+            executions
+                .iter()
+                .all(|execution| execution.state == ExecutionState::Completed),
+            "DAG execution states: {executions:?}"
         );
     }
 }

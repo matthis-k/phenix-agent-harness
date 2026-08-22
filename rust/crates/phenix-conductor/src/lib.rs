@@ -1,20 +1,24 @@
 #![forbid(unsafe_code)]
 
 mod callables;
+#[cfg(test)]
+mod config_revision_tests;
 mod context;
 mod execution_provider;
+mod failure_decisions;
 mod journal;
 mod persistence;
 mod policy;
 mod routing;
 mod server;
 
-pub use callables::{CallableRegistry, CallableRegistryError};
-pub use context::{ContextError, ContextRegistry};
+pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
+pub use context::{ContextError, ContextRegistry, SkillRegistry};
 pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
     ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest,
 };
+pub use failure_decisions::OrchestrationFailureDecisionRequest;
 pub use journal::{
     DomainEvent, JournalEntry, JournalError, JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
@@ -32,25 +36,64 @@ use phenix_backend::{
     BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, ConfigRevisionId, ExecutionEvent,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
-    ExecutionTarget, ModelTarget, OrchestrationDefinition, RoutingProfile, SessionId, SessionState,
-    SessionSummary, SkillDescriptor, SkillId, ToolCallId,
+    AgentDefinition, AttemptGroup, AttemptGroupId, CallableDescriptor, CallableId, CallableKind,
+    ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
+    ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
+    ExecutionTerminationCause, ExecutionWorkspaceValidity, FileObservation, FileVersion,
+    ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
+    RoutingProfile, RoutingProfileDescriptor, SessionId, SessionState, SessionSummary,
+    SkillDescriptor, SkillId, ToolCallId, WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::path::PathBuf;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConfigRevisionFingerprint(String);
+
+impl Display for ConfigRevisionFingerprint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConductorError {
     UnknownSession(SessionId),
+    UnknownConfigRevision(ConfigRevisionId),
+    UnboundConfigRevision(ConfigRevisionId),
+    ConfigRevisionAlreadyBound(ConfigRevisionId),
+    ConfigRevisionFingerprintMismatch {
+        revision: ConfigRevisionId,
+        expected: ConfigRevisionFingerprint,
+        actual: ConfigRevisionFingerprint,
+    },
     ClosedSession(SessionId),
     SessionHasActiveExecutions(SessionId),
     UnknownExecution(ExecutionId),
+    WorkspaceMismatch {
+        expected: WorkspaceId,
+        actual: WorkspaceId,
+    },
     EmptyInput,
     InvalidLifecycle(ExecutionId),
+    InvalidFailureDecision {
+        parent_execution: ExecutionId,
+        failed_child: ExecutionId,
+    },
+    FailureDecisionDenied {
+        parent_execution: ExecutionId,
+        decider_execution: ExecutionId,
+    },
+    DelegationDenied {
+        parent_execution: ExecutionId,
+        callable: CallableId,
+    },
     NonModelExecution(ExecutionId),
     NonProviderExecution(ExecutionId),
     PolicyDenied {
@@ -69,13 +112,49 @@ impl Display for ConductorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownSession(id) => write!(f, "unknown session: {id}"),
+            Self::UnknownConfigRevision(id) => write!(f, "unknown configuration revision: {id}"),
+            Self::UnboundConfigRevision(id) => write!(f, "configuration revision is not bound in this process: {id}"),
+            Self::ConfigRevisionAlreadyBound(id) => write!(f, "configuration revision is already bound: {id}"),
+            Self::ConfigRevisionFingerprintMismatch {
+                revision,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "configuration revision fingerprint mismatch for {revision}: expected {expected}, found {actual}"
+            ),
             Self::ClosedSession(id) => write!(f, "session is closed: {id}"),
             Self::SessionHasActiveExecutions(id) => {
                 write!(f, "session has active executions and cannot close: {id}")
             }
             Self::UnknownExecution(id) => write!(f, "unknown execution: {id}"),
+            Self::WorkspaceMismatch { expected, actual } => write!(
+                f,
+                "workspace binding mismatch: persisted {expected}, discovered {actual}"
+            ),
             Self::EmptyInput => f.write_str("input must not be empty"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
+            Self::InvalidFailureDecision {
+                parent_execution,
+                failed_child,
+            } => write!(
+                f,
+                "invalid failure decision for child {failed_child} of orchestration {parent_execution}"
+            ),
+            Self::FailureDecisionDenied {
+                parent_execution,
+                decider_execution,
+            } => write!(
+                f,
+                "execution {decider_execution} may not decide failures for orchestration {parent_execution}"
+            ),
+            Self::DelegationDenied {
+                parent_execution,
+                callable,
+            } => write!(
+                f,
+                "execution {parent_execution} may not delegate callable {callable}"
+            ),
             Self::NonModelExecution(id) => {
                 write!(f, "execution is not model-provider backed: {id}")
             }
@@ -139,13 +218,147 @@ struct SessionRecord {
 #[derive(Clone, Debug)]
 enum ExecutionPayload {
     Invocation { input: String },
-    Orchestration { objective: String, next_node: usize },
+    Orchestration { objective: String },
 }
 
 #[derive(Clone, Debug)]
 struct ExecutionRecord {
     summary: ExecutionSummary,
     payload: ExecutionPayload,
+    authority: ExecutionAuthority,
+    config_revision: ConfigRevisionId,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CompiledConfiguration {
+    callables: CallableRegistry,
+    routing: RoutingRegistry,
+    context: ContextRegistry,
+    skills: SkillRegistry,
+}
+
+impl CompiledConfiguration {
+    fn fingerprint(&self) -> ConfigRevisionFingerprint {
+        let manifest = json!({
+            "callables": self.callables.semantic_manifest(),
+            "routing": self.routing.semantic_manifest(),
+            "context": self.context.semantic_manifest(),
+            "skills": self.skills.semantic_manifest(),
+        });
+        let encoded = serde_json::to_vec(&manifest)
+            .expect("compiled configuration manifest is JSON serializable");
+        let digest = Sha256::digest(encoded);
+        let encoded = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        ConfigRevisionFingerprint(encoded)
+    }
+
+    pub fn register_tool<F, O>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        handler: F,
+    ) -> Result<(), ConductorError>
+    where
+        F: Fn(&str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
+    {
+        self.callables.register_tool(descriptor, handler)?;
+        Ok(())
+    }
+
+    pub(crate) fn register_contextual_tool<F, O>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        handler: F,
+    ) -> Result<(), ConductorError>
+    where
+        F: Fn(&callables::ToolExecutionContext, &str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
+    {
+        self.callables
+            .register_contextual_tool(descriptor, handler)?;
+        Ok(())
+    }
+
+    pub fn register_agent(&mut self, definition: AgentDefinition) -> Result<(), ConductorError> {
+        self.callables.register_agent(definition)?;
+        Ok(())
+    }
+
+    pub fn register_provider_agent<P>(
+        &mut self,
+        definition: AgentDefinition,
+        provider: P,
+    ) -> Result<(), ConductorError>
+    where
+        P: ExecutionProvider + 'static,
+    {
+        self.callables
+            .register_provider_agent(definition, provider)?;
+        Ok(())
+    }
+
+    pub fn register_orchestration(
+        &mut self,
+        definition: OrchestrationDefinition,
+    ) -> Result<(), ConductorError> {
+        self.callables.register_orchestration(definition)?;
+        Ok(())
+    }
+
+    pub fn register_routing_profile(
+        &mut self,
+        profile: RoutingProfile,
+    ) -> Result<(), ConductorError> {
+        self.routing.register(profile)?;
+        Ok(())
+    }
+
+    pub fn install_context_registry(&mut self, context: ContextRegistry) {
+        self.context = context;
+    }
+
+    pub fn install_skill_registry(&mut self, skills: SkillRegistry) {
+        self.skills = skills;
+    }
+
+    #[must_use]
+    pub fn callable_descriptors(&self) -> Vec<CallableDescriptor> {
+        self.callables.descriptors()
+    }
+
+    #[must_use]
+    pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
+        self.callables.tool_descriptors()
+    }
+
+    #[must_use]
+    pub fn routing_profiles(&self) -> Vec<RoutingProfileDescriptor> {
+        self.routing.descriptors()
+    }
+
+    #[must_use]
+    pub fn skill_descriptors(&self) -> Vec<SkillDescriptor> {
+        self.skills.skill_descriptors()
+    }
+
+    #[must_use]
+    pub fn has_model_invocable_skills(&self) -> bool {
+        self.skills.has_model_invocable_skills()
+    }
+
+    #[must_use]
+    pub fn has_skills(&self) -> bool {
+        self.skills.has_skills()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ConfigRevisionSlot {
+    pub fingerprint: ConfigRevisionFingerprint,
+    pub configuration: Option<CompiledConfiguration>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -196,19 +409,25 @@ impl PreparedInvocation {
 #[derive(Debug)]
 pub struct ConductorRuntime {
     config_revision: ConfigRevisionId,
+    config_revisions: BTreeMap<ConfigRevisionId, ConfigRevisionSlot>,
+    workspace_id: WorkspaceId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
+    attempt_groups: BTreeMap<AttemptGroupId, AttemptGroup>,
+    orchestration_decisions: BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
+    orchestration_interfaces: BTreeMap<ExecutionId, ExecutionId>,
+    orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
     resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
+    read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
     events: Vec<ExecutionEvent>,
     journal: RuntimeJournal,
-    callables: CallableRegistry,
-    routing: RoutingRegistry,
-    context: ContextRegistry,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
     policy: InvocationPolicy,
     event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
+    next_config_revision: u64,
     next_session: u64,
     next_execution: u64,
+    next_attempt_group: u64,
     next_event: u64,
     next_tool_call: u64,
 }
@@ -223,27 +442,61 @@ impl ConductorRuntime {
     #[must_use]
     pub fn new() -> Self {
         let config_revision = ConfigRevisionId::parse("config-1").expect("static config id");
+        let workspace_id = WorkspaceId::parse("workspace:in-memory").expect("static workspace id");
+        let configuration = CompiledConfiguration::default();
+        let fingerprint = configuration.fingerprint();
+        let config_revisions = BTreeMap::from([(
+            config_revision.clone(),
+            ConfigRevisionSlot {
+                fingerprint: fingerprint.clone(),
+                configuration: Some(configuration),
+            },
+        )]);
         Self {
-            journal: RuntimeJournal::new(config_revision.clone()),
+            journal: RuntimeJournal::new(config_revision.clone(), fingerprint),
             config_revision,
+            config_revisions,
+            workspace_id,
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
+            attempt_groups: BTreeMap::new(),
+            orchestration_decisions: BTreeMap::new(),
+            orchestration_interfaces: BTreeMap::new(),
+            orchestration_nodes: BTreeMap::new(),
             resolved_routes: BTreeMap::new(),
+            read_sets: BTreeMap::new(),
             events: Vec::new(),
-            callables: CallableRegistry::default(),
-            routing: RoutingRegistry::default(),
-            context: ContextRegistry::default(),
             skill_activations: BTreeMap::new(),
             policy: InvocationPolicy::new(),
             event_sink: None,
+            next_config_revision: 1,
             next_session: 0,
             next_execution: 0,
+            next_attempt_group: 0,
             next_event: 0,
             next_tool_call: 0,
         }
     }
 
-    fn record_domain_event(&mut self, event: DomainEvent) -> Result<(), ConductorError> {
+    pub fn bind_workspace(&mut self, workspace_id: WorkspaceId) -> Result<(), ConductorError> {
+        if let Some(session) = self
+            .sessions
+            .values()
+            .find(|session| session.summary.workspace_id != workspace_id)
+        {
+            return Err(ConductorError::WorkspaceMismatch {
+                expected: session.summary.workspace_id.clone(),
+                actual: workspace_id,
+            });
+        }
+        self.workspace_id = workspace_id;
+        Ok(())
+    }
+
+    fn record_domain_event(&mut self, mut event: DomainEvent) -> Result<(), ConductorError> {
+        if let DomainEvent::ExecutionCreated { execution, payload } = &mut event {
+            payload.set_authority(self.effective_authority_for_execution(execution)?);
+        }
         let frontend_event = match &event {
             DomainEvent::FrontendEvent { event } => Some(event.clone()),
             _ => None,
@@ -257,13 +510,21 @@ impl ConductorRuntime {
         });
         let result = {
             let mut projection = DurableProjection {
-                config_revision: &self.config_revision,
+                config_revisions: &mut self.config_revisions,
+                current_config_revision: &mut self.config_revision,
                 sessions: &mut self.sessions,
                 executions: &mut self.executions,
+                attempt_groups: &mut self.attempt_groups,
+                orchestration_decisions: &mut self.orchestration_decisions,
+                orchestration_interfaces: &mut self.orchestration_interfaces,
+                orchestration_nodes: &mut self.orchestration_nodes,
                 resolved_routes: &mut self.resolved_routes,
+                read_sets: &mut self.read_sets,
                 events: &mut self.events,
+                next_config_revision: &mut self.next_config_revision,
                 next_session: &mut self.next_session,
                 next_execution: &mut self.next_execution,
+                next_attempt_group: &mut self.next_attempt_group,
                 next_event: &mut self.next_event,
                 next_tool_call: &mut self.next_tool_call,
             };
@@ -292,33 +553,148 @@ impl ConductorRuntime {
         self.policy.register(guard);
     }
 
-    pub fn register_tool<F>(
+    fn current_configuration(&self) -> Result<&CompiledConfiguration, ConductorError> {
+        self.configuration_revision(&self.config_revision)
+    }
+
+    pub fn current_compiled_configuration(&self) -> Result<CompiledConfiguration, ConductorError> {
+        Ok(self.current_configuration()?.clone())
+    }
+
+    pub(crate) fn configuration_revision(
+        &self,
+        revision: &ConfigRevisionId,
+    ) -> Result<&CompiledConfiguration, ConductorError> {
+        self.config_revisions
+            .get(revision)
+            .ok_or_else(|| ConductorError::UnknownConfigRevision(revision.clone()))?
+            .configuration
+            .as_ref()
+            .ok_or_else(|| ConductorError::UnboundConfigRevision(revision.clone()))
+    }
+
+    pub(crate) fn configuration_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<&CompiledConfiguration, ConductorError> {
+        let revision = &self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?
+            .summary
+            .config_revision;
+        self.configuration_revision(revision)
+    }
+
+    pub(crate) fn configuration_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<&CompiledConfiguration, ConductorError> {
+        let revision = &self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?
+            .config_revision;
+        self.configuration_revision(revision)
+    }
+
+    #[must_use]
+    pub fn current_config_revision(&self) -> &ConfigRevisionId {
+        &self.config_revision
+    }
+
+    pub fn execution_config_revision(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<ConfigRevisionId, ConductorError> {
+        self.executions
+            .get(execution_id)
+            .map(|execution| execution.config_revision.clone())
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))
+    }
+
+    pub fn bind_configuration_revision(
+        &mut self,
+        revision: &ConfigRevisionId,
+        configuration: CompiledConfiguration,
+    ) -> Result<(), ConductorError> {
+        let slot = self
+            .config_revisions
+            .get_mut(revision)
+            .ok_or_else(|| ConductorError::UnknownConfigRevision(revision.clone()))?;
+        if slot.configuration.is_some() {
+            return Err(ConductorError::ConfigRevisionAlreadyBound(revision.clone()));
+        }
+        let actual = configuration.fingerprint();
+        if actual != slot.fingerprint {
+            return Err(ConductorError::ConfigRevisionFingerprintMismatch {
+                revision: revision.clone(),
+                expected: slot.fingerprint.clone(),
+                actual,
+            });
+        }
+        slot.configuration = Some(configuration);
+        Ok(())
+    }
+
+    pub fn reload_configuration(
+        &mut self,
+        configuration: CompiledConfiguration,
+    ) -> Result<ConfigRevisionId, ConductorError> {
+        let revision = self.new_config_revision_id();
+        let fingerprint = configuration.fingerprint();
+        self.record_domain_event(DomainEvent::ConfigurationRevisionActivated {
+            revision: revision.clone(),
+            fingerprint,
+        })?;
+        let slot = self
+            .config_revisions
+            .get_mut(&revision)
+            .expect("configuration activation creates a revision slot");
+        slot.configuration = Some(configuration);
+        Ok(revision)
+    }
+
+    fn revise_configuration<F>(&mut self, update: F) -> Result<ConfigRevisionId, ConductorError>
+    where
+        F: FnOnce(&mut CompiledConfiguration) -> Result<(), ConductorError>,
+    {
+        let mut configuration = self.current_configuration()?.clone();
+        update(&mut configuration)?;
+        self.reload_configuration(configuration)
+    }
+
+    pub fn register_tool<F, O>(
         &mut self,
         descriptor: CallableDescriptor,
         handler: F,
     ) -> Result<(), ConductorError>
     where
-        F: Fn(&str) -> Result<String, String> + Send + Sync + 'static,
+        F: Fn(&str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
     {
-        self.callables.register_tool(descriptor, handler)?;
+        self.revise_configuration(move |configuration| {
+            configuration.register_tool(descriptor, handler)
+        })?;
         Ok(())
     }
 
-    pub fn register_agent(&mut self, descriptor: CallableDescriptor) -> Result<(), ConductorError> {
-        self.callables.register_agent(descriptor)?;
+    pub fn register_agent(&mut self, definition: AgentDefinition) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| configuration.register_agent(definition))?;
         Ok(())
     }
 
     pub fn register_provider_agent<P>(
         &mut self,
-        descriptor: CallableDescriptor,
+        definition: AgentDefinition,
         provider: P,
     ) -> Result<(), ConductorError>
     where
         P: ExecutionProvider + 'static,
     {
-        self.callables
-            .register_provider_agent(descriptor, provider)?;
+        self.revise_configuration(move |configuration| {
+            configuration.register_provider_agent(definition, provider)
+        })?;
         Ok(())
     }
 
@@ -326,7 +702,9 @@ impl ConductorRuntime {
         &mut self,
         definition: OrchestrationDefinition,
     ) -> Result<(), ConductorError> {
-        self.callables.register_orchestration(definition)?;
+        self.revise_configuration(move |configuration| {
+            configuration.register_orchestration(definition)
+        })?;
         Ok(())
     }
 
@@ -334,27 +712,57 @@ impl ConductorRuntime {
         &mut self,
         profile: RoutingProfile,
     ) -> Result<(), ConductorError> {
-        self.routing.register(profile)?;
+        self.revise_configuration(move |configuration| {
+            configuration.register_routing_profile(profile)
+        })?;
         Ok(())
     }
 
-    pub fn install_context_registry(&mut self, context: ContextRegistry) {
-        self.context = context;
+    pub fn install_context_registry(
+        &mut self,
+        context: ContextRegistry,
+    ) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| {
+            configuration.install_context_registry(context);
+            Ok(())
+        })?;
+        Ok(())
     }
 
-    #[must_use]
-    pub fn skill_descriptors(&self) -> Vec<SkillDescriptor> {
-        self.context.skill_descriptors()
+    pub fn install_skill_registry(&mut self, skills: SkillRegistry) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| {
+            configuration.install_skill_registry(skills);
+            Ok(())
+        })?;
+        Ok(())
     }
 
-    #[must_use]
-    pub fn has_model_invocable_skills(&self) -> bool {
-        self.context.has_model_invocable_skills()
+    pub fn skill_descriptors(&self) -> Result<Vec<SkillDescriptor>, ConductorError> {
+        Ok(self.current_configuration()?.skill_descriptors())
     }
 
-    #[must_use]
-    pub fn has_skills(&self) -> bool {
-        self.context.has_skills()
+    pub fn has_model_invocable_skills(&self) -> Result<bool, ConductorError> {
+        Ok(self.current_configuration()?.has_model_invocable_skills())
+    }
+
+    pub fn has_skills(&self) -> Result<bool, ConductorError> {
+        Ok(self.current_configuration()?.has_skills())
+    }
+
+    pub(crate) fn has_model_invocable_skills_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<bool, ConductorError> {
+        Ok(self
+            .configuration_for_execution(execution_id)?
+            .has_model_invocable_skills())
+    }
+
+    pub(crate) fn has_skills_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<bool, ConductorError> {
+        Ok(self.configuration_for_execution(execution_id)?.has_skills())
     }
 
     pub fn load_skill(
@@ -362,7 +770,10 @@ impl ConductorRuntime {
         execution_id: &ExecutionId,
         id: &SkillId,
     ) -> Result<String, ConductorError> {
-        let payload = self.context.model_skill_payload(id)?;
+        let payload = self
+            .configuration_for_execution(execution_id)?
+            .skills
+            .model_skill_payload(id)?;
         self.skill_activations
             .entry(execution_id.clone())
             .or_default()
@@ -383,17 +794,240 @@ impl ConductorRuntime {
         {
             return Err(ContextError::InactiveSkill(id.clone()).into());
         }
-        Ok(self.context.skill_resource_payload(id, path)?)
+        Ok(self
+            .configuration_for_execution(execution_id)?
+            .skills
+            .skill_resource_payload(id, path)?)
+    }
+
+    pub fn callable_descriptors(&self) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        Ok(self.current_configuration()?.callable_descriptors())
+    }
+
+    pub fn tool_descriptors(&self) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        Ok(self.current_configuration()?.tool_descriptors())
+    }
+
+    pub fn routing_profiles(&self) -> Result<Vec<RoutingProfileDescriptor>, ConductorError> {
+        Ok(self.current_configuration()?.routing_profiles())
+    }
+
+    pub(crate) fn callable_descriptors_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        Ok(self
+            .configuration_for_execution(execution_id)?
+            .callable_descriptors())
+    }
+
+    fn permitted_tool_descriptors(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        let authority = self.execution_authority(execution_id)?;
+        Ok(self
+            .configuration_for_execution(execution_id)?
+            .callables
+            .tool_descriptors()
+            .into_iter()
+            .filter(|descriptor| {
+                authority
+                    .filesystem
+                    .permits_capabilities(&descriptor.capabilities)
+            })
+            .collect())
     }
 
     #[must_use]
-    pub fn callable_descriptors(&self) -> Vec<CallableDescriptor> {
-        self.callables.descriptors()
+    pub fn attempt_groups(&self) -> Vec<AttemptGroup> {
+        self.attempt_groups.values().cloned().collect()
     }
 
     #[must_use]
-    pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
-        self.callables.tool_descriptors()
+    pub fn attempt_group_for_execution(&self, execution_id: &ExecutionId) -> Option<AttemptGroup> {
+        self.attempt_groups
+            .values()
+            .find(|group| group.contains_execution(execution_id))
+            .cloned()
+    }
+
+    #[must_use]
+    pub fn orchestration_failure_decisions(&self) -> Vec<OrchestrationFailureDecisionRecord> {
+        self.orchestration_decisions.values().cloned().collect()
+    }
+
+    #[must_use]
+    pub fn orchestration_failure_decision(
+        &self,
+        failed_child: &ExecutionId,
+    ) -> Option<OrchestrationFailureDecisionRecord> {
+        self.orchestration_decisions.get(failed_child).cloned()
+    }
+
+    pub(crate) fn failed_child_for_interface(
+        &self,
+        interface_execution: &ExecutionId,
+    ) -> Option<ExecutionId> {
+        self.orchestration_interfaces
+            .iter()
+            .find_map(|(failed_child, interface)| {
+                (interface == interface_execution).then(|| failed_child.clone())
+            })
+    }
+
+    pub fn execution_read_set(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<ExecutionReadSet, ConductorError> {
+        if !self.executions.contains_key(execution_id) {
+            return Err(ConductorError::UnknownExecution(execution_id.clone()));
+        }
+        Ok(self
+            .read_sets
+            .get(execution_id)
+            .cloned()
+            .unwrap_or_else(|| ExecutionReadSet::new(execution_id.clone())))
+    }
+
+    pub fn execution_workspace_validity(
+        &self,
+        execution_id: &ExecutionId,
+        current: &BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<ExecutionWorkspaceValidity, ConductorError> {
+        Ok(self
+            .execution_read_set(execution_id)?
+            .validity_against(current))
+    }
+
+    fn record_file_observation(
+        &mut self,
+        execution_id: &ExecutionId,
+        observation: FileObservation,
+    ) -> Result<(), ConductorError> {
+        self.record_domain_event(DomainEvent::WorkspaceFileObserved {
+            execution_id: execution_id.clone(),
+            observation,
+        })
+    }
+
+    pub fn execution_authority(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<ExecutionAuthority, ConductorError> {
+        self.executions
+            .get(execution_id)
+            .map(|execution| execution.authority.clone())
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))
+    }
+
+    pub(crate) fn workspace_lease_request(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<WorkspaceLeaseRequest, ConductorError> {
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let session = self
+            .sessions
+            .get(&execution.summary.session_id)
+            .expect("execution session invariant");
+        Ok(WorkspaceLeaseRequest {
+            workspace_id: session.summary.workspace_id.clone(),
+            execution_id: execution_id.clone(),
+            mode: execution.authority.filesystem.into(),
+        })
+    }
+
+    fn effective_authority_for_execution(
+        &self,
+        execution: &ExecutionSummary,
+    ) -> Result<ExecutionAuthority, ConductorError> {
+        let configured = self.configured_authority_for_execution(execution)?;
+        let Some(parent_id) = execution.parent_execution.as_ref() else {
+            return Ok(configured);
+        };
+        let parent = self
+            .executions
+            .get(parent_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?;
+        Ok(parent.authority.attenuate(&configured))
+    }
+
+    fn configured_authority_for_execution(
+        &self,
+        execution: &ExecutionSummary,
+    ) -> Result<ExecutionAuthority, ConductorError> {
+        let revision = if let Some(parent_id) = execution.parent_execution.as_ref() {
+            self.executions
+                .get(parent_id)
+                .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?
+                .config_revision
+                .clone()
+        } else {
+            self.sessions
+                .get(&execution.session_id)
+                .ok_or_else(|| ConductorError::UnknownSession(execution.session_id.clone()))?
+                .summary
+                .config_revision
+                .clone()
+        };
+        let callables = &self.configuration_revision(&revision)?.callables;
+        match execution.kind {
+            ExecutionKind::Root => {
+                let mut authority = authority_envelope(
+                    callables
+                        .agent_definitions()
+                        .map(|definition| &definition.authority),
+                );
+                authority.callables.extend(
+                    callables
+                        .descriptors()
+                        .into_iter()
+                        .filter(|descriptor| {
+                            matches!(
+                                descriptor.kind,
+                                CallableKind::Agent | CallableKind::Orchestration
+                            )
+                        })
+                        .map(|descriptor| descriptor.id),
+                );
+                Ok(authority)
+            }
+            ExecutionKind::Agent => {
+                let Some(callable) = execution.callable.as_ref() else {
+                    return Ok(ExecutionAuthority::read_only());
+                };
+                Ok(callables.agent_definition(callable)?.authority.clone())
+            }
+            ExecutionKind::Orchestration => {
+                let Some(callable) = execution.callable.as_ref() else {
+                    return Ok(ExecutionAuthority::read_only());
+                };
+                let definition = callables.orchestration(callable)?;
+                let mut authorities = definition
+                    .nodes
+                    .iter()
+                    .map(|node| {
+                        callables
+                            .agent_definition(&node.callable)
+                            .map(|definition| &definition.authority)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if let Some(interface_agent) = definition.interface_agent.as_ref() {
+                    authorities.push(&callables.agent_definition(interface_agent)?.authority);
+                }
+                let mut authority = authority_envelope(authorities);
+                authority
+                    .callables
+                    .extend(definition.nodes.iter().map(|node| node.callable.clone()));
+                if let Some(interface_agent) = definition.interface_agent.as_ref() {
+                    authority.callables.insert(interface_agent.clone());
+                }
+                Ok(authority)
+            }
+        }
     }
 
     pub fn create_session(
@@ -402,16 +1036,34 @@ impl ConductorRuntime {
         name: Option<String>,
         target: ExecutionTarget,
     ) -> Result<SessionSummary, ConductorError> {
-        if let Some(parent) = parent_session.as_ref() {
-            if !self.sessions.contains_key(parent) {
-                return Err(ConductorError::UnknownSession(parent.clone()));
-            }
-        }
+        let revision = self.config_revision.clone();
+        self.create_session_at_revision(parent_session, name, target, revision)
+    }
+
+    fn create_session_at_revision(
+        &mut self,
+        parent_session: Option<SessionId>,
+        name: Option<String>,
+        target: ExecutionTarget,
+        revision: ConfigRevisionId,
+    ) -> Result<SessionSummary, ConductorError> {
+        self.configuration_revision(&revision)?;
+        let workspace_id = if let Some(parent) = parent_session.as_ref() {
+            self.sessions
+                .get(parent)
+                .ok_or_else(|| ConductorError::UnknownSession(parent.clone()))?
+                .summary
+                .workspace_id
+                .clone()
+        } else {
+            self.workspace_id.clone()
+        };
         let summary = SessionSummary {
             id: self.new_session_id(),
             parent_session,
             name,
-            config_revision: self.config_revision.clone(),
+            workspace_id,
+            config_revision: revision,
             default_target: target,
             state: SessionState::Active,
         };
@@ -432,7 +1084,31 @@ impl ConductorRuntime {
             .ok_or_else(|| ConductorError::UnknownSession(source.clone()))?
             .summary
             .clone();
-        self.create_session(Some(source.id), name, source.default_target)
+        self.create_session_at_revision(
+            Some(source.id),
+            name,
+            source.default_target,
+            source.config_revision,
+        )
+    }
+
+    pub fn rebase_session(
+        &mut self,
+        session_id: &SessionId,
+        revision: &ConfigRevisionId,
+    ) -> Result<SessionSummary, ConductorError> {
+        self.ensure_session_active(session_id)?;
+        self.configuration_revision(revision)?;
+        self.record_domain_event(DomainEvent::SessionConfigRebased {
+            session_id: session_id.clone(),
+            config_revision: revision.clone(),
+        })?;
+        Ok(self
+            .sessions
+            .get(session_id)
+            .expect("rebased session remains present")
+            .summary
+            .clone())
     }
 
     pub fn validate_session_close(
@@ -507,6 +1183,7 @@ impl ConductorRuntime {
             execution: summary.clone(),
             payload: JournalExecutionPayload::Invocation {
                 input: text.clone(),
+                authority: ExecutionAuthority::read_only(),
             },
         })?;
         self.push_event(&summary.id, ExecutionEventKind::UserInput { text })?;
@@ -525,7 +1202,21 @@ impl ConductorRuntime {
         callable: &CallableId,
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let descriptor = self.callables.descriptor(callable)?.clone();
+        self.start_agent_with_node(parent_id, callable, objective, None)
+    }
+
+    fn start_agent_with_node(
+        &mut self,
+        parent_id: &ExecutionId,
+        callable: &CallableId,
+        objective: impl Into<String>,
+        orchestration_node: Option<OrchestrationNodeId>,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        let callables = self
+            .configuration_for_execution(parent_id)?
+            .callables
+            .clone();
+        let descriptor = callables.descriptor(callable)?.clone();
         if descriptor.kind != CallableKind::Agent {
             return Err(CallableRegistryError::WrongKind {
                 callable: callable.clone(),
@@ -534,16 +1225,29 @@ impl ConductorRuntime {
             }
             .into());
         }
-        self.callables.execution_provider(callable)?;
-        self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgent)?;
-        self.create_child(
+        callables.execution_provider(callable)?;
+        let operation = if orchestration_node.is_some() {
+            CallableOperation::StartAgentNode
+        } else {
+            CallableOperation::StartAgent
+        };
+        self.check_callable_policy(parent_id, &descriptor, operation)?;
+        let child = self.create_child(
             parent_id,
             ExecutionKind::Agent,
             callable.clone(),
             ExecutionPayload::Invocation {
                 input: objective.into(),
             },
-        )
+        )?;
+        if let Some(node_id) = orchestration_node {
+            self.record_domain_event(DomainEvent::OrchestrationNodeStarted {
+                execution_id: parent_id.clone(),
+                node_id,
+                child_execution_id: child.id.clone(),
+            })?;
+        }
+        Ok(child)
     }
 
     pub fn start_orchestration(
@@ -552,15 +1256,24 @@ impl ConductorRuntime {
         callable: &CallableId,
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let definition = self.callables.orchestration(callable)?.clone();
+        let callables = self
+            .configuration_for_execution(parent_id)?
+            .callables
+            .clone();
+        let definition = callables.orchestration(callable)?.clone();
         self.check_callable_policy(
             parent_id,
             &definition.descriptor,
             CallableOperation::StartOrchestration,
         )?;
         for step in &definition.nodes {
-            let descriptor = self.callables.descriptor(&step.callable)?.clone();
-            self.callables.execution_provider(&step.callable)?;
+            let descriptor = callables.descriptor(&step.callable)?.clone();
+            callables.execution_provider(&step.callable)?;
+            self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgentNode)?;
+        }
+        if let Some(interface_agent) = definition.interface_agent.as_ref() {
+            let descriptor = callables.descriptor(interface_agent)?.clone();
+            callables.execution_provider(interface_agent)?;
             self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgentNode)?;
         }
         let summary = self.create_child(
@@ -569,7 +1282,6 @@ impl ConductorRuntime {
             callable.clone(),
             ExecutionPayload::Orchestration {
                 objective: objective.into(),
-                next_node: 0,
             },
         )?;
         self.set_state(&summary.id, ExecutionState::Running)?;
@@ -592,9 +1304,14 @@ impl ConductorRuntime {
         let parent = self
             .executions
             .get(parent_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?
-            .summary
-            .clone();
+            .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?;
+        if !parent.authority.callables.contains(&callable) {
+            return Err(ConductorError::DelegationDenied {
+                parent_execution: parent_id.clone(),
+                callable,
+            });
+        }
+        let parent = parent.summary.clone();
         self.ensure_session_active(&parent.session_id)?;
         let child = ExecutionSummary {
             id: self.new_execution_id(),
@@ -632,11 +1349,12 @@ impl ConductorRuntime {
             .executions
             .get(execution_id)
             .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let configuration = self.configuration_revision(&execution.config_revision)?;
         match execution.summary.callable.as_ref() {
             None if execution.summary.kind == ExecutionKind::Root => {
                 Ok(ExecutionProviderKind::Model)
             }
-            Some(callable) => Ok(self.callables.execution_provider(callable)?.kind()),
+            Some(callable) => Ok(configuration.callables.execution_provider(callable)?.kind()),
             None => Err(ConductorError::NonProviderExecution(execution_id.clone())),
         }
     }
@@ -662,20 +1380,22 @@ impl ConductorRuntime {
             return Err(ConductorError::NonModelExecution(execution_id.clone()));
         }
 
+        let configuration = self.configuration_for_execution(execution_id)?.clone();
+        let execution_revision = self.execution_config_revision(execution_id)?;
         let route = if let Some(route) = self.resolved_routes.get(execution_id) {
             route.clone()
         } else {
             let requested_target = summary.target.clone();
             let model = match &requested_target {
                 ExecutionTarget::Fixed(model) => model.clone(),
-                ExecutionTarget::Routed(profile) => {
-                    self.routing.resolve(profile, summary.callable.as_ref())?
-                }
+                ExecutionTarget::Routed(profile) => configuration
+                    .routing
+                    .resolve(profile, summary.callable.as_ref())?,
             };
             let route = ResolvedRoute {
                 requested_target,
                 model,
-                config_revision: self.config_revision.clone(),
+                config_revision: execution_revision,
             };
             self.record_domain_event(DomainEvent::InvocationResolved {
                 execution_id: execution_id.clone(),
@@ -684,7 +1404,9 @@ impl ConductorRuntime {
             route
         };
 
-        let (prompt, explicit_skills) = self.context.compose_prompt_with_activations(&input)?;
+        let (prompt, explicit_skills) = configuration
+            .context
+            .compose_prompt_with_activations(&configuration.skills, &input)?;
         if !explicit_skills.is_empty() {
             self.skill_activations
                 .entry(execution_id.clone())
@@ -701,7 +1423,7 @@ impl ConductorRuntime {
             model: route.model,
             prompt,
             tools: ToolProvision {
-                callables: self.callables.tool_descriptors(),
+                callables: self.permitted_tool_descriptors(execution_id)?,
             },
         })
     }
@@ -779,8 +1501,12 @@ impl ConductorRuntime {
             .callable
             .clone()
             .ok_or_else(|| ConductorError::NonProviderExecution(execution_id.clone()))?;
-        let descriptor = self.callables.descriptor(&callable)?.clone();
-        let binding = self.callables.execution_provider(&callable)?.clone();
+        let configuration = self.configuration_for_execution(execution_id)?.clone();
+        let descriptor = configuration.callables.descriptor(&callable)?.clone();
+        let binding = configuration
+            .callables
+            .execution_provider(&callable)?
+            .clone();
         let Some(provider) = binding.provider().cloned() else {
             return Err(ConductorError::NonProviderExecution(execution_id.clone()));
         };
@@ -789,13 +1515,7 @@ impl ConductorRuntime {
             &descriptor,
             CallableOperation::DispatchProvider,
         )?;
-        let config_revision = self
-            .sessions
-            .get(&summary.session_id)
-            .expect("execution session invariant")
-            .summary
-            .config_revision
-            .clone();
+        let config_revision = self.execution_config_revision(execution_id)?;
         let request = ExecutionProviderRequest {
             execution_id: execution_id.clone(),
             session_id: summary.session_id,
@@ -827,28 +1547,39 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    pub fn cancel_execution(&mut self, root: &ExecutionId) -> Result<(), ConductorError> {
+    fn execution_subtree(
+        &self,
+        root: &ExecutionId,
+    ) -> Result<BTreeSet<ExecutionId>, ConductorError> {
         if !self.executions.contains_key(root) {
             return Err(ConductorError::UnknownExecution(root.clone()));
         }
-        let mut cancelled = BTreeSet::from([root.clone()]);
+        let mut subtree = BTreeSet::from([root.clone()]);
         loop {
-            let before = cancelled.len();
+            let before = subtree.len();
             for (id, record) in &self.executions {
                 if record
                     .summary
                     .parent_execution
                     .as_ref()
-                    .is_some_and(|parent| cancelled.contains(parent))
+                    .is_some_and(|parent| subtree.contains(parent))
                 {
-                    cancelled.insert(id.clone());
+                    subtree.insert(id.clone());
                 }
             }
-            if cancelled.len() == before {
+            if subtree.len() == before {
                 break;
             }
         }
-        for id in cancelled {
+        Ok(subtree)
+    }
+
+    fn cancel_execution_set(
+        &mut self,
+        executions: BTreeSet<ExecutionId>,
+        cause: ExecutionTerminationCause,
+    ) -> Result<(), ConductorError> {
+        for id in executions {
             let state = self
                 .executions
                 .get(&id)
@@ -857,10 +1588,37 @@ impl ConductorRuntime {
                 .state
                 .clone();
             if !is_terminal(&state) {
+                self.push_event(
+                    &id,
+                    ExecutionEventKind::ExecutionTerminated {
+                        cause: cause.clone(),
+                    },
+                )?;
                 self.set_state(&id, ExecutionState::Cancelled)?;
             }
         }
         Ok(())
+    }
+
+    fn cancel_descendants(&mut self, root: &ExecutionId) -> Result<(), ConductorError> {
+        let mut descendants = self.execution_subtree(root)?;
+        descendants.remove(root);
+        self.cancel_execution_set(
+            descendants,
+            ExecutionTerminationCause::AncestorFailure {
+                failed_ancestor: root.clone(),
+            },
+        )
+    }
+
+    pub fn cancel_execution(&mut self, root: &ExecutionId) -> Result<(), ConductorError> {
+        let executions = self.execution_subtree(root)?;
+        self.cancel_execution_set(
+            executions,
+            ExecutionTerminationCause::ExplicitCancellation {
+                requested_execution: root.clone(),
+            },
+        )
     }
 
     pub fn push_event(
@@ -915,6 +1673,9 @@ impl ConductorRuntime {
                 state: state.clone(),
             },
         )?;
+        if state == ExecutionState::Failed {
+            self.cancel_descendants(execution_id)?;
+        }
         if is_terminal(&state) {
             self.skill_activations.remove(execution_id);
             if let Some(parent) = parent {
@@ -928,91 +1689,6 @@ impl ConductorRuntime {
                 self.refresh_orchestration(&parent)?;
             }
         }
-        Ok(())
-    }
-
-    fn refresh_orchestration(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
-        let Some(orchestration) = self.executions.get(execution_id) else {
-            return Err(ConductorError::UnknownExecution(execution_id.clone()));
-        };
-        if orchestration.summary.kind != ExecutionKind::Orchestration
-            || is_terminal(&orchestration.summary.state)
-        {
-            return Ok(());
-        }
-        let states: Vec<ExecutionState> = self
-            .executions
-            .values()
-            .filter(|record| record.summary.parent_execution.as_ref() == Some(execution_id))
-            .map(|record| record.summary.state.clone())
-            .collect();
-        if states.contains(&ExecutionState::Failed) {
-            self.set_state(execution_id, ExecutionState::Failed)?;
-            return Ok(());
-        }
-        if states.contains(&ExecutionState::Cancelled) {
-            self.set_state(execution_id, ExecutionState::Cancelled)?;
-            return Ok(());
-        }
-        if states.contains(&ExecutionState::Interrupted) {
-            self.set_state(execution_id, ExecutionState::Interrupted)?;
-            return Ok(());
-        }
-        if states.iter().any(|state| !is_terminal(state)) {
-            return Ok(());
-        }
-        self.advance_orchestration(execution_id)
-    }
-
-    fn advance_orchestration(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
-        let (callable, objective, next_node, state) = {
-            let execution = self
-                .executions
-                .get(execution_id)
-                .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-            let ExecutionPayload::Orchestration {
-                objective,
-                next_node,
-            } = &execution.payload
-            else {
-                return Err(ConductorError::NonModelExecution(execution_id.clone()));
-            };
-            (
-                execution
-                    .summary
-                    .callable
-                    .clone()
-                    .expect("orchestration execution has callable"),
-                objective.clone(),
-                *next_node,
-                execution.summary.state.clone(),
-            )
-        };
-        if state != ExecutionState::Running {
-            return Ok(());
-        }
-        let definition = self.callables.orchestration(&callable)?.clone();
-        if next_node >= definition.nodes.len() {
-            self.set_state(execution_id, ExecutionState::Completed)?;
-            return Ok(());
-        }
-        let step = definition.nodes[next_node].clone();
-        let objective = match step.objective {
-            Some(step_objective) => {
-                format!(
-                    "{step_objective}
-
-Orchestration objective:
-{objective}"
-                )
-            }
-            None => objective,
-        };
-        self.start_agent(execution_id, &step.callable, objective)?;
-        self.record_domain_event(DomainEvent::OrchestrationAdvanced {
-            execution_id: execution_id.clone(),
-            next_node: next_node + 1,
-        })?;
         Ok(())
     }
 
@@ -1065,14 +1741,10 @@ Orchestration objective:
             .executions
             .get(execution_id)
             .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-        let session = self
-            .sessions
-            .get(&execution.summary.session_id)
-            .expect("execution session invariant");
         let context = InvocationPolicyContext {
             session_id: &execution.summary.session_id,
             execution_id,
-            config_revision: &session.summary.config_revision,
+            config_revision: &execution.config_revision,
             subject: InvocationSubject::Callable {
                 descriptor,
                 operation,
@@ -1109,8 +1781,13 @@ Orchestration objective:
         allowed_tools: &BTreeSet<CallableId>,
         invocation: ToolInvocation,
     ) -> Result<ToolResult, BackendError> {
+        let callables = self
+            .configuration_for_execution(execution_id)
+            .map_err(conductor_protocol_error)?
+            .callables
+            .clone();
         if !allowed_tools.contains(&invocation.callable)
-            || !self.callables.contains(&invocation.callable)
+            || !callables.contains(&invocation.callable)
         {
             return Err(BackendError::Protocol(format!(
                 "backend invoked unprovisioned tool {}",
@@ -1135,8 +1812,7 @@ Orchestration objective:
         )
         .map_err(conductor_protocol_error)?;
 
-        let descriptor = self
-            .callables
+        let descriptor = callables
             .descriptor(&invocation.callable)
             .map_err(|error| BackendError::Protocol(error.to_string()))?
             .clone();
@@ -1146,10 +1822,23 @@ Orchestration objective:
             CallableOperation::InvokeTool,
         ) {
             Ok(()) => match serde_json::from_str::<Value>(&invocation.arguments_json) {
-                Ok(_) => self
-                    .callables
-                    .invoke_tool(&invocation.callable, &invocation.arguments_json)
-                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                Ok(_) => {
+                    let context = callables::ToolExecutionContext {
+                        authority: self
+                            .execution_authority(execution_id)
+                            .map_err(conductor_protocol_error)?,
+                    };
+                    let outcome = callables
+                        .invoke_tool(&context, &invocation.callable, &invocation.arguments_json)
+                        .map_err(|error| BackendError::Protocol(error.to_string()))?;
+                    if outcome.success {
+                        for observation in outcome.file_observations.iter().cloned() {
+                            self.record_file_observation(execution_id, observation)
+                                .map_err(conductor_protocol_error)?;
+                        }
+                    }
+                    outcome.into_backend_result()
+                }
                 Err(error) => ToolResult {
                     output: format!("invalid JSON tool arguments: {error}"),
                     success: false,
@@ -1185,12 +1874,22 @@ Orchestration objective:
         }
     }
 
+    fn new_config_revision_id(&self) -> ConfigRevisionId {
+        ConfigRevisionId::parse(format!("config-{}", self.next_config_revision + 1))
+            .expect("generated config revision id")
+    }
+
     fn new_session_id(&self) -> SessionId {
         SessionId::parse(format!("session-{}", self.next_session + 1)).expect("generated id")
     }
 
     fn new_execution_id(&self) -> ExecutionId {
         ExecutionId::parse(format!("execution-{}", self.next_execution + 1)).expect("generated id")
+    }
+
+    fn new_attempt_group_id(&self) -> AttemptGroupId {
+        AttemptGroupId::parse(format!("attempt-group-{}", self.next_attempt_group + 1))
+            .expect("generated id")
     }
 
     fn new_tool_call_id(&self) -> ToolCallId {
@@ -1210,6 +1909,23 @@ fn is_terminal(state: &ExecutionState) -> bool {
             | ExecutionState::Cancelled
             | ExecutionState::Interrupted
     )
+}
+
+fn authority_envelope<'a>(
+    authorities: impl IntoIterator<Item = &'a ExecutionAuthority>,
+) -> ExecutionAuthority {
+    let mut envelope = ExecutionAuthority::read_only();
+    for authority in authorities {
+        envelope.filesystem = envelope.filesystem.max(authority.filesystem);
+        envelope.network = envelope.network.max(authority.network);
+        envelope.repository = envelope.repository.max(authority.repository);
+        envelope.ipc.extend(authority.ipc.iter().cloned());
+        envelope.secrets.extend(authority.secrets.iter().cloned());
+        envelope
+            .callables
+            .extend(authority.callables.iter().cloned());
+    }
+    envelope
 }
 
 struct RuntimeHost<'a> {
@@ -1262,8 +1978,9 @@ impl ExecutionProviderHost for ProviderRuntimeHost<'_> {
 mod tests {
     use super::*;
     use phenix_core::{
-        BackendId, CallablePolicy, CapabilitySet, InferenceOptions, ModelId, ProviderId,
-        RoutingProfileId,
+        BackendId, CallablePolicy, CapabilitySet, FilesystemAuthority, InferenceOptions, ModelId,
+        NetworkAuthority, ProviderId, RepositoryAuthority, RoutingProfileId, WorkspaceId,
+        CAPABILITY_FILESYSTEM_READ, CAPABILITY_FILESYSTEM_WRITE,
     };
     use serde_json::json;
 
@@ -1288,6 +2005,44 @@ mod tests {
         }
     }
 
+    fn tool(id: &str, capabilities: &[&str]) -> CallableDescriptor {
+        CallableDescriptor {
+            id: CallableId::parse(id).unwrap(),
+            kind: CallableKind::Tool,
+            description: "test tool".to_owned(),
+            input_schema: json!({"type": "object"}),
+            output_schema: json!({"type": "object"}),
+            capabilities: CapabilitySet(
+                capabilities
+                    .iter()
+                    .map(|capability| (*capability).to_owned())
+                    .collect(),
+            ),
+            policy: CallablePolicy::default(),
+        }
+    }
+
+    fn authority(
+        filesystem: FilesystemAuthority,
+        network: NetworkAuthority,
+        repository: RepositoryAuthority,
+        ipc: &[&str],
+        secrets: &[&str],
+        callables: &[&str],
+    ) -> ExecutionAuthority {
+        ExecutionAuthority {
+            filesystem,
+            network,
+            repository,
+            ipc: ipc.iter().map(|value| (*value).to_owned()).collect(),
+            secrets: secrets.iter().map(|value| (*value).to_owned()).collect(),
+            callables: callables
+                .iter()
+                .map(|value| CallableId::parse(*value).unwrap())
+                .collect(),
+        }
+    }
+
     #[test]
     fn session_lineage_is_distinct_from_execution_parentage() {
         let mut runtime = ConductorRuntime::new();
@@ -1296,6 +2051,22 @@ mod tests {
         let execution = runtime.submit(&fork.id, "work").unwrap();
         assert_eq!(fork.parent_session, Some(root.id));
         assert_eq!(execution.parent_execution, None);
+    }
+
+    #[test]
+    fn sessions_bind_to_runtime_workspace_and_forks_inherit_it() {
+        let mut runtime = ConductorRuntime::new();
+        let workspace = WorkspaceId::parse("workspace:/repo").unwrap();
+        runtime.bind_workspace(workspace.clone()).unwrap();
+        let root = runtime.create_session(None, None, fixed("a")).unwrap();
+        let fork = runtime.fork_session(&root.id, None).unwrap();
+
+        assert_eq!(root.workspace_id, workspace);
+        assert_eq!(fork.workspace_id, root.workspace_id);
+        assert!(matches!(
+            runtime.bind_workspace(WorkspaceId::parse("workspace:/other").unwrap()),
+            Err(ConductorError::WorkspaceMismatch { .. })
+        ));
     }
 
     #[test]
@@ -1330,7 +2101,12 @@ mod tests {
     #[test]
     fn fixed_parent_forces_callable_child_target() {
         let mut runtime = ConductorRuntime::new();
-        runtime.register_agent(agent("scout")).unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("scout"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let root = runtime.submit(&session.id, "work").unwrap();
         let child = runtime
@@ -1340,9 +2116,290 @@ mod tests {
     }
 
     #[test]
+    fn child_authority_is_attenuated_by_parent() {
+        let mut runtime = ConductorRuntime::new();
+        let parent_authority = authority(
+            FilesystemAuthority::ReadOnly,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Read,
+            &["dbus"],
+            &["github"],
+            &["agent.child", "tool.read"],
+        );
+        let child_maximum = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &["dbus", "docker"],
+            &["github", "other"],
+            &["tool.read", "tool.write"],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                parent_authority.clone(),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                child_maximum.clone(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let child = runtime
+            .start_agent(
+                &parent.id,
+                &CallableId::parse("agent.child").unwrap(),
+                "child",
+            )
+            .unwrap();
+
+        assert_eq!(
+            runtime.execution_authority(&parent.id).unwrap(),
+            parent_authority
+        );
+        assert_eq!(
+            runtime.execution_authority(&child.id).unwrap(),
+            parent_authority.attenuate(&child_maximum)
+        );
+    }
+
+    #[test]
+    fn child_creation_requires_parent_callable_delegation() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.allowed"],
+                ),
+            ))
+            .unwrap();
+        for callable in ["agent.allowed", "agent.denied"] {
+            runtime
+                .register_agent(AgentDefinition::new(
+                    agent(callable),
+                    ExecutionAuthority::read_only(),
+                ))
+                .unwrap();
+        }
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let before = runtime.snapshot().executions.len();
+        let denied = CallableId::parse("agent.denied").unwrap();
+
+        assert_eq!(
+            runtime
+                .start_agent(&parent.id, &denied, "denied child")
+                .unwrap_err(),
+            ConductorError::DelegationDenied {
+                parent_execution: parent.id,
+                callable: denied,
+            }
+        );
+        assert_eq!(runtime.snapshot().executions.len(), before);
+    }
+
+    #[test]
+    fn root_authority_is_the_configured_agent_envelope() {
+        let mut runtime = ConductorRuntime::new();
+        let scout = authority(
+            FilesystemAuthority::ReadOnly,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Read,
+            &["dbus"],
+            &[],
+            &["agent.worker"],
+        );
+        let worker = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::None,
+            RepositoryAuthority::Write,
+            &[],
+            &["github"],
+            &["tool.write"],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(agent("agent.scout"), scout.clone()))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(agent("agent.worker"), worker.clone()))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let root = runtime.submit(&session.id, "work").unwrap();
+
+        let mut expected = authority_envelope([&scout, &worker]);
+        expected.callables.extend([
+            CallableId::parse("agent.scout").unwrap(),
+            CallableId::parse("agent.worker").unwrap(),
+        ]);
+        assert_eq!(runtime.execution_authority(&root.id).unwrap(), expected);
+    }
+
+    #[test]
+    fn execution_authority_roundtrips_and_rejects_parent_expansion() {
+        let mut runtime = ConductorRuntime::new();
+        let parent_authority = authority(
+            FilesystemAuthority::ReadOnly,
+            NetworkAuthority::None,
+            RepositoryAuthority::Read,
+            &[],
+            &[],
+            &["agent.child"],
+        );
+        let child_maximum = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &[],
+            &[],
+            &[],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                parent_authority.clone(),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                child_maximum.clone(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let child = runtime
+            .start_agent(
+                &parent.id,
+                &CallableId::parse("agent.child").unwrap(),
+                "child",
+            )
+            .unwrap();
+        let journal = runtime.journal().clone();
+        let restored = ConductorRuntime::restore(journal.clone()).unwrap();
+        assert_eq!(
+            restored.execution_authority(&child.id).unwrap(),
+            parent_authority.attenuate(&child_maximum)
+        );
+
+        let mut corrupted = journal.clone();
+        let child_payload = corrupted
+            .entries
+            .iter_mut()
+            .find_map(|entry| match &mut entry.event {
+                DomainEvent::ExecutionCreated { execution, payload }
+                    if execution.id == child.id =>
+                {
+                    Some(payload)
+                }
+                _ => None,
+            })
+            .expect("child creation is durable");
+        child_payload.set_authority(authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::None,
+            RepositoryAuthority::Read,
+            &[],
+            &[],
+            &[],
+        ));
+        assert!(matches!(
+            ConductorRuntime::restore(corrupted),
+            Err(PersistenceError::InvalidJournal(message)) if message.contains("authority exceeds parent")
+        ));
+
+        let mut corrupted = journal;
+        let child_execution = corrupted
+            .entries
+            .iter_mut()
+            .find_map(|entry| match &mut entry.event {
+                DomainEvent::ExecutionCreated { execution, .. } if execution.id == child.id => {
+                    Some(execution)
+                }
+                _ => None,
+            })
+            .expect("child creation is durable");
+        child_execution.callable = Some(CallableId::parse("agent.other").unwrap());
+        assert!(matches!(
+            ConductorRuntime::restore(corrupted),
+            Err(PersistenceError::InvalidJournal(message)) if message.contains("not delegated by parent")
+        ));
+    }
+
+    #[test]
+    fn resolved_invocation_filters_tools_by_execution_authority() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.reader"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        runtime
+            .register_tool(tool("tool.read", &[CAPABILITY_FILESYSTEM_READ]), |_| {
+                Ok("read".to_owned())
+            })
+            .unwrap();
+        runtime
+            .register_tool(tool("tool.write", &[CAPABILITY_FILESYSTEM_WRITE]), |_| {
+                Ok("write".to_owned())
+            })
+            .unwrap();
+
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let execution = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.reader").unwrap(),
+                "inspect",
+            )
+            .unwrap();
+        let resolved = runtime.resolve_invocation(&execution.id).unwrap();
+        let tools = resolved
+            .tools
+            .callables
+            .iter()
+            .map(|descriptor| descriptor.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(tools, vec!["tool.read"]);
+    }
+
+    #[test]
     fn cancellation_cascades_to_descendants() {
         let mut runtime = ConductorRuntime::new();
-        runtime.register_agent(agent("scout")).unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("scout"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
         let session = runtime.create_session(None, None, fixed("a")).unwrap();
         let root = runtime.submit(&session.id, "work").unwrap();
         let child = runtime
@@ -1355,6 +2412,177 @@ mod tests {
             .iter()
             .filter(|execution| execution.id == root.id || execution.id == child.id)
             .all(|execution| execution.state == ExecutionState::Cancelled));
+    }
+
+    #[test]
+    fn failed_orchestration_cancels_active_siblings_and_preserves_terminal_children() {
+        let mut runtime = ConductorRuntime::new();
+        for callable in ["agent.fail", "agent.active", "agent.done"] {
+            runtime
+                .register_agent(AgentDefinition::new(
+                    agent(callable),
+                    ExecutionAuthority::read_only(),
+                ))
+                .unwrap();
+        }
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
+                descriptor: CallableDescriptor {
+                    id: CallableId::parse("orchestration.parallel").unwrap(),
+                    kind: CallableKind::Orchestration,
+                    description: "parallel failure fixture".to_owned(),
+                    input_schema: json!({"type": "object"}),
+                    output_schema: json!({"type": "object"}),
+                    capabilities: CapabilitySet::default(),
+                    policy: CallablePolicy::default(),
+                },
+                nodes: vec![
+                    phenix_core::OrchestrationNode {
+                        id: OrchestrationNodeId::parse("fail").unwrap(),
+                        callable: CallableId::parse("agent.fail").unwrap(),
+                        depends_on: Vec::new(),
+                        objective: None,
+                    },
+                    phenix_core::OrchestrationNode {
+                        id: OrchestrationNodeId::parse("active").unwrap(),
+                        callable: CallableId::parse("agent.active").unwrap(),
+                        depends_on: Vec::new(),
+                        objective: None,
+                    },
+                    phenix_core::OrchestrationNode {
+                        id: OrchestrationNodeId::parse("done").unwrap(),
+                        callable: CallableId::parse("agent.done").unwrap(),
+                        depends_on: Vec::new(),
+                        objective: None,
+                    },
+                ],
+            })
+            .unwrap();
+
+        let session = runtime.create_session(None, None, fixed("a")).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let orchestration = runtime
+            .start_orchestration(
+                &root.id,
+                &CallableId::parse("orchestration.parallel").unwrap(),
+                "parallel work",
+            )
+            .unwrap();
+        let children = runtime
+            .snapshot()
+            .executions
+            .into_iter()
+            .filter(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
+            .collect::<Vec<_>>();
+        let child = |callable: &str| {
+            children
+                .iter()
+                .find(|execution| {
+                    execution
+                        .callable
+                        .as_ref()
+                        .is_some_and(|id| id.as_str() == callable)
+                })
+                .unwrap()
+                .id
+                .clone()
+        };
+        let failing = child("agent.fail");
+        let active = child("agent.active");
+        let done = child("agent.done");
+
+        runtime.set_state(&done, ExecutionState::Completed).unwrap();
+        runtime.set_state(&active, ExecutionState::Running).unwrap();
+        runtime
+            .set_state(&failing, ExecutionState::Running)
+            .unwrap();
+        runtime.set_state(&failing, ExecutionState::Failed).unwrap();
+
+        let snapshot = runtime.snapshot();
+        let state = |id: &ExecutionId| {
+            snapshot
+                .executions
+                .iter()
+                .find(|execution| &execution.id == id)
+                .unwrap()
+                .state
+                .clone()
+        };
+        assert_eq!(state(&failing), ExecutionState::Failed);
+        assert_eq!(state(&active), ExecutionState::Cancelled);
+        assert_eq!(state(&done), ExecutionState::Completed);
+        assert_eq!(state(&orchestration.id), ExecutionState::Failed);
+        assert!(runtime.events_since(0).iter().any(|event| {
+            event.execution_id == root.id
+                && matches!(
+                    &event.kind,
+                    ExecutionEventKind::ChildExecutionFinished { child, state }
+                        if child == &orchestration.id && *state == ExecutionState::Failed
+                )
+        }));
+    }
+
+    #[test]
+    fn failed_parent_cancels_deep_active_subtree() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.child"],
+                ),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("a")).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let parent = runtime
+            .start_agent(
+                &root.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let child = runtime
+            .start_agent(
+                &parent.id,
+                &CallableId::parse("agent.child").unwrap(),
+                "child",
+            )
+            .unwrap();
+        runtime
+            .set_state(&parent.id, ExecutionState::Running)
+            .unwrap();
+        runtime
+            .set_state(&child.id, ExecutionState::Running)
+            .unwrap();
+
+        runtime.set_state(&root.id, ExecutionState::Failed).unwrap();
+
+        let snapshot = runtime.snapshot();
+        let state = |id: &ExecutionId| {
+            snapshot
+                .executions
+                .iter()
+                .find(|execution| &execution.id == id)
+                .unwrap()
+                .state
+                .clone()
+        };
+        assert_eq!(state(&root.id), ExecutionState::Failed);
+        assert_eq!(state(&parent.id), ExecutionState::Cancelled);
+        assert_eq!(state(&child.id), ExecutionState::Cancelled);
     }
 
     #[test]
