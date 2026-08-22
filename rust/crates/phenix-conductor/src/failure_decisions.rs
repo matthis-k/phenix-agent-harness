@@ -21,6 +21,16 @@ pub enum OrchestrationFailureDecisionRequest {
     Fail,
 }
 
+fn compact_text(value: &str, max_characters: usize) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= max_characters {
+        return normalized;
+    }
+    let mut compact = normalized.chars().take(max_characters).collect::<String>();
+    compact.push('…');
+    compact
+}
+
 impl ConductorRuntime {
     pub fn decide_orchestration_failure(
         &mut self,
@@ -281,24 +291,126 @@ Retry context JSON:
             .as_ref()
             .map(ToString::to_string)
             .unwrap_or_else(|| "execution".to_owned());
-        let reason = self
+        let input = match &execution.payload {
+            ExecutionPayload::Invocation { input } => input.as_str(),
+            ExecutionPayload::Orchestration { input } => {
+                return Ok(FailureAttemptSummary {
+                    execution_id: execution_id.clone(),
+                    attempt,
+                    approach: format!("run orchestration {callable} with input {input}"),
+                    failure_at: self
+                        .orchestration_nodes
+                        .get(execution_id)
+                        .map_or_else(|| "orchestration".to_owned(), |node| format!("node:{node}")),
+                    reason: self.runtime_failure_reason(execution_id),
+                    completed_work: self.runtime_completed_work(execution_id),
+                });
+            }
+        };
+        let approach_input = compact_text(input, 240);
+        let failed_tool = self
             .events
             .iter()
             .rev()
             .filter(|event| event.execution_id == *execution_id)
             .find_map(|event| match &event.kind {
-                ExecutionEventKind::Error { message, .. } => Some(message.clone()),
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id,
+                    success: false,
+                    ..
+                } => Some(tool_call_id.clone()),
                 _ => None,
-            })
-            .unwrap_or_else(|| "execution failed".to_owned());
+            });
+        let failure_at = if let Some(tool_call_id) = failed_tool {
+            let callable = self
+                .events
+                .iter()
+                .find_map(|event| match &event.kind {
+                    ExecutionEventKind::ToolCallStarted {
+                        tool_call_id: started,
+                        callable,
+                    } if started == &tool_call_id && event.execution_id == *execution_id => {
+                        Some(callable.to_string())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| tool_call_id.to_string());
+            format!("tool:{callable}")
+        } else if let Some(node) = self.orchestration_nodes.get(execution_id) {
+            format!("node:{node}")
+        } else {
+            format!("callable:{callable}")
+        };
         Ok(FailureAttemptSummary {
             execution_id: execution_id.clone(),
             attempt,
-            approach: format!("execute {callable}"),
-            failure_at: "execution".to_owned(),
-            reason,
-            completed_work: Vec::new(),
+            approach: format!("run {callable} with input {approach_input}"),
+            failure_at,
+            reason: self.runtime_failure_reason(execution_id),
+            completed_work: self.runtime_completed_work(execution_id),
         })
+    }
+
+    fn runtime_failure_reason(&self, execution_id: &ExecutionId) -> String {
+        self.events
+            .iter()
+            .rev()
+            .filter(|event| event.execution_id == *execution_id)
+            .find_map(|event| match &event.kind {
+                ExecutionEventKind::Error { message, .. } => Some(message.clone()),
+                ExecutionEventKind::ToolCallFinished {
+                    output,
+                    success: false,
+                    ..
+                } => Some(output.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "execution failed".to_owned())
+    }
+
+    fn runtime_completed_work(&self, execution_id: &ExecutionId) -> Vec<String> {
+        let tool_names = self
+            .events
+            .iter()
+            .filter(|event| event.execution_id == *execution_id)
+            .filter_map(|event| match &event.kind {
+                ExecutionEventKind::ToolCallStarted {
+                    tool_call_id,
+                    callable,
+                } => Some((tool_call_id.clone(), callable.clone())),
+                _ => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut completed = self
+            .events
+            .iter()
+            .filter(|event| event.execution_id == *execution_id)
+            .filter_map(|event| match &event.kind {
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id,
+                    success: true,
+                    ..
+                } => Some(format!(
+                    "tool {} completed",
+                    tool_names
+                        .get(tool_call_id)
+                        .map_or_else(|| tool_call_id.to_string(), ToString::to_string)
+                )),
+                ExecutionEventKind::ChildExecutionFinished {
+                    child,
+                    state: ExecutionState::Completed,
+                } => Some(format!("child {child} completed")),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        completed.extend(
+            self.read_sets
+                .get(execution_id)
+                .into_iter()
+                .flat_map(|read_set| read_set.files.keys())
+                .map(|path| format!("observed source {}", path.display())),
+        );
+        completed.into_iter().collect()
     }
 
     fn create_recovery_agent(
@@ -888,5 +1000,130 @@ Failure context JSON:
                 OrchestrationFailureDecision::Fail => return Ok(ExecutionState::Failed),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_core::{
+        AgentDefinition, BackendId, CallableDescriptor, CallableKind, CallablePolicy,
+        CapabilitySet, ExecutionAuthority, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
+        ProviderId,
+    };
+    use serde_json::json;
+
+    fn target() -> ExecutionTarget {
+        ExecutionTarget::Fixed(ModelTarget {
+            backend: BackendId::parse("mock").unwrap(),
+            provider: ProviderId::parse("mock").unwrap(),
+            model: ModelId::parse("model").unwrap(),
+            inference: InferenceOptions::default(),
+        })
+    }
+
+    #[test]
+    fn retry_provenance_uses_canonical_activity_and_survives_replay() {
+        let mut runtime = ConductorRuntime::new();
+        let callable = CallableId::parse("agent.implement").unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                CallableDescriptor {
+                    id: callable.clone(),
+                    kind: CallableKind::Agent,
+                    description: "implement".to_owned(),
+                    input_schema: json!({"type": "object"}),
+                    output_schema: json!({"type": "object"}),
+                    capabilities: CapabilitySet::default(),
+                    policy: CallablePolicy::default(),
+                },
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, target()).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let child = runtime
+            .start_agent(
+                &root.id,
+                &callable,
+                "Implement the cache without replacing the API",
+            )
+            .unwrap();
+        let read_call = runtime.new_tool_call_id();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallStarted {
+                    tool_call_id: read_call.clone(),
+                    callable: CallableId::parse("read").unwrap(),
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id: read_call,
+                    output: "source inspected".to_owned(),
+                    success: true,
+                },
+            )
+            .unwrap();
+        let build_call = runtime.new_tool_call_id();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallStarted {
+                    tool_call_id: build_call.clone(),
+                    callable: CallableId::parse("build").unwrap(),
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id: build_call,
+                    output: "compiler error".to_owned(),
+                    success: false,
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::Error {
+                    code: "build_failed".to_owned(),
+                    message: "type mismatch in cache adapter".to_owned(),
+                },
+            )
+            .unwrap();
+        runtime
+            .set_state(&child.id, ExecutionState::Failed)
+            .unwrap();
+        let failure = runtime.runtime_failure_summary(&child.id, 1).unwrap();
+        assert!(failure.approach.contains("Implement the cache"));
+        assert_eq!(failure.failure_at, "tool:build");
+        assert_eq!(failure.reason, "type mismatch in cache adapter");
+        assert_eq!(failure.completed_work, vec!["tool read completed"]);
+        let group = AttemptGroup::from_first_failure(
+            runtime.new_attempt_group_id(),
+            root.id,
+            callable,
+            "Implement the cache",
+            failure.clone(),
+        );
+        runtime
+            .record_domain_event(DomainEvent::AttemptGroupCreated { group })
+            .unwrap();
+
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert_eq!(
+            restored
+                .attempt_group_for_execution(&child.id)
+                .unwrap()
+                .failures,
+            vec![failure]
+        );
     }
 }
