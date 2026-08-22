@@ -101,10 +101,10 @@ impl<'a> ExecutionSandbox<'a> {
             .arg("--tmpfs")
             .arg("/run")
             .arg("--dir")
-            .arg("/phenix-home")
+            .arg("/run/phenix-home")
             .arg("--bind")
             .arg(self.state.home())
-            .arg("/phenix-home");
+            .arg("/run/phenix-home");
 
         if let Some(host_home) = env::var_os("HOME").map(PathBuf::from) {
             if host_home.is_absolute() && host_home != Path::new("/") {
@@ -148,22 +148,22 @@ impl<'a> ExecutionSandbox<'a> {
                 environment.insert(OsString::from(name), value);
             }
         }
-        environment.insert(OsString::from("HOME"), OsString::from("/phenix-home"));
+        environment.insert(OsString::from("HOME"), OsString::from("/run/phenix-home"));
         environment.insert(
             OsString::from("XDG_CONFIG_HOME"),
-            OsString::from("/phenix-home/.config"),
+            OsString::from("/run/phenix-home/.config"),
         );
         environment.insert(
             OsString::from("XDG_CACHE_HOME"),
-            OsString::from("/phenix-home/.cache"),
+            OsString::from("/run/phenix-home/.cache"),
         );
         environment.insert(
             OsString::from("XDG_STATE_HOME"),
-            OsString::from("/phenix-home/.local/state"),
+            OsString::from("/run/phenix-home/.local/state"),
         );
         environment.insert(
             OsString::from("XDG_DATA_HOME"),
-            OsString::from("/phenix-home/.local/share"),
+            OsString::from("/run/phenix-home/.local/share"),
         );
         environment.insert(OsString::from("TMPDIR"), OsString::from("/tmp"));
 
@@ -287,7 +287,7 @@ mod tests {
         let debug = format!("{command:?}");
 
         assert!(debug.contains("--unshare-net"));
-        assert!(debug.contains("/phenix-home"));
+        assert!(debug.contains("/run/phenix-home"));
         assert!(!debug.contains("OPENAI_API_KEY"));
     }
 
