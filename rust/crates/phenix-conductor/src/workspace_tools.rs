@@ -1115,6 +1115,7 @@ mod tests {
         let orchestration_id = CallableId::parse("orchestration.tool-surface").unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: fixture_descriptor(
                     orchestration_id.as_str(),
                     CallableKind::Orchestration,

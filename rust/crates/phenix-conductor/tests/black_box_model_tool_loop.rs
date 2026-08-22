@@ -414,6 +414,7 @@ fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() 
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.implement", CallableKind::Orchestration),
             nodes: vec![
                 node("scout", scout, &[], Some("inspect")),

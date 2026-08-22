@@ -420,6 +420,7 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.edge", CallableKind::Orchestration),
             nodes: vec![
                 node("first", "agent.first", &[], Some("first")),

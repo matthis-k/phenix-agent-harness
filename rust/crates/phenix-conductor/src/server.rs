@@ -1672,12 +1672,30 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.execution_id = Some(id);
             error
         }
-        ConductorError::InvalidRetry(id) => {
+        ConductorError::InvalidFailureDecision {
+            parent_execution,
+            failed_child,
+        } => {
             let mut error = protocol_error(
                 ErrorCode::InvalidRequest,
-                format!("execution cannot be retried: {id}"),
+                format!(
+                    "invalid failure decision for child {failed_child} of orchestration {parent_execution}"
+                ),
             );
-            error.execution_id = Some(id);
+            error.execution_id = Some(parent_execution);
+            error
+        }
+        ConductorError::FailureDecisionDenied {
+            parent_execution,
+            decider_execution,
+        } => {
+            let mut error = protocol_error(
+                ErrorCode::PolicyDenied,
+                format!(
+                    "execution {decider_execution} may not decide failures for orchestration {parent_execution}"
+                ),
+            );
+            error.execution_id = Some(decider_execution);
             error
         }
         ConductorError::DelegationDenied {
@@ -1829,6 +1847,7 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration.tree", CallableKind::Orchestration),
                 nodes: vec![OrchestrationNode {
                     id: OrchestrationNodeId::parse("child").unwrap(),
@@ -2104,6 +2123,7 @@ mod tests {
         }
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
                 nodes: vec![
                     node("alpha", "agent.alpha", &[]),

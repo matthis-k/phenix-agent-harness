@@ -228,6 +228,7 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             nodes: vec![node("provider", step, Some("provider step"))],
         })
@@ -281,6 +282,7 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             nodes: vec![node(
                 "provider",
