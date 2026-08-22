@@ -1,4 +1,5 @@
 use phenix_core::{SkillDescriptor, SkillId, SkillInvocationPolicy};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
@@ -103,6 +104,26 @@ impl ContextRegistry {
             base_documents: discover_base_documents(&project_root, cwd)?,
         })
     }
+    pub(crate) fn semantic_manifest(&self) -> Value {
+        Value::Array(
+            self.base_documents
+                .iter()
+                .map(|document| {
+                    let kind = match document.kind {
+                        ContextDocumentKind::AgentInstructions => "agent_instructions",
+                        ContextDocumentKind::ProjectInstructions => "project_instructions",
+                    };
+                    json!({
+                        "kind": kind,
+                        "path": document.path.display().to_string(),
+                        "scope_root": document.scope_root.display().to_string(),
+                        "content": document.content,
+                    })
+                })
+                .collect(),
+        )
+    }
+
     pub fn compose_prompt(
         &self,
         skills: &SkillRegistry,
@@ -203,6 +224,34 @@ impl SkillRegistry {
             }
         }
         Ok(registry)
+    }
+
+    pub(crate) fn semantic_manifest(&self) -> Value {
+        Value::Array(
+            self.skills
+                .values()
+                .map(|skill| {
+                    let resources = skill
+                        .resources
+                        .iter()
+                        .map(|(path, content)| {
+                            let content = match content {
+                                SkillResourceContent::Text(content) => json!({"text": content}),
+                                SkillResourceContent::Unavailable => json!({"unavailable": true}),
+                            };
+                            (path.display().to_string(), content)
+                        })
+                        .collect::<BTreeMap<_, _>>();
+                    json!({
+                        "descriptor": skill.descriptor,
+                        "instructions": skill.instructions,
+                        "root": skill.root.display().to_string(),
+                        "resources": resources,
+                        "allowed_tools": skill.allowed_tools,
+                    })
+                })
+                .collect(),
+        )
     }
 
     pub fn skill_descriptors(&self) -> Vec<SkillDescriptor> {

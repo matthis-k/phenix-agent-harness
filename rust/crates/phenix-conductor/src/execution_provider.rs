@@ -126,8 +126,12 @@ impl ConductorRuntime {
             .callable
             .clone()
             .ok_or_else(|| ConductorError::NonProviderExecution(execution_id.clone()))?;
-        let descriptor = self.callables.descriptor(&callable)?.clone();
-        let binding = self.callables.execution_provider(&callable)?.clone();
+        let configuration = self.configuration_for_execution(execution_id)?;
+        let descriptor = configuration.callables.descriptor(&callable)?.clone();
+        let binding = configuration
+            .callables
+            .execution_provider(&callable)?
+            .clone();
         let Some(provider) = binding.provider().cloned() else {
             return Err(ConductorError::NonProviderExecution(execution_id.clone()));
         };
@@ -136,13 +140,7 @@ impl ConductorRuntime {
             &descriptor,
             CallableOperation::DispatchProvider,
         )?;
-        let config_revision = self
-            .sessions
-            .get(&summary.session_id)
-            .expect("execution session invariant")
-            .summary
-            .config_revision
-            .clone();
+        let config_revision = self.execution_config_revision(execution_id)?;
         let request = ExecutionProviderRequest {
             execution_id: execution_id.clone(),
             session_id: summary.session_id,

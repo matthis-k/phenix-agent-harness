@@ -1,7 +1,7 @@
 use crate::{
     CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
-    ExecutionProvider, ExecutionProviderBinding, InvocationPolicyContext, InvocationSubject,
-    JournalExecutionPayload,
+    ExecutionProvider, ExecutionProviderBinding, ExecutionProviderKind, InvocationPolicyContext,
+    InvocationSubject, JournalExecutionPayload,
 };
 use phenix_backend::ToolResult;
 use phenix_core::{
@@ -9,6 +9,7 @@ use phenix_core::{
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
     FileObservation, OrchestrationDefinition, OrchestrationNodeId, SessionId,
 };
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -153,6 +154,7 @@ impl Display for CallableRegistryError {
 
 impl Error for CallableRegistryError {}
 
+#[derive(Clone)]
 enum CallableEntry {
     Tool {
         descriptor: CallableDescriptor,
@@ -188,7 +190,7 @@ impl Debug for CallableEntry {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CallableRegistry {
     entries: BTreeMap<CallableId, CallableEntry>,
 }
@@ -202,6 +204,40 @@ impl Debug for CallableRegistry {
 }
 
 impl CallableRegistry {
+    pub(crate) fn semantic_manifest(&self) -> Value {
+        Value::Array(
+            self.entries
+                .values()
+                .map(|entry| match entry {
+                    CallableEntry::Tool { descriptor, .. } => json!({
+                        "type": "tool",
+                        "descriptor": descriptor,
+                    }),
+                    CallableEntry::Agent {
+                        definition,
+                        provider,
+                    } => {
+                        let provider_kind = match provider.kind() {
+                            ExecutionProviderKind::Model => "model",
+                            ExecutionProviderKind::Native => "native",
+                            ExecutionProviderKind::Acp => "acp",
+                            ExecutionProviderKind::RemotePhenix => "remote_phenix",
+                        };
+                        json!({
+                            "type": "agent",
+                            "definition": definition,
+                            "provider_kind": provider_kind,
+                        })
+                    }
+                    CallableEntry::Orchestration(definition) => json!({
+                        "type": "orchestration",
+                        "definition": definition,
+                    }),
+                })
+                .collect(),
+        )
+    }
+
     pub fn register_tool<F, O>(
         &mut self,
         descriptor: CallableDescriptor,
@@ -537,12 +573,16 @@ impl ConductorRuntime {
         if objective.trim().is_empty() {
             return Err(ConductorError::EmptyInput);
         }
-        let descriptor = self.callables.descriptor(callable)?.clone();
+        let callables = self
+            .configuration_for_session(session_id)?
+            .callables
+            .clone();
+        let descriptor = callables.descriptor(callable)?.clone();
         let execution_id = self.new_execution_id();
 
         match descriptor.kind {
             CallableKind::Agent => {
-                self.callables.execution_provider(callable)?;
+                callables.execution_provider(callable)?;
                 self.check_session_callable_policy(
                     session_id,
                     &execution_id,
@@ -561,7 +601,7 @@ impl ConductorRuntime {
                 )
             }
             CallableKind::Orchestration => {
-                let definition = self.callables.orchestration(callable)?.clone();
+                let definition = callables.orchestration(callable)?.clone();
                 self.check_session_callable_policy(
                     session_id,
                     &execution_id,
@@ -569,8 +609,8 @@ impl ConductorRuntime {
                     CallableOperation::StartOrchestration,
                 )?;
                 for node in &definition.nodes {
-                    let node_descriptor = self.callables.descriptor(&node.callable)?.clone();
-                    self.callables.execution_provider(&node.callable)?;
+                    let node_descriptor = callables.descriptor(&node.callable)?.clone();
+                    callables.execution_provider(&node.callable)?;
                     self.check_session_callable_policy(
                         session_id,
                         &execution_id,
@@ -579,8 +619,8 @@ impl ConductorRuntime {
                     )?;
                 }
                 if let Some(interface_agent) = definition.interface_agent.as_ref() {
-                    let descriptor = self.callables.descriptor(interface_agent)?.clone();
-                    self.callables.execution_provider(interface_agent)?;
+                    let descriptor = callables.descriptor(interface_agent)?.clone();
+                    callables.execution_provider(interface_agent)?;
                     self.check_session_callable_policy(
                         session_id,
                         &execution_id,

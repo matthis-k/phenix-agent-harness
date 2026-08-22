@@ -390,10 +390,14 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
         .clone();
     assert_eq!(second.state, ExecutionState::Pending);
 
+    let revision = runtime.current_config_revision().clone();
+    let configuration = runtime.current_compiled_configuration().unwrap();
     let serialized = serde_json::to_vec(runtime.journal()).unwrap();
     let mut restored =
         ConductorRuntime::restore(serde_json::from_slice(&serialized).unwrap()).unwrap();
-    bind_two_step_workflow(&mut restored);
+    restored
+        .bind_configuration_revision(&revision, configuration)
+        .unwrap();
     assert_eq!(restored.snapshot(), before_restart);
 
     restored

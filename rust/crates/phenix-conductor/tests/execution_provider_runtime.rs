@@ -159,6 +159,7 @@ fn mock_provider_executes_an_ordinary_child_and_emits_canonical_events() {
             MockProvider::emitting(state.clone()),
         )
         .unwrap();
+    let revision = runtime.current_config_revision().clone();
     let root = root(&mut runtime);
     let callable = CallableId::parse("agent.native").unwrap();
     let child = runtime
@@ -174,7 +175,7 @@ fn mock_provider_executes_an_ordinary_child_and_emits_canonical_events() {
     assert_eq!(requests[0].parent_execution.as_ref(), Some(&root.id));
     assert_eq!(requests[0].callable, callable);
     assert_eq!(requests[0].objective, "native objective");
-    assert_eq!(requests[0].config_revision.as_str(), "config-1");
+    assert_eq!(requests[0].config_revision, revision);
     drop(requests);
 
     let snapshot = runtime.snapshot();

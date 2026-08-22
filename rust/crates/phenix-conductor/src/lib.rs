@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod callables;
+#[cfg(test)]
+mod config_revision_tests;
 mod context;
 mod execution_provider;
 mod failure_decisions;
@@ -39,19 +41,38 @@ use phenix_core::{
     ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
     ExecutionTerminationCause, ExecutionWorkspaceValidity, FileObservation, FileVersion,
     ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
-    RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId,
-    WorkspaceId, WorkspaceLeaseRequest,
+    RoutingProfile, RoutingProfileDescriptor, SessionId, SessionState, SessionSummary,
+    SkillDescriptor, SkillId, ToolCallId, WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConfigRevisionFingerprint(String);
+
+impl Display for ConfigRevisionFingerprint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConductorError {
     UnknownSession(SessionId),
+    UnknownConfigRevision(ConfigRevisionId),
+    UnboundConfigRevision(ConfigRevisionId),
+    ConfigRevisionAlreadyBound(ConfigRevisionId),
+    ConfigRevisionFingerprintMismatch {
+        revision: ConfigRevisionId,
+        expected: ConfigRevisionFingerprint,
+        actual: ConfigRevisionFingerprint,
+    },
     ClosedSession(SessionId),
     SessionHasActiveExecutions(SessionId),
     UnknownExecution(ExecutionId),
@@ -91,6 +112,17 @@ impl Display for ConductorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownSession(id) => write!(f, "unknown session: {id}"),
+            Self::UnknownConfigRevision(id) => write!(f, "unknown configuration revision: {id}"),
+            Self::UnboundConfigRevision(id) => write!(f, "configuration revision is not bound in this process: {id}"),
+            Self::ConfigRevisionAlreadyBound(id) => write!(f, "configuration revision is already bound: {id}"),
+            Self::ConfigRevisionFingerprintMismatch {
+                revision,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "configuration revision fingerprint mismatch for {revision}: expected {expected}, found {actual}"
+            ),
             Self::ClosedSession(id) => write!(f, "session is closed: {id}"),
             Self::SessionHasActiveExecutions(id) => {
                 write!(f, "session has active executions and cannot close: {id}")
@@ -194,191 +226,33 @@ struct ExecutionRecord {
     summary: ExecutionSummary,
     payload: ExecutionPayload,
     authority: ExecutionAuthority,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ResolvedInvocation {
-    pub execution_id: ExecutionId,
-    pub session_id: SessionId,
-    pub config_revision: ConfigRevisionId,
-    pub callable: Option<CallableId>,
-    pub requested_target: ExecutionTarget,
-    pub model: ModelTarget,
-    pub prompt: String,
-    pub tools: ToolProvision,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PreparedInvocation {
-    pub resolved: ResolvedInvocation,
-    pub tools: PreparedToolSurface,
-}
-
-impl PreparedInvocation {
-    #[must_use]
-    pub fn backend_session_request(&self) -> BackendSessionRequest {
-        BackendSessionRequest {
-            model: self.resolved.model.clone(),
-            tools: self.tools.clone(),
-        }
-    }
-
-    #[must_use]
-    pub fn backend_execution_request(&self) -> BackendExecutionRequest {
-        BackendExecutionRequest {
-            execution_id: self.resolved.execution_id.clone(),
-            prompt: self.resolved.prompt.clone(),
-        }
-    }
-
-    #[must_use]
-    pub fn allowed_tools(&self) -> BTreeSet<CallableId> {
-        self.tools
-            .callables()
-            .iter()
-            .map(|descriptor| descriptor.id.clone())
-            .collect()
-    }
-}
-
-#[derive(Debug)]
-pub struct ConductorRuntime {
     config_revision: ConfigRevisionId,
-    workspace_id: WorkspaceId,
-    sessions: BTreeMap<SessionId, SessionRecord>,
-    executions: BTreeMap<ExecutionId, ExecutionRecord>,
-    attempt_groups: BTreeMap<AttemptGroupId, AttemptGroup>,
-    orchestration_decisions: BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
-    orchestration_interfaces: BTreeMap<ExecutionId, ExecutionId>,
-    orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
-    resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
-    read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
-    events: Vec<ExecutionEvent>,
-    journal: RuntimeJournal,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CompiledConfiguration {
     callables: CallableRegistry,
     routing: RoutingRegistry,
     context: ContextRegistry,
     skills: SkillRegistry,
-    skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
-    policy: InvocationPolicy,
-    event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
-    next_session: u64,
-    next_execution: u64,
-    next_attempt_group: u64,
-    next_event: u64,
-    next_tool_call: u64,
 }
 
-impl Default for ConductorRuntime {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ConductorRuntime {
-    #[must_use]
-    pub fn new() -> Self {
-        let config_revision = ConfigRevisionId::parse("config-1").expect("static config id");
-        let workspace_id = WorkspaceId::parse("workspace:in-memory").expect("static workspace id");
-        Self {
-            journal: RuntimeJournal::new(config_revision.clone()),
-            config_revision,
-            workspace_id,
-            sessions: BTreeMap::new(),
-            executions: BTreeMap::new(),
-            attempt_groups: BTreeMap::new(),
-            orchestration_decisions: BTreeMap::new(),
-            orchestration_interfaces: BTreeMap::new(),
-            orchestration_nodes: BTreeMap::new(),
-            resolved_routes: BTreeMap::new(),
-            read_sets: BTreeMap::new(),
-            events: Vec::new(),
-            callables: CallableRegistry::default(),
-            routing: RoutingRegistry::default(),
-            context: ContextRegistry::default(),
-            skills: SkillRegistry::default(),
-            skill_activations: BTreeMap::new(),
-            policy: InvocationPolicy::new(),
-            event_sink: None,
-            next_session: 0,
-            next_execution: 0,
-            next_attempt_group: 0,
-            next_event: 0,
-            next_tool_call: 0,
-        }
-    }
-
-    pub fn bind_workspace(&mut self, workspace_id: WorkspaceId) -> Result<(), ConductorError> {
-        if let Some(session) = self
-            .sessions
-            .values()
-            .find(|session| session.summary.workspace_id != workspace_id)
-        {
-            return Err(ConductorError::WorkspaceMismatch {
-                expected: session.summary.workspace_id.clone(),
-                actual: workspace_id,
-            });
-        }
-        self.workspace_id = workspace_id;
-        Ok(())
-    }
-
-    fn record_domain_event(&mut self, mut event: DomainEvent) -> Result<(), ConductorError> {
-        if let DomainEvent::ExecutionCreated { execution, payload } = &mut event {
-            payload.set_authority(self.effective_authority_for_execution(execution)?);
-        }
-        let frontend_event = match &event {
-            DomainEvent::FrontendEvent { event } => Some(event.clone()),
-            _ => None,
-        };
-        let sequence = u64::try_from(self.journal.entries.len())
-            .map_err(|_| JournalError::InvalidFormat("journal is too large".to_owned()))?
-            + 1;
-        self.journal.entries.push(JournalEntry {
-            sequence,
-            event: event.clone(),
+impl CompiledConfiguration {
+    fn fingerprint(&self) -> ConfigRevisionFingerprint {
+        let manifest = json!({
+            "callables": self.callables.semantic_manifest(),
+            "routing": self.routing.semantic_manifest(),
+            "context": self.context.semantic_manifest(),
+            "skills": self.skills.semantic_manifest(),
         });
-        let result = {
-            let mut projection = DurableProjection {
-                config_revision: &self.config_revision,
-                sessions: &mut self.sessions,
-                executions: &mut self.executions,
-                attempt_groups: &mut self.attempt_groups,
-                orchestration_decisions: &mut self.orchestration_decisions,
-                orchestration_interfaces: &mut self.orchestration_interfaces,
-                orchestration_nodes: &mut self.orchestration_nodes,
-                resolved_routes: &mut self.resolved_routes,
-                read_sets: &mut self.read_sets,
-                events: &mut self.events,
-                next_session: &mut self.next_session,
-                next_execution: &mut self.next_execution,
-                next_attempt_group: &mut self.next_attempt_group,
-                next_event: &mut self.next_event,
-                next_tool_call: &mut self.next_tool_call,
-            };
-            apply_domain_event(&mut projection, &event)
-        };
-        if let Err(error) = result {
-            self.journal.entries.pop();
-            return Err(error.into());
-        }
-        if let Some(event) = frontend_event {
-            if self
-                .event_sink
-                .as_ref()
-                .is_some_and(|sink| sink.send(event).is_err())
-            {
-                self.event_sink = None;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn register_invocation_guard<G>(&mut self, guard: G)
-    where
-        G: InvocationGuard + 'static,
-    {
-        self.policy.register(guard);
+        let encoded = serde_json::to_vec(&manifest)
+            .expect("compiled configuration manifest is JSON serializable");
+        let digest = Sha256::digest(encoded);
+        let encoded = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        ConfigRevisionFingerprint(encoded)
     }
 
     pub fn register_tool<F, O>(
@@ -451,6 +325,21 @@ impl ConductorRuntime {
     }
 
     #[must_use]
+    pub fn callable_descriptors(&self) -> Vec<CallableDescriptor> {
+        self.callables.descriptors()
+    }
+
+    #[must_use]
+    pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
+        self.callables.tool_descriptors()
+    }
+
+    #[must_use]
+    pub fn routing_profiles(&self) -> Vec<RoutingProfileDescriptor> {
+        self.routing.descriptors()
+    }
+
+    #[must_use]
     pub fn skill_descriptors(&self) -> Vec<SkillDescriptor> {
         self.skills.skill_descriptors()
     }
@@ -464,13 +353,427 @@ impl ConductorRuntime {
     pub fn has_skills(&self) -> bool {
         self.skills.has_skills()
     }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ConfigRevisionSlot {
+    pub fingerprint: ConfigRevisionFingerprint,
+    pub configuration: Option<CompiledConfiguration>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedInvocation {
+    pub execution_id: ExecutionId,
+    pub session_id: SessionId,
+    pub config_revision: ConfigRevisionId,
+    pub callable: Option<CallableId>,
+    pub requested_target: ExecutionTarget,
+    pub model: ModelTarget,
+    pub prompt: String,
+    pub tools: ToolProvision,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedInvocation {
+    pub resolved: ResolvedInvocation,
+    pub tools: PreparedToolSurface,
+}
+
+impl PreparedInvocation {
+    #[must_use]
+    pub fn backend_session_request(&self) -> BackendSessionRequest {
+        BackendSessionRequest {
+            model: self.resolved.model.clone(),
+            tools: self.tools.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn backend_execution_request(&self) -> BackendExecutionRequest {
+        BackendExecutionRequest {
+            execution_id: self.resolved.execution_id.clone(),
+            prompt: self.resolved.prompt.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn allowed_tools(&self) -> BTreeSet<CallableId> {
+        self.tools
+            .callables()
+            .iter()
+            .map(|descriptor| descriptor.id.clone())
+            .collect()
+    }
+}
+
+#[derive(Debug)]
+pub struct ConductorRuntime {
+    config_revision: ConfigRevisionId,
+    config_revisions: BTreeMap<ConfigRevisionId, ConfigRevisionSlot>,
+    workspace_id: WorkspaceId,
+    sessions: BTreeMap<SessionId, SessionRecord>,
+    executions: BTreeMap<ExecutionId, ExecutionRecord>,
+    attempt_groups: BTreeMap<AttemptGroupId, AttemptGroup>,
+    orchestration_decisions: BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
+    orchestration_interfaces: BTreeMap<ExecutionId, ExecutionId>,
+    orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
+    resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
+    read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
+    events: Vec<ExecutionEvent>,
+    journal: RuntimeJournal,
+    skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
+    policy: InvocationPolicy,
+    event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
+    next_config_revision: u64,
+    next_session: u64,
+    next_execution: u64,
+    next_attempt_group: u64,
+    next_event: u64,
+    next_tool_call: u64,
+}
+
+impl Default for ConductorRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ConductorRuntime {
+    #[must_use]
+    pub fn new() -> Self {
+        let config_revision = ConfigRevisionId::parse("config-1").expect("static config id");
+        let workspace_id = WorkspaceId::parse("workspace:in-memory").expect("static workspace id");
+        let configuration = CompiledConfiguration::default();
+        let fingerprint = configuration.fingerprint();
+        let config_revisions = BTreeMap::from([(
+            config_revision.clone(),
+            ConfigRevisionSlot {
+                fingerprint: fingerprint.clone(),
+                configuration: Some(configuration),
+            },
+        )]);
+        Self {
+            journal: RuntimeJournal::new(config_revision.clone(), fingerprint),
+            config_revision,
+            config_revisions,
+            workspace_id,
+            sessions: BTreeMap::new(),
+            executions: BTreeMap::new(),
+            attempt_groups: BTreeMap::new(),
+            orchestration_decisions: BTreeMap::new(),
+            orchestration_interfaces: BTreeMap::new(),
+            orchestration_nodes: BTreeMap::new(),
+            resolved_routes: BTreeMap::new(),
+            read_sets: BTreeMap::new(),
+            events: Vec::new(),
+            skill_activations: BTreeMap::new(),
+            policy: InvocationPolicy::new(),
+            event_sink: None,
+            next_config_revision: 1,
+            next_session: 0,
+            next_execution: 0,
+            next_attempt_group: 0,
+            next_event: 0,
+            next_tool_call: 0,
+        }
+    }
+
+    pub fn bind_workspace(&mut self, workspace_id: WorkspaceId) -> Result<(), ConductorError> {
+        if let Some(session) = self
+            .sessions
+            .values()
+            .find(|session| session.summary.workspace_id != workspace_id)
+        {
+            return Err(ConductorError::WorkspaceMismatch {
+                expected: session.summary.workspace_id.clone(),
+                actual: workspace_id,
+            });
+        }
+        self.workspace_id = workspace_id;
+        Ok(())
+    }
+
+    fn record_domain_event(&mut self, mut event: DomainEvent) -> Result<(), ConductorError> {
+        if let DomainEvent::ExecutionCreated { execution, payload } = &mut event {
+            payload.set_authority(self.effective_authority_for_execution(execution)?);
+        }
+        let frontend_event = match &event {
+            DomainEvent::FrontendEvent { event } => Some(event.clone()),
+            _ => None,
+        };
+        let sequence = u64::try_from(self.journal.entries.len())
+            .map_err(|_| JournalError::InvalidFormat("journal is too large".to_owned()))?
+            + 1;
+        self.journal.entries.push(JournalEntry {
+            sequence,
+            event: event.clone(),
+        });
+        let result = {
+            let mut projection = DurableProjection {
+                config_revisions: &mut self.config_revisions,
+                current_config_revision: &mut self.config_revision,
+                sessions: &mut self.sessions,
+                executions: &mut self.executions,
+                attempt_groups: &mut self.attempt_groups,
+                orchestration_decisions: &mut self.orchestration_decisions,
+                orchestration_interfaces: &mut self.orchestration_interfaces,
+                orchestration_nodes: &mut self.orchestration_nodes,
+                resolved_routes: &mut self.resolved_routes,
+                read_sets: &mut self.read_sets,
+                events: &mut self.events,
+                next_config_revision: &mut self.next_config_revision,
+                next_session: &mut self.next_session,
+                next_execution: &mut self.next_execution,
+                next_attempt_group: &mut self.next_attempt_group,
+                next_event: &mut self.next_event,
+                next_tool_call: &mut self.next_tool_call,
+            };
+            apply_domain_event(&mut projection, &event)
+        };
+        if let Err(error) = result {
+            self.journal.entries.pop();
+            return Err(error.into());
+        }
+        if let Some(event) = frontend_event {
+            if self
+                .event_sink
+                .as_ref()
+                .is_some_and(|sink| sink.send(event).is_err())
+            {
+                self.event_sink = None;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn register_invocation_guard<G>(&mut self, guard: G)
+    where
+        G: InvocationGuard + 'static,
+    {
+        self.policy.register(guard);
+    }
+
+    fn current_configuration(&self) -> Result<&CompiledConfiguration, ConductorError> {
+        self.configuration_revision(&self.config_revision)
+    }
+
+    pub fn current_compiled_configuration(&self) -> Result<CompiledConfiguration, ConductorError> {
+        Ok(self.current_configuration()?.clone())
+    }
+
+    pub(crate) fn configuration_revision(
+        &self,
+        revision: &ConfigRevisionId,
+    ) -> Result<&CompiledConfiguration, ConductorError> {
+        self.config_revisions
+            .get(revision)
+            .ok_or_else(|| ConductorError::UnknownConfigRevision(revision.clone()))?
+            .configuration
+            .as_ref()
+            .ok_or_else(|| ConductorError::UnboundConfigRevision(revision.clone()))
+    }
+
+    pub(crate) fn configuration_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<&CompiledConfiguration, ConductorError> {
+        let revision = &self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?
+            .summary
+            .config_revision;
+        self.configuration_revision(revision)
+    }
+
+    pub(crate) fn configuration_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<&CompiledConfiguration, ConductorError> {
+        let revision = &self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?
+            .config_revision;
+        self.configuration_revision(revision)
+    }
+
+    #[must_use]
+    pub fn current_config_revision(&self) -> &ConfigRevisionId {
+        &self.config_revision
+    }
+
+    pub fn execution_config_revision(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<ConfigRevisionId, ConductorError> {
+        self.executions
+            .get(execution_id)
+            .map(|execution| execution.config_revision.clone())
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))
+    }
+
+    pub fn bind_configuration_revision(
+        &mut self,
+        revision: &ConfigRevisionId,
+        configuration: CompiledConfiguration,
+    ) -> Result<(), ConductorError> {
+        let slot = self
+            .config_revisions
+            .get_mut(revision)
+            .ok_or_else(|| ConductorError::UnknownConfigRevision(revision.clone()))?;
+        if slot.configuration.is_some() {
+            return Err(ConductorError::ConfigRevisionAlreadyBound(revision.clone()));
+        }
+        let actual = configuration.fingerprint();
+        if actual != slot.fingerprint {
+            return Err(ConductorError::ConfigRevisionFingerprintMismatch {
+                revision: revision.clone(),
+                expected: slot.fingerprint.clone(),
+                actual,
+            });
+        }
+        slot.configuration = Some(configuration);
+        Ok(())
+    }
+
+    pub fn reload_configuration(
+        &mut self,
+        configuration: CompiledConfiguration,
+    ) -> Result<ConfigRevisionId, ConductorError> {
+        let revision = self.new_config_revision_id();
+        let fingerprint = configuration.fingerprint();
+        self.record_domain_event(DomainEvent::ConfigurationRevisionActivated {
+            revision: revision.clone(),
+            fingerprint,
+        })?;
+        let slot = self
+            .config_revisions
+            .get_mut(&revision)
+            .expect("configuration activation creates a revision slot");
+        slot.configuration = Some(configuration);
+        Ok(revision)
+    }
+
+    fn revise_configuration<F>(&mut self, update: F) -> Result<ConfigRevisionId, ConductorError>
+    where
+        F: FnOnce(&mut CompiledConfiguration) -> Result<(), ConductorError>,
+    {
+        let mut configuration = self.current_configuration()?.clone();
+        update(&mut configuration)?;
+        self.reload_configuration(configuration)
+    }
+
+    pub fn register_tool<F, O>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        handler: F,
+    ) -> Result<(), ConductorError>
+    where
+        F: Fn(&str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
+    {
+        self.revise_configuration(move |configuration| {
+            configuration.register_tool(descriptor, handler)
+        })?;
+        Ok(())
+    }
+
+    pub fn register_agent(&mut self, definition: AgentDefinition) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| configuration.register_agent(definition))?;
+        Ok(())
+    }
+
+    pub fn register_provider_agent<P>(
+        &mut self,
+        definition: AgentDefinition,
+        provider: P,
+    ) -> Result<(), ConductorError>
+    where
+        P: ExecutionProvider + 'static,
+    {
+        self.revise_configuration(move |configuration| {
+            configuration.register_provider_agent(definition, provider)
+        })?;
+        Ok(())
+    }
+
+    pub fn register_orchestration(
+        &mut self,
+        definition: OrchestrationDefinition,
+    ) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| {
+            configuration.register_orchestration(definition)
+        })?;
+        Ok(())
+    }
+
+    pub fn register_routing_profile(
+        &mut self,
+        profile: RoutingProfile,
+    ) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| {
+            configuration.register_routing_profile(profile)
+        })?;
+        Ok(())
+    }
+
+    pub fn install_context_registry(
+        &mut self,
+        context: ContextRegistry,
+    ) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| {
+            configuration.install_context_registry(context);
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    pub fn install_skill_registry(&mut self, skills: SkillRegistry) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| {
+            configuration.install_skill_registry(skills);
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    pub fn skill_descriptors(&self) -> Result<Vec<SkillDescriptor>, ConductorError> {
+        Ok(self.current_configuration()?.skill_descriptors())
+    }
+
+    pub fn has_model_invocable_skills(&self) -> Result<bool, ConductorError> {
+        Ok(self.current_configuration()?.has_model_invocable_skills())
+    }
+
+    pub fn has_skills(&self) -> Result<bool, ConductorError> {
+        Ok(self.current_configuration()?.has_skills())
+    }
+
+    pub(crate) fn has_model_invocable_skills_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<bool, ConductorError> {
+        Ok(self
+            .configuration_for_execution(execution_id)?
+            .has_model_invocable_skills())
+    }
+
+    pub(crate) fn has_skills_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<bool, ConductorError> {
+        Ok(self.configuration_for_execution(execution_id)?.has_skills())
+    }
 
     pub fn load_skill(
         &mut self,
         execution_id: &ExecutionId,
         id: &SkillId,
     ) -> Result<String, ConductorError> {
-        let payload = self.skills.model_skill_payload(id)?;
+        let payload = self
+            .configuration_for_execution(execution_id)?
+            .skills
+            .model_skill_payload(id)?;
         self.skill_activations
             .entry(execution_id.clone())
             .or_default()
@@ -491,17 +794,31 @@ impl ConductorRuntime {
         {
             return Err(ContextError::InactiveSkill(id.clone()).into());
         }
-        Ok(self.skills.skill_resource_payload(id, path)?)
+        Ok(self
+            .configuration_for_execution(execution_id)?
+            .skills
+            .skill_resource_payload(id, path)?)
     }
 
-    #[must_use]
-    pub fn callable_descriptors(&self) -> Vec<CallableDescriptor> {
-        self.callables.descriptors()
+    pub fn callable_descriptors(&self) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        Ok(self.current_configuration()?.callable_descriptors())
     }
 
-    #[must_use]
-    pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
-        self.callables.tool_descriptors()
+    pub fn tool_descriptors(&self) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        Ok(self.current_configuration()?.tool_descriptors())
+    }
+
+    pub fn routing_profiles(&self) -> Result<Vec<RoutingProfileDescriptor>, ConductorError> {
+        Ok(self.current_configuration()?.routing_profiles())
+    }
+
+    pub(crate) fn callable_descriptors_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<CallableDescriptor>, ConductorError> {
+        Ok(self
+            .configuration_for_execution(execution_id)?
+            .callable_descriptors())
     }
 
     fn permitted_tool_descriptors(
@@ -510,6 +827,7 @@ impl ConductorRuntime {
     ) -> Result<Vec<CallableDescriptor>, ConductorError> {
         let authority = self.execution_authority(execution_id)?;
         Ok(self
+            .configuration_for_execution(execution_id)?
             .callables
             .tool_descriptors()
             .into_iter()
@@ -641,15 +959,30 @@ impl ConductorRuntime {
         &self,
         execution: &ExecutionSummary,
     ) -> Result<ExecutionAuthority, ConductorError> {
+        let revision = if let Some(parent_id) = execution.parent_execution.as_ref() {
+            self.executions
+                .get(parent_id)
+                .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?
+                .config_revision
+                .clone()
+        } else {
+            self.sessions
+                .get(&execution.session_id)
+                .ok_or_else(|| ConductorError::UnknownSession(execution.session_id.clone()))?
+                .summary
+                .config_revision
+                .clone()
+        };
+        let callables = &self.configuration_revision(&revision)?.callables;
         match execution.kind {
             ExecutionKind::Root => {
                 let mut authority = authority_envelope(
-                    self.callables
+                    callables
                         .agent_definitions()
                         .map(|definition| &definition.authority),
                 );
                 authority.callables.extend(
-                    self.callables
+                    callables
                         .descriptors()
                         .into_iter()
                         .filter(|descriptor| {
@@ -666,24 +999,24 @@ impl ConductorRuntime {
                 let Some(callable) = execution.callable.as_ref() else {
                     return Ok(ExecutionAuthority::read_only());
                 };
-                Ok(self.callables.agent_definition(callable)?.authority.clone())
+                Ok(callables.agent_definition(callable)?.authority.clone())
             }
             ExecutionKind::Orchestration => {
                 let Some(callable) = execution.callable.as_ref() else {
                     return Ok(ExecutionAuthority::read_only());
                 };
-                let definition = self.callables.orchestration(callable)?;
+                let definition = callables.orchestration(callable)?;
                 let mut authorities = definition
                     .nodes
                     .iter()
                     .map(|node| {
-                        self.callables
+                        callables
                             .agent_definition(&node.callable)
                             .map(|definition| &definition.authority)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 if let Some(interface_agent) = definition.interface_agent.as_ref() {
-                    authorities.push(&self.callables.agent_definition(interface_agent)?.authority);
+                    authorities.push(&callables.agent_definition(interface_agent)?.authority);
                 }
                 let mut authority = authority_envelope(authorities);
                 authority
@@ -703,6 +1036,18 @@ impl ConductorRuntime {
         name: Option<String>,
         target: ExecutionTarget,
     ) -> Result<SessionSummary, ConductorError> {
+        let revision = self.config_revision.clone();
+        self.create_session_at_revision(parent_session, name, target, revision)
+    }
+
+    fn create_session_at_revision(
+        &mut self,
+        parent_session: Option<SessionId>,
+        name: Option<String>,
+        target: ExecutionTarget,
+        revision: ConfigRevisionId,
+    ) -> Result<SessionSummary, ConductorError> {
+        self.configuration_revision(&revision)?;
         let workspace_id = if let Some(parent) = parent_session.as_ref() {
             self.sessions
                 .get(parent)
@@ -718,7 +1063,7 @@ impl ConductorRuntime {
             parent_session,
             name,
             workspace_id,
-            config_revision: self.config_revision.clone(),
+            config_revision: revision,
             default_target: target,
             state: SessionState::Active,
         };
@@ -739,7 +1084,31 @@ impl ConductorRuntime {
             .ok_or_else(|| ConductorError::UnknownSession(source.clone()))?
             .summary
             .clone();
-        self.create_session(Some(source.id), name, source.default_target)
+        self.create_session_at_revision(
+            Some(source.id),
+            name,
+            source.default_target,
+            source.config_revision,
+        )
+    }
+
+    pub fn rebase_session(
+        &mut self,
+        session_id: &SessionId,
+        revision: &ConfigRevisionId,
+    ) -> Result<SessionSummary, ConductorError> {
+        self.ensure_session_active(session_id)?;
+        self.configuration_revision(revision)?;
+        self.record_domain_event(DomainEvent::SessionConfigRebased {
+            session_id: session_id.clone(),
+            config_revision: revision.clone(),
+        })?;
+        Ok(self
+            .sessions
+            .get(session_id)
+            .expect("rebased session remains present")
+            .summary
+            .clone())
     }
 
     pub fn validate_session_close(
@@ -843,7 +1212,11 @@ impl ConductorRuntime {
         objective: impl Into<String>,
         orchestration_node: Option<OrchestrationNodeId>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let descriptor = self.callables.descriptor(callable)?.clone();
+        let callables = self
+            .configuration_for_execution(parent_id)?
+            .callables
+            .clone();
+        let descriptor = callables.descriptor(callable)?.clone();
         if descriptor.kind != CallableKind::Agent {
             return Err(CallableRegistryError::WrongKind {
                 callable: callable.clone(),
@@ -852,7 +1225,7 @@ impl ConductorRuntime {
             }
             .into());
         }
-        self.callables.execution_provider(callable)?;
+        callables.execution_provider(callable)?;
         let operation = if orchestration_node.is_some() {
             CallableOperation::StartAgentNode
         } else {
@@ -883,20 +1256,24 @@ impl ConductorRuntime {
         callable: &CallableId,
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let definition = self.callables.orchestration(callable)?.clone();
+        let callables = self
+            .configuration_for_execution(parent_id)?
+            .callables
+            .clone();
+        let definition = callables.orchestration(callable)?.clone();
         self.check_callable_policy(
             parent_id,
             &definition.descriptor,
             CallableOperation::StartOrchestration,
         )?;
         for step in &definition.nodes {
-            let descriptor = self.callables.descriptor(&step.callable)?.clone();
-            self.callables.execution_provider(&step.callable)?;
+            let descriptor = callables.descriptor(&step.callable)?.clone();
+            callables.execution_provider(&step.callable)?;
             self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgentNode)?;
         }
         if let Some(interface_agent) = definition.interface_agent.as_ref() {
-            let descriptor = self.callables.descriptor(interface_agent)?.clone();
-            self.callables.execution_provider(interface_agent)?;
+            let descriptor = callables.descriptor(interface_agent)?.clone();
+            callables.execution_provider(interface_agent)?;
             self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgentNode)?;
         }
         let summary = self.create_child(
@@ -972,11 +1349,12 @@ impl ConductorRuntime {
             .executions
             .get(execution_id)
             .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let configuration = self.configuration_revision(&execution.config_revision)?;
         match execution.summary.callable.as_ref() {
             None if execution.summary.kind == ExecutionKind::Root => {
                 Ok(ExecutionProviderKind::Model)
             }
-            Some(callable) => Ok(self.callables.execution_provider(callable)?.kind()),
+            Some(callable) => Ok(configuration.callables.execution_provider(callable)?.kind()),
             None => Err(ConductorError::NonProviderExecution(execution_id.clone())),
         }
     }
@@ -1002,20 +1380,22 @@ impl ConductorRuntime {
             return Err(ConductorError::NonModelExecution(execution_id.clone()));
         }
 
+        let configuration = self.configuration_for_execution(execution_id)?.clone();
+        let execution_revision = self.execution_config_revision(execution_id)?;
         let route = if let Some(route) = self.resolved_routes.get(execution_id) {
             route.clone()
         } else {
             let requested_target = summary.target.clone();
             let model = match &requested_target {
                 ExecutionTarget::Fixed(model) => model.clone(),
-                ExecutionTarget::Routed(profile) => {
-                    self.routing.resolve(profile, summary.callable.as_ref())?
-                }
+                ExecutionTarget::Routed(profile) => configuration
+                    .routing
+                    .resolve(profile, summary.callable.as_ref())?,
             };
             let route = ResolvedRoute {
                 requested_target,
                 model,
-                config_revision: self.config_revision.clone(),
+                config_revision: execution_revision,
             };
             self.record_domain_event(DomainEvent::InvocationResolved {
                 execution_id: execution_id.clone(),
@@ -1024,9 +1404,9 @@ impl ConductorRuntime {
             route
         };
 
-        let (prompt, explicit_skills) = self
+        let (prompt, explicit_skills) = configuration
             .context
-            .compose_prompt_with_activations(&self.skills, &input)?;
+            .compose_prompt_with_activations(&configuration.skills, &input)?;
         if !explicit_skills.is_empty() {
             self.skill_activations
                 .entry(execution_id.clone())
@@ -1121,8 +1501,12 @@ impl ConductorRuntime {
             .callable
             .clone()
             .ok_or_else(|| ConductorError::NonProviderExecution(execution_id.clone()))?;
-        let descriptor = self.callables.descriptor(&callable)?.clone();
-        let binding = self.callables.execution_provider(&callable)?.clone();
+        let configuration = self.configuration_for_execution(execution_id)?.clone();
+        let descriptor = configuration.callables.descriptor(&callable)?.clone();
+        let binding = configuration
+            .callables
+            .execution_provider(&callable)?
+            .clone();
         let Some(provider) = binding.provider().cloned() else {
             return Err(ConductorError::NonProviderExecution(execution_id.clone()));
         };
@@ -1131,13 +1515,7 @@ impl ConductorRuntime {
             &descriptor,
             CallableOperation::DispatchProvider,
         )?;
-        let config_revision = self
-            .sessions
-            .get(&summary.session_id)
-            .expect("execution session invariant")
-            .summary
-            .config_revision
-            .clone();
+        let config_revision = self.execution_config_revision(execution_id)?;
         let request = ExecutionProviderRequest {
             execution_id: execution_id.clone(),
             session_id: summary.session_id,
@@ -1363,14 +1741,10 @@ impl ConductorRuntime {
             .executions
             .get(execution_id)
             .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-        let session = self
-            .sessions
-            .get(&execution.summary.session_id)
-            .expect("execution session invariant");
         let context = InvocationPolicyContext {
             session_id: &execution.summary.session_id,
             execution_id,
-            config_revision: &session.summary.config_revision,
+            config_revision: &execution.config_revision,
             subject: InvocationSubject::Callable {
                 descriptor,
                 operation,
@@ -1407,8 +1781,13 @@ impl ConductorRuntime {
         allowed_tools: &BTreeSet<CallableId>,
         invocation: ToolInvocation,
     ) -> Result<ToolResult, BackendError> {
+        let callables = self
+            .configuration_for_execution(execution_id)
+            .map_err(conductor_protocol_error)?
+            .callables
+            .clone();
         if !allowed_tools.contains(&invocation.callable)
-            || !self.callables.contains(&invocation.callable)
+            || !callables.contains(&invocation.callable)
         {
             return Err(BackendError::Protocol(format!(
                 "backend invoked unprovisioned tool {}",
@@ -1433,8 +1812,7 @@ impl ConductorRuntime {
         )
         .map_err(conductor_protocol_error)?;
 
-        let descriptor = self
-            .callables
+        let descriptor = callables
             .descriptor(&invocation.callable)
             .map_err(|error| BackendError::Protocol(error.to_string()))?
             .clone();
@@ -1450,8 +1828,7 @@ impl ConductorRuntime {
                             .execution_authority(execution_id)
                             .map_err(conductor_protocol_error)?,
                     };
-                    let outcome = self
-                        .callables
+                    let outcome = callables
                         .invoke_tool(&context, &invocation.callable, &invocation.arguments_json)
                         .map_err(|error| BackendError::Protocol(error.to_string()))?;
                     if outcome.success {
@@ -1495,6 +1872,11 @@ impl ConductorRuntime {
         } else {
             Ok(())
         }
+    }
+
+    fn new_config_revision_id(&self) -> ConfigRevisionId {
+        ConfigRevisionId::parse(format!("config-{}", self.next_config_revision + 1))
+            .expect("generated config revision id")
     }
 
     fn new_session_id(&self) -> SessionId {

@@ -168,9 +168,17 @@ fn journal_replay_restart_continues_protocol_with_monotonic_ids_and_events() {
     let before_restart = before.snapshot.clone();
     let session_id = before_restart.sessions[0].id.clone();
     let cursor = before_restart.last_event_sequence;
+    let revision = before.journal.config_revision.clone();
+    let configuration = ConductorRuntime::new()
+        .current_compiled_configuration()
+        .unwrap();
     let persisted = serde_json::to_vec(&before.journal).unwrap();
-    let restored = ConductorRuntime::restore(serde_json::from_slice(&persisted).unwrap()).unwrap();
+    let mut restored =
+        ConductorRuntime::restore(serde_json::from_slice(&persisted).unwrap()).unwrap();
     assert_eq!(restored.snapshot(), before_restart);
+    restored
+        .bind_configuration_revision(&revision, configuration)
+        .unwrap();
 
     let after = ProtocolHarness::model(MockModelScript::reply("after restart complete"))
         .runtime(restored)

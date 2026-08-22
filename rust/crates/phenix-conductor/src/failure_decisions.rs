@@ -75,6 +75,7 @@ impl ConductorRuntime {
         }
         let orchestration_callable = parent.summary.callable.as_ref().ok_or_else(&invalid)?;
         let definition = self
+            .configuration_for_execution(&parent_id)?
             .callables
             .orchestration(orchestration_callable)?
             .clone();
@@ -305,7 +306,11 @@ Retry context JSON:
         callable: &CallableId,
         objective: String,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let descriptor = self.callables.descriptor(callable)?.clone();
+        let callables = self
+            .configuration_for_execution(parent_id)?
+            .callables
+            .clone();
+        let descriptor = callables.descriptor(callable)?.clone();
         if descriptor.kind != CallableKind::Agent {
             return Err(crate::CallableRegistryError::WrongKind {
                 callable: callable.clone(),
@@ -314,7 +319,7 @@ Retry context JSON:
             }
             .into());
         }
-        self.callables.execution_provider(callable)?;
+        callables.execution_provider(callable)?;
         self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgentNode)?;
         let parent = self
             .executions
@@ -456,7 +461,11 @@ Failure context JSON:
             .callable
             .as_ref()
             .expect("orchestration execution has callable");
-        let definition = self.callables.orchestration(callable)?.clone();
+        let definition = self
+            .configuration_for_execution(execution_id)?
+            .callables
+            .orchestration(callable)?
+            .clone();
         let interface_ids = self
             .orchestration_interfaces
             .iter()
@@ -573,7 +582,11 @@ Failure context JSON:
         if state != ExecutionState::Running {
             return Ok(());
         }
-        let definition = self.callables.orchestration(&callable)?.clone();
+        let definition = self
+            .configuration_for_execution(execution_id)?
+            .callables
+            .orchestration(&callable)?
+            .clone();
         let node_states = self.orchestration_node_states(execution_id)?;
         let ready = definition
             .nodes
