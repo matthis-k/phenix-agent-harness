@@ -2,10 +2,10 @@ use crate::{
     ConfigRevisionFingerprint, ConfigRevisionSlot, ExecutionPayload, ExecutionRecord, SessionRecord,
 };
 use phenix_core::{
-    AttemptGroup, AttemptGroupId, ConfigRevisionId, ExecutionAuthority, ExecutionEvent,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet, ExecutionState,
-    ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation, FileVersion,
-    FilesystemAuthority, ModelTarget, OrchestrationFailureDecision,
+    AttemptGroup, AttemptGroupId, ConfigRevisionId, DiagnosticWritePatch, ExecutionAuthority,
+    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
+    ExecutionState, ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation,
+    FileVersion, FilesystemAuthority, ModelTarget, OrchestrationFailureDecision,
     OrchestrationFailureDecisionRecord, OrchestrationNodeId, SessionId, SessionState,
     SessionSummary, ToolCallId, WorkspaceId,
 };
@@ -15,7 +15,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
-pub const JOURNAL_FORMAT_VERSION: u64 = 2;
+pub const JOURNAL_FORMAT_VERSION: u64 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -25,9 +25,8 @@ pub enum JournalExecutionPayload {
         #[serde(default)]
         authority: ExecutionAuthority,
     },
-    #[serde(alias = "workflow")]
     Orchestration {
-        objective: String,
+        input: serde_json::Value,
         #[serde(default)]
         authority: ExecutionAuthority,
     },
@@ -60,8 +59,8 @@ impl From<&ExecutionPayload> for JournalExecutionPayload {
                 input: input.clone(),
                 authority: ExecutionAuthority::read_only(),
             },
-            ExecutionPayload::Orchestration { objective } => Self::Orchestration {
-                objective: objective.clone(),
+            ExecutionPayload::Orchestration { input } => Self::Orchestration {
+                input: input.clone(),
                 authority: ExecutionAuthority::read_only(),
             },
         }
@@ -72,9 +71,7 @@ impl From<JournalExecutionPayload> for ExecutionPayload {
     fn from(value: JournalExecutionPayload) -> Self {
         match value {
             JournalExecutionPayload::Invocation { input, .. } => Self::Invocation { input },
-            JournalExecutionPayload::Orchestration { objective, .. } => {
-                Self::Orchestration { objective }
-            }
+            JournalExecutionPayload::Orchestration { input, .. } => Self::Orchestration { input },
         }
     }
 }
@@ -115,6 +112,11 @@ pub enum DomainEvent {
         execution: ExecutionSummary,
         payload: JournalExecutionPayload,
     },
+    RootSubmissionAccepted {
+        session_id: SessionId,
+        execution_id: ExecutionId,
+        ingress_order: u64,
+    },
     ExecutionStateChanged {
         execution_id: ExecutionId,
         state: ExecutionState,
@@ -142,6 +144,22 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         node_id: OrchestrationNodeId,
         child_execution_id: ExecutionId,
+    },
+    OrchestrationNodeInputBound {
+        execution_id: ExecutionId,
+        node_id: OrchestrationNodeId,
+        input: serde_json::Value,
+    },
+    OrchestrationSynthesisStarted {
+        execution_id: ExecutionId,
+        interface_execution_id: ExecutionId,
+    },
+    ExecutionOutputRecorded {
+        execution_id: ExecutionId,
+        output: serde_json::Value,
+    },
+    DiagnosticWritePatchCaptured {
+        patch: DiagnosticWritePatch,
     },
     InvocationResolved {
         execution_id: ExecutionId,
@@ -241,10 +259,17 @@ pub(crate) struct DurableProjection<'a> {
     pub current_config_revision: &'a mut ConfigRevisionId,
     pub sessions: &'a mut BTreeMap<SessionId, SessionRecord>,
     pub executions: &'a mut BTreeMap<ExecutionId, ExecutionRecord>,
+    pub root_ingress: &'a mut BTreeMap<ExecutionId, u64>,
+    pub next_root_ingress: &'a mut BTreeMap<SessionId, u64>,
     pub attempt_groups: &'a mut BTreeMap<AttemptGroupId, AttemptGroup>,
     pub orchestration_decisions: &'a mut BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
     pub orchestration_interfaces: &'a mut BTreeMap<ExecutionId, ExecutionId>,
     pub orchestration_nodes: &'a mut BTreeMap<ExecutionId, OrchestrationNodeId>,
+    pub orchestration_node_inputs:
+        &'a mut BTreeMap<(ExecutionId, OrchestrationNodeId), serde_json::Value>,
+    pub orchestration_synthesis: &'a mut BTreeMap<ExecutionId, ExecutionId>,
+    pub execution_outputs: &'a mut BTreeMap<ExecutionId, serde_json::Value>,
+    pub diagnostic_write_patches: &'a mut Vec<DiagnosticWritePatch>,
     pub resolved_routes: &'a mut BTreeMap<ExecutionId, ResolvedRoute>,
     pub read_sets: &'a mut BTreeMap<ExecutionId, ExecutionReadSet>,
     pub events: &'a mut Vec<ExecutionEvent>,
@@ -565,6 +590,48 @@ pub(crate) fn apply_domain_event(
                 }
             }
             *state.next_execution += 1;
+        }
+        DomainEvent::RootSubmissionAccepted {
+            session_id,
+            execution_id,
+            ingress_order,
+        } => {
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "root ingress references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.session_id != *session_id
+                || execution.summary.parent_execution.is_some()
+                || execution.summary.state != ExecutionState::Pending
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "root ingress does not match pending root execution {execution_id}"
+                )));
+            }
+            let expected = state
+                .next_root_ingress
+                .get(session_id)
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(1);
+            if *ingress_order != expected {
+                return Err(JournalError::InvalidEvent(format!(
+                    "session {session_id} ingress order expected {expected}, found {ingress_order}"
+                )));
+            }
+            if state
+                .root_ingress
+                .insert(execution_id.clone(), *ingress_order)
+                .is_some()
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "root execution {execution_id} was accepted more than once"
+                )));
+            }
+            state
+                .next_root_ingress
+                .insert(session_id.clone(), *ingress_order);
         }
         DomainEvent::ExecutionStateChanged {
             execution_id,
@@ -982,6 +1049,105 @@ pub(crate) fn apply_domain_event(
                 }
             }
         }
+        DomainEvent::OrchestrationNodeInputBound {
+            execution_id,
+            node_id,
+            input,
+        } => {
+            let child_exists = state
+                .orchestration_nodes
+                .iter()
+                .any(|(child_id, bound_node)| {
+                    bound_node == node_id
+                        && state
+                            .executions
+                            .get(child_id)
+                            .and_then(|execution| execution.summary.parent_execution.as_ref())
+                            == Some(execution_id)
+                });
+            if !child_exists {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration {execution_id} input binding references unstarted node {node_id}"
+                )));
+            }
+            if state
+                .orchestration_node_inputs
+                .insert((execution_id.clone(), node_id.clone()), input.clone())
+                .is_some()
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration {execution_id} node {node_id} input was bound more than once"
+                )));
+            }
+        }
+        DomainEvent::OrchestrationSynthesisStarted {
+            execution_id,
+            interface_execution_id,
+        } => {
+            let orchestration = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "synthesis references unknown orchestration {execution_id}"
+                ))
+            })?;
+            let interface = state
+                .executions
+                .get(interface_execution_id)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "synthesis references unknown interface execution {interface_execution_id}"
+                    ))
+                })?;
+            if orchestration.summary.kind != ExecutionKind::Orchestration
+                || interface.summary.parent_execution.as_ref() != Some(execution_id)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "invalid synthesis binding {execution_id} -> {interface_execution_id}"
+                )));
+            }
+            if state
+                .orchestration_synthesis
+                .insert(execution_id.clone(), interface_execution_id.clone())
+                .is_some()
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "orchestration {execution_id} started synthesis more than once"
+                )));
+            }
+        }
+        DomainEvent::ExecutionOutputRecorded {
+            execution_id,
+            output,
+        } => {
+            if !state.executions.contains_key(execution_id) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "output references unknown execution {execution_id}"
+                )));
+            }
+            if state
+                .execution_outputs
+                .insert(execution_id.clone(), output.clone())
+                .is_some()
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "execution {execution_id} output was recorded more than once"
+                )));
+            }
+        }
+        DomainEvent::DiagnosticWritePatchCaptured { patch } => {
+            let execution = state.executions.get(&patch.execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "diagnostic patch references unknown execution {}",
+                    patch.execution_id
+                ))
+            })?;
+            if execution.authority.filesystem != FilesystemAuthority::ReadOnly {
+                return Err(JournalError::InvalidEvent(format!(
+                    "diagnostic patch references writable execution {}",
+                    patch.execution_id
+                )));
+            }
+            state.diagnostic_write_patches.push(patch.clone());
+        }
         DomainEvent::InvocationResolved {
             execution_id,
             route,
@@ -1135,18 +1301,18 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn legacy_workflow_payload_tag_decodes_but_current_journals_emit_orchestration() {
+    fn orchestration_payload_serializes_typed_input() {
         let payload: JournalExecutionPayload = serde_json::from_value(json!({
-            "kind": "workflow",
-            "objective": "legacy"
+            "kind": "orchestration",
+            "input": {"goal": "implement"}
         }))
         .unwrap();
         assert!(matches!(
             payload,
             JournalExecutionPayload::Orchestration {
-                ref objective,
+                ref input,
                 ..
-            } if objective == "legacy"
+            } if input == &json!({"goal": "implement"})
         ));
         assert_eq!(payload.authority(), &ExecutionAuthority::read_only());
         assert_eq!(

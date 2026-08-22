@@ -10,6 +10,7 @@ mod journal;
 mod persistence;
 mod policy;
 mod routing;
+mod sandbox;
 mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
@@ -22,13 +23,13 @@ pub use failure_decisions::OrchestrationFailureDecisionRequest;
 pub use journal::{
     DomainEvent, JournalEntry, JournalError, JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
-pub use persistence::{JsonFileStore, PersistenceError};
+pub use persistence::{PersistenceError, SqliteStore};
 pub use policy::{
     CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
     InvocationPolicyContext, InvocationSubject, PolicyDenial,
 };
 pub use routing::{RoutingRegistry, RoutingRegistryError};
-pub use server::{ConductorServer, ServerError};
+pub use server::{ConductorServer, ConductorService, ServerError};
 
 use journal::{apply_domain_event, DurableProjection};
 use phenix_backend::{
@@ -37,12 +38,14 @@ use phenix_backend::{
 };
 use phenix_core::{
     AgentDefinition, AttemptGroup, AttemptGroupId, CallableDescriptor, CallableId, CallableKind,
-    ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
-    ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
-    ExecutionTerminationCause, ExecutionWorkspaceValidity, FileObservation, FileVersion,
-    ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
-    RoutingProfile, RoutingProfileDescriptor, SessionId, SessionState, SessionSummary,
-    SkillDescriptor, SkillId, ToolCallId, WorkspaceId, WorkspaceLeaseRequest,
+    ConfigRevisionId, DebugConversationMessage, DebugConversationRole, DebugOrchestration,
+    DebugResolvedRoute, DebugWorkspaceCheckpoint, DiagnosticWritePatch, ExecutionAuthority,
+    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
+    ExecutionState, ExecutionSummary, ExecutionTarget, ExecutionTerminationCause,
+    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
+    OrchestrationFailureDecisionRecord, OrchestrationNodeId, RoutingProfile,
+    RoutingProfileDescriptor, SessionDebugBundle, SessionId, SessionState, SessionSummary,
+    SkillDescriptor, SkillId, ToolCallId, WorkspaceDescriptor, WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde::{Deserialize, Serialize};
@@ -53,7 +56,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct ConfigRevisionFingerprint(String);
 
 impl Display for ConfigRevisionFingerprint {
@@ -73,6 +76,11 @@ pub enum ConductorError {
         expected: ConfigRevisionFingerprint,
         actual: ConfigRevisionFingerprint,
     },
+    IncompatibleSessionRebase {
+        session_id: SessionId,
+        revision: ConfigRevisionId,
+        reason: String,
+    },
     ClosedSession(SessionId),
     SessionHasActiveExecutions(SessionId),
     UnknownExecution(ExecutionId),
@@ -81,6 +89,10 @@ pub enum ConductorError {
         actual: WorkspaceId,
     },
     EmptyInput,
+    InvalidExecutionData {
+        execution_id: ExecutionId,
+        message: String,
+    },
     InvalidLifecycle(ExecutionId),
     InvalidFailureDecision {
         parent_execution: ExecutionId,
@@ -123,6 +135,14 @@ impl Display for ConductorError {
                 f,
                 "configuration revision fingerprint mismatch for {revision}: expected {expected}, found {actual}"
             ),
+            Self::IncompatibleSessionRebase {
+                session_id,
+                revision,
+                reason,
+            } => write!(
+                f,
+                "session {session_id} cannot rebase to configuration revision {revision}: {reason}"
+            ),
             Self::ClosedSession(id) => write!(f, "session is closed: {id}"),
             Self::SessionHasActiveExecutions(id) => {
                 write!(f, "session has active executions and cannot close: {id}")
@@ -133,6 +153,10 @@ impl Display for ConductorError {
                 "workspace binding mismatch: persisted {expected}, discovered {actual}"
             ),
             Self::EmptyInput => f.write_str("input must not be empty"),
+            Self::InvalidExecutionData {
+                execution_id,
+                message,
+            } => write!(f, "execution {execution_id} has invalid typed data: {message}"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
             Self::InvalidFailureDecision {
                 parent_execution,
@@ -218,7 +242,7 @@ struct SessionRecord {
 #[derive(Clone, Debug)]
 enum ExecutionPayload {
     Invocation { input: String },
-    Orchestration { objective: String },
+    Orchestration { input: Value },
 }
 
 #[derive(Clone, Debug)]
@@ -413,17 +437,25 @@ pub struct ConductorRuntime {
     workspace_id: WorkspaceId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
+    root_ingress: BTreeMap<ExecutionId, u64>,
+    next_root_ingress: BTreeMap<SessionId, u64>,
     attempt_groups: BTreeMap<AttemptGroupId, AttemptGroup>,
     orchestration_decisions: BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
     orchestration_interfaces: BTreeMap<ExecutionId, ExecutionId>,
     orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
+    orchestration_node_inputs: BTreeMap<(ExecutionId, OrchestrationNodeId), Value>,
+    orchestration_synthesis: BTreeMap<ExecutionId, ExecutionId>,
+    execution_outputs: BTreeMap<ExecutionId, Value>,
+    diagnostic_write_patches: Vec<DiagnosticWritePatch>,
     resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
     read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
     events: Vec<ExecutionEvent>,
     journal: RuntimeJournal,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
+    sandbox_states: BTreeMap<ExecutionId, std::sync::Arc<sandbox::ExecutionSandboxState>>,
     policy: InvocationPolicy,
-    event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
+    event_sinks: BTreeMap<u64, std::sync::mpsc::Sender<ExecutionEvent>>,
+    next_event_subscription: u64,
     next_config_revision: u64,
     next_session: u64,
     next_execution: u64,
@@ -459,16 +491,24 @@ impl ConductorRuntime {
             workspace_id,
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
+            root_ingress: BTreeMap::new(),
+            next_root_ingress: BTreeMap::new(),
             attempt_groups: BTreeMap::new(),
             orchestration_decisions: BTreeMap::new(),
             orchestration_interfaces: BTreeMap::new(),
             orchestration_nodes: BTreeMap::new(),
+            orchestration_node_inputs: BTreeMap::new(),
+            orchestration_synthesis: BTreeMap::new(),
+            execution_outputs: BTreeMap::new(),
+            diagnostic_write_patches: Vec::new(),
             resolved_routes: BTreeMap::new(),
             read_sets: BTreeMap::new(),
             events: Vec::new(),
             skill_activations: BTreeMap::new(),
+            sandbox_states: BTreeMap::new(),
             policy: InvocationPolicy::new(),
-            event_sink: None,
+            event_sinks: BTreeMap::new(),
+            next_event_subscription: 0,
             next_config_revision: 1,
             next_session: 0,
             next_execution: 0,
@@ -493,10 +533,7 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    fn record_domain_event(&mut self, mut event: DomainEvent) -> Result<(), ConductorError> {
-        if let DomainEvent::ExecutionCreated { execution, payload } = &mut event {
-            payload.set_authority(self.effective_authority_for_execution(execution)?);
-        }
+    fn record_domain_event(&mut self, event: DomainEvent) -> Result<(), ConductorError> {
         let frontend_event = match &event {
             DomainEvent::FrontendEvent { event } => Some(event.clone()),
             _ => None,
@@ -514,10 +551,16 @@ impl ConductorRuntime {
                 current_config_revision: &mut self.config_revision,
                 sessions: &mut self.sessions,
                 executions: &mut self.executions,
+                root_ingress: &mut self.root_ingress,
+                next_root_ingress: &mut self.next_root_ingress,
                 attempt_groups: &mut self.attempt_groups,
                 orchestration_decisions: &mut self.orchestration_decisions,
                 orchestration_interfaces: &mut self.orchestration_interfaces,
                 orchestration_nodes: &mut self.orchestration_nodes,
+                orchestration_node_inputs: &mut self.orchestration_node_inputs,
+                orchestration_synthesis: &mut self.orchestration_synthesis,
+                execution_outputs: &mut self.execution_outputs,
+                diagnostic_write_patches: &mut self.diagnostic_write_patches,
                 resolved_routes: &mut self.resolved_routes,
                 read_sets: &mut self.read_sets,
                 events: &mut self.events,
@@ -535,15 +578,24 @@ impl ConductorRuntime {
             return Err(error.into());
         }
         if let Some(event) = frontend_event {
-            if self
-                .event_sink
-                .as_ref()
-                .is_some_and(|sink| sink.send(event).is_err())
-            {
-                self.event_sink = None;
-            }
+            self.event_sinks
+                .retain(|_, sink| sink.send(event.clone()).is_ok());
         }
         Ok(())
+    }
+
+    fn record_execution_created(
+        &mut self,
+        execution: ExecutionSummary,
+        mut payload: JournalExecutionPayload,
+        restrictions: Option<&ExecutionAuthority>,
+    ) -> Result<(), ConductorError> {
+        let configured = self.effective_authority_for_execution(&execution)?;
+        let effective = restrictions.map_or(configured.clone(), |requested| {
+            configured.attenuate(requested)
+        });
+        payload.set_authority(effective);
+        self.record_domain_event(DomainEvent::ExecutionCreated { execution, payload })
     }
 
     pub fn register_invocation_guard<G>(&mut self, guard: G)
@@ -634,6 +686,74 @@ impl ConductorRuntime {
             });
         }
         slot.configuration = Some(configuration);
+        Ok(())
+    }
+
+    pub fn bind_available_configurations(
+        &mut self,
+        configurations: &[CompiledConfiguration],
+    ) -> Result<Vec<ConfigRevisionId>, ConductorError> {
+        let available = configurations
+            .iter()
+            .map(|configuration| (configuration.fingerprint(), configuration))
+            .collect::<BTreeMap<_, _>>();
+        let bindings = self
+            .config_revisions
+            .iter()
+            .filter(|(_, slot)| slot.configuration.is_none())
+            .filter_map(|(revision, slot)| {
+                available
+                    .get(&slot.fingerprint)
+                    .map(|configuration| (revision.clone(), (*configuration).clone()))
+            })
+            .collect::<Vec<_>>();
+        let mut bound = Vec::with_capacity(bindings.len());
+        for (revision, configuration) in bindings {
+            self.bind_configuration_revision(&revision, configuration)?;
+            bound.push(revision);
+        }
+        Ok(bound)
+    }
+
+    pub fn activate_configuration(
+        &mut self,
+        configuration: CompiledConfiguration,
+    ) -> Result<ConfigRevisionId, ConductorError> {
+        let fingerprint = configuration.fingerprint();
+        let current = self
+            .config_revisions
+            .get(&self.config_revision)
+            .expect("current configuration revision exists");
+        if current.fingerprint == fingerprint {
+            let revision = self.config_revision.clone();
+            if current.configuration.is_none() {
+                self.bind_configuration_revision(&revision, configuration)?;
+            }
+            return Ok(revision);
+        }
+        self.reload_configuration(configuration)
+    }
+
+    #[must_use]
+    pub fn required_config_revisions(&self) -> BTreeSet<ConfigRevisionId> {
+        let mut revisions = BTreeSet::from([self.config_revision.clone()]);
+        revisions.extend(
+            self.sessions
+                .values()
+                .map(|session| session.summary.config_revision.clone()),
+        );
+        revisions.extend(
+            self.executions
+                .values()
+                .map(|execution| execution.config_revision.clone()),
+        );
+        revisions
+    }
+
+    pub fn ensure_required_configurations_bound(&self) -> Result<(), ConductorError> {
+        for revision in self.required_config_revisions() {
+            self.configuration_revision(&revision)?;
+        }
         Ok(())
     }
 
@@ -1098,7 +1218,25 @@ impl ConductorRuntime {
         revision: &ConfigRevisionId,
     ) -> Result<SessionSummary, ConductorError> {
         self.ensure_session_active(session_id)?;
-        self.configuration_revision(revision)?;
+        let session = self
+            .sessions
+            .get(session_id)
+            .expect("active session exists")
+            .summary
+            .clone();
+        if session.config_revision == *revision {
+            return Ok(session);
+        }
+        let configuration = self.configuration_revision(revision)?;
+        if let ExecutionTarget::Routed(profile) = &session.default_target {
+            if !configuration.routing.contains(profile) {
+                return Err(ConductorError::IncompatibleSessionRebase {
+                    session_id: session_id.clone(),
+                    revision: revision.clone(),
+                    reason: format!("routing profile {profile} is unavailable"),
+                });
+            }
+        }
         self.record_domain_event(DomainEvent::SessionConfigRebased {
             session_id: session_id.clone(),
             config_revision: revision.clone(),
@@ -1158,6 +1296,15 @@ impl ConductorRuntime {
         session_id: &SessionId,
         text: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
+        self.submit_with_restrictions(session_id, text, None)
+    }
+
+    pub fn submit_with_restrictions(
+        &mut self,
+        session_id: &SessionId,
+        text: impl Into<String>,
+        restrictions: Option<&ExecutionAuthority>,
+    ) -> Result<ExecutionSummary, ConductorError> {
         let text = text.into();
         if text.trim().is_empty() {
             return Err(ConductorError::EmptyInput);
@@ -1179,13 +1326,15 @@ impl ConductorRuntime {
             target,
             state: ExecutionState::Pending,
         };
-        self.record_domain_event(DomainEvent::ExecutionCreated {
-            execution: summary.clone(),
-            payload: JournalExecutionPayload::Invocation {
+        self.record_execution_created(
+            summary.clone(),
+            JournalExecutionPayload::Invocation {
                 input: text.clone(),
                 authority: ExecutionAuthority::read_only(),
             },
-        })?;
+            restrictions,
+        )?;
+        self.accept_root_submission(&summary)?;
         self.push_event(&summary.id, ExecutionEventKind::UserInput { text })?;
         self.push_event(
             &summary.id,
@@ -1196,13 +1345,65 @@ impl ConductorRuntime {
         Ok(summary)
     }
 
+    pub(crate) fn accept_root_submission(
+        &mut self,
+        execution: &ExecutionSummary,
+    ) -> Result<(), ConductorError> {
+        let ingress_order = self
+            .next_root_ingress
+            .get(&execution.session_id)
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.record_domain_event(DomainEvent::RootSubmissionAccepted {
+            session_id: execution.session_id.clone(),
+            execution_id: execution.id.clone(),
+            ingress_order,
+        })
+    }
+
+    #[must_use]
+    pub fn root_ingress_order(&self, execution_id: &ExecutionId) -> Option<u64> {
+        self.root_ingress.get(execution_id).copied()
+    }
+
+    #[must_use]
+    pub fn pending_roots_in_ingress_order(&self) -> Vec<ExecutionSummary> {
+        let mut roots = self
+            .executions
+            .values()
+            .filter(|execution| {
+                execution.summary.parent_execution.is_none()
+                    && execution.summary.state == ExecutionState::Pending
+            })
+            .map(|execution| execution.summary.clone())
+            .collect::<Vec<_>>();
+        roots.sort_by(|left, right| {
+            left.session_id.cmp(&right.session_id).then_with(|| {
+                self.root_ingress_order(&left.id)
+                    .cmp(&self.root_ingress_order(&right.id))
+            })
+        });
+        roots
+    }
+
     pub fn start_agent(
         &mut self,
         parent_id: &ExecutionId,
         callable: &CallableId,
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        self.start_agent_with_node(parent_id, callable, objective, None)
+        self.start_agent_with_node(parent_id, callable, objective, None, None)
+    }
+
+    pub fn start_agent_with_restrictions(
+        &mut self,
+        parent_id: &ExecutionId,
+        callable: &CallableId,
+        objective: impl Into<String>,
+        restrictions: &ExecutionAuthority,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        self.start_agent_with_node(parent_id, callable, objective, None, Some(restrictions))
     }
 
     fn start_agent_with_node(
@@ -1211,6 +1412,7 @@ impl ConductorRuntime {
         callable: &CallableId,
         objective: impl Into<String>,
         orchestration_node: Option<OrchestrationNodeId>,
+        restrictions: Option<&ExecutionAuthority>,
     ) -> Result<ExecutionSummary, ConductorError> {
         let callables = self
             .configuration_for_execution(parent_id)?
@@ -1239,6 +1441,7 @@ impl ConductorRuntime {
             ExecutionPayload::Invocation {
                 input: objective.into(),
             },
+            restrictions,
         )?;
         if let Some(node_id) = orchestration_node {
             self.record_domain_event(DomainEvent::OrchestrationNodeStarted {
@@ -1254,13 +1457,20 @@ impl ConductorRuntime {
         &mut self,
         parent_id: &ExecutionId,
         callable: &CallableId,
-        objective: impl Into<String>,
+        input: impl Into<Value>,
     ) -> Result<ExecutionSummary, ConductorError> {
+        let input = input.into();
         let callables = self
             .configuration_for_execution(parent_id)?
             .callables
             .clone();
         let definition = callables.orchestration(callable)?.clone();
+        validate_json_schema(&definition.descriptor.input_schema, &input).map_err(|message| {
+            ConductorError::InvalidExecutionData {
+                execution_id: parent_id.clone(),
+                message: format!("orchestration input: {message}"),
+            }
+        })?;
         self.check_callable_policy(
             parent_id,
             &definition.descriptor,
@@ -1280,9 +1490,8 @@ impl ConductorRuntime {
             parent_id,
             ExecutionKind::Orchestration,
             callable.clone(),
-            ExecutionPayload::Orchestration {
-                objective: objective.into(),
-            },
+            ExecutionPayload::Orchestration { input },
+            None,
         )?;
         self.set_state(&summary.id, ExecutionState::Running)?;
         self.advance_orchestration(&summary.id)?;
@@ -1300,6 +1509,7 @@ impl ConductorRuntime {
         kind: ExecutionKind,
         callable: CallableId,
         payload: ExecutionPayload,
+        restrictions: Option<&ExecutionAuthority>,
     ) -> Result<ExecutionSummary, ConductorError> {
         let parent = self
             .executions
@@ -1322,10 +1532,11 @@ impl ConductorRuntime {
             target: parent.target,
             state: ExecutionState::Pending,
         };
-        self.record_domain_event(DomainEvent::ExecutionCreated {
-            execution: child.clone(),
-            payload: JournalExecutionPayload::from(&payload),
-        })?;
+        self.record_execution_created(
+            child.clone(),
+            JournalExecutionPayload::from(&payload),
+            restrictions,
+        )?;
         self.push_event(
             parent_id,
             ExecutionEventKind::ChildExecutionStarted {
@@ -1650,6 +1861,9 @@ impl ConductorRuntime {
         execution_id: &ExecutionId,
         state: ExecutionState,
     ) -> Result<(), ConductorError> {
+        if state == ExecutionState::Completed {
+            self.ensure_orchestration_child_output(execution_id)?;
+        }
         let (current, parent) = {
             let execution = self
                 .executions
@@ -1678,6 +1892,7 @@ impl ConductorRuntime {
         }
         if is_terminal(&state) {
             self.skill_activations.remove(execution_id);
+            self.sandbox_states.remove(execution_id);
             if let Some(parent) = parent {
                 self.push_event(
                     &parent,
@@ -1692,17 +1907,116 @@ impl ConductorRuntime {
         Ok(())
     }
 
+    pub fn record_execution_output(
+        &mut self,
+        execution_id: &ExecutionId,
+        output: Value,
+    ) -> Result<(), ConductorError> {
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        if self.execution_outputs.contains_key(execution_id) {
+            return Err(ConductorError::InvalidExecutionData {
+                execution_id: execution_id.clone(),
+                message: "output was already recorded".to_owned(),
+            });
+        }
+        if let Some(callable) = execution.summary.callable.as_ref() {
+            let descriptor = self
+                .configuration_for_execution(execution_id)?
+                .callables
+                .descriptor(callable)?;
+            validate_json_schema(&descriptor.output_schema, &output).map_err(|message| {
+                ConductorError::InvalidExecutionData {
+                    execution_id: execution_id.clone(),
+                    message: format!("output: {message}"),
+                }
+            })?;
+        }
+        self.record_domain_event(DomainEvent::ExecutionOutputRecorded {
+            execution_id: execution_id.clone(),
+            output,
+        })
+    }
+
+    #[must_use]
+    pub fn execution_output(&self, execution_id: &ExecutionId) -> Option<&Value> {
+        self.execution_outputs.get(execution_id)
+    }
+
+    fn ensure_orchestration_child_output(
+        &mut self,
+        execution_id: &ExecutionId,
+    ) -> Result<(), ConductorError> {
+        if self.execution_outputs.contains_key(execution_id) {
+            return Ok(());
+        }
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let Some(parent_id) = execution.summary.parent_execution.as_ref() else {
+            return Ok(());
+        };
+        if self
+            .executions
+            .get(parent_id)
+            .is_none_or(|parent| parent.summary.kind != ExecutionKind::Orchestration)
+        {
+            return Ok(());
+        }
+        let content = self
+            .events
+            .iter()
+            .filter(|event| event.execution_id == *execution_id)
+            .filter_map(|event| match &event.kind {
+                ExecutionEventKind::AssistantContentDelta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        let output = if content.trim().is_empty() {
+            Value::Object(serde_json::Map::new())
+        } else {
+            serde_json::from_str(&content).map_err(|error| {
+                ConductorError::InvalidExecutionData {
+                    execution_id: execution_id.clone(),
+                    message: format!("output is not valid JSON: {error}"),
+                }
+            })?
+        };
+        self.record_execution_output(execution_id, output)
+    }
+
     pub fn subscribe_events(
         &mut self,
         capacity: usize,
     ) -> std::sync::mpsc::Receiver<ExecutionEvent> {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(capacity.max(1));
-        self.event_sink = Some(sender);
-        receiver
+        self.subscribe_events_with_id(capacity).1
+    }
+
+    pub fn subscribe_events_with_id(
+        &mut self,
+        _capacity: usize,
+    ) -> (u64, std::sync::mpsc::Receiver<ExecutionEvent>) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.next_event_subscription = self.next_event_subscription.saturating_add(1);
+        let subscription = self.next_event_subscription;
+        self.event_sinks.insert(subscription, sender);
+        (subscription, receiver)
+    }
+
+    pub fn unsubscribe_event_subscription(&mut self, subscription: u64) {
+        self.event_sinks.remove(&subscription);
     }
 
     pub fn unsubscribe_events(&mut self) {
-        self.event_sink = None;
+        self.event_sinks.clear();
+    }
+
+    #[must_use]
+    pub fn event_subscription_count(&self) -> usize {
+        self.event_sinks.len()
     }
 
     #[must_use]
@@ -1729,6 +2043,223 @@ impl ConductorRuntime {
                 .collect(),
             last_event_sequence: self.next_event,
         }
+    }
+
+    pub fn session(&self, session_id: &SessionId) -> Result<SessionSummary, ConductorError> {
+        self.sessions
+            .get(session_id)
+            .map(|record| record.summary.clone())
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))
+    }
+
+    pub fn build_session_debug_bundle(
+        &self,
+        session_id: &SessionId,
+        workspace: WorkspaceDescriptor,
+        current_versions: &BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<SessionDebugBundle, ConductorError> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?
+            .summary
+            .clone();
+        if workspace.id != session.workspace_id {
+            return Err(ConductorError::WorkspaceMismatch {
+                expected: session.workspace_id,
+                actual: workspace.id,
+            });
+        }
+        let execution_ids = self
+            .executions
+            .values()
+            .filter(|record| record.summary.session_id == *session_id)
+            .map(|record| record.summary.id.clone())
+            .collect::<BTreeSet<_>>();
+        let secret_names = self
+            .executions
+            .values()
+            .filter(|record| execution_ids.contains(&record.summary.id))
+            .flat_map(|record| record.authority.secrets.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let secret_values = secret_names
+            .iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .filter(|value| !value.is_empty())
+            .collect::<BTreeSet<_>>();
+        let mut events = self
+            .events
+            .iter()
+            .filter(|event| event.session_id == *session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        for event in &mut events {
+            redact_event(event, &secret_names, &secret_values);
+        }
+
+        let mut bundle = SessionDebugBundle::new(session, workspace);
+        bundle.executions = self
+            .executions
+            .values()
+            .filter(|record| execution_ids.contains(&record.summary.id))
+            .map(|record| record.summary.clone())
+            .collect();
+        bundle.events = events.clone();
+        bundle.attempt_groups = self
+            .attempt_groups
+            .values()
+            .filter(|group| execution_ids.contains(&group.parent_execution))
+            .cloned()
+            .collect();
+        for event in &events {
+            match &event.kind {
+                ExecutionEventKind::UserInput { text } => {
+                    bundle.conversation.push(DebugConversationMessage {
+                        execution_id: event.execution_id.clone(),
+                        role: DebugConversationRole::User,
+                        content: text.clone(),
+                    })
+                }
+                ExecutionEventKind::AssistantContentDelta { text } => {
+                    if let Some(last) = bundle.conversation.last_mut().filter(|message| {
+                        message.execution_id == event.execution_id
+                            && message.role == DebugConversationRole::Assistant
+                    }) {
+                        last.content.push_str(text);
+                    } else {
+                        bundle.conversation.push(DebugConversationMessage {
+                            execution_id: event.execution_id.clone(),
+                            role: DebugConversationRole::Assistant,
+                            content: text.clone(),
+                        });
+                    }
+                }
+                ExecutionEventKind::ToolCallStarted { .. }
+                | ExecutionEventKind::ToolCallArguments { .. }
+                | ExecutionEventKind::ToolCallFinished { .. } => {
+                    bundle.tool_activity.push(event.clone());
+                }
+                ExecutionEventKind::ExecutionTerminated { cause } => {
+                    bundle
+                        .termination_causes
+                        .insert(event.execution_id.clone(), cause.clone());
+                }
+                _ => {}
+            }
+        }
+        for execution_id in &execution_ids {
+            let record = &self.executions[execution_id];
+            let mut authority = record.authority.clone();
+            authority.secrets.clear();
+            bundle
+                .workspace_authority
+                .insert(execution_id.clone(), authority);
+            let read_set = self
+                .read_sets
+                .get(execution_id)
+                .cloned()
+                .unwrap_or_else(|| ExecutionReadSet::new(execution_id.clone()));
+            bundle.workspace_validity.insert(
+                execution_id.clone(),
+                read_set.validity_against(current_versions),
+            );
+            bundle.read_sets.push(read_set);
+            if record.summary.kind == ExecutionKind::Orchestration {
+                let callable = record
+                    .summary
+                    .callable
+                    .as_ref()
+                    .expect("orchestration callable invariant");
+                let definition = self
+                    .configuration_revision(&record.config_revision)?
+                    .callables
+                    .orchestration(callable)?
+                    .clone();
+                let node_bindings = self
+                    .orchestration_nodes
+                    .iter()
+                    .filter(|(child_id, _)| {
+                        self.executions.get(*child_id).is_some_and(|child| {
+                            child.summary.parent_execution.as_ref() == Some(execution_id)
+                        })
+                    })
+                    .map(|(child_id, node_id)| (node_id.clone(), child_id.clone()))
+                    .collect();
+                let mut node_inputs = self
+                    .orchestration_node_inputs
+                    .iter()
+                    .filter(|((parent_id, _), _)| parent_id == execution_id)
+                    .map(|((_, node_id), input)| (node_id.clone(), input.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                for value in node_inputs.values_mut() {
+                    redact_value(value, &secret_names, &secret_values);
+                }
+                bundle.orchestrations.push(DebugOrchestration {
+                    execution_id: execution_id.clone(),
+                    definition,
+                    node_bindings,
+                    node_inputs,
+                    synthesis_execution: self.orchestration_synthesis.get(execution_id).cloned(),
+                });
+            }
+        }
+        bundle.resolved_routing = self
+            .resolved_routes
+            .iter()
+            .filter(|(execution_id, _)| execution_ids.contains(*execution_id))
+            .map(|(execution_id, route)| DebugResolvedRoute {
+                execution_id: execution_id.clone(),
+                requested_target: route.requested_target.clone(),
+                model: route.model.clone(),
+                config_revision: route.config_revision.clone(),
+            })
+            .collect();
+        bundle.failure_decisions = self
+            .orchestration_decisions
+            .values()
+            .filter(|decision| execution_ids.contains(&decision.parent_execution))
+            .cloned()
+            .collect();
+        bundle.execution_outputs = self
+            .execution_outputs
+            .iter()
+            .filter(|(execution_id, _)| execution_ids.contains(*execution_id))
+            .map(|(execution_id, output)| {
+                let mut output = output.clone();
+                redact_value(&mut output, &secret_names, &secret_values);
+                (execution_id.clone(), output)
+            })
+            .collect();
+        bundle.checkpoints = self
+            .journal
+            .entries
+            .iter()
+            .filter_map(|entry| match &entry.event {
+                DomainEvent::WorkspaceCheckpointCaptured {
+                    execution_id,
+                    workspace_id,
+                    files,
+                } if execution_ids.contains(execution_id) => Some(DebugWorkspaceCheckpoint {
+                    sequence: entry.sequence,
+                    execution_id: execution_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                    files: files.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        bundle.diagnostic_write_patches = self
+            .diagnostic_write_patches
+            .iter()
+            .filter(|patch| execution_ids.contains(&patch.execution_id))
+            .cloned()
+            .map(|mut patch| {
+                redact_text(&mut patch.patch, &secret_values);
+                patch
+            })
+            .collect();
+        Ok(bundle)
     }
 
     fn check_callable_policy(
@@ -1823,10 +2354,16 @@ impl ConductorRuntime {
         ) {
             Ok(()) => match serde_json::from_str::<Value>(&invocation.arguments_json) {
                 Ok(_) => {
+                    let authority = self
+                        .execution_authority(execution_id)
+                        .map_err(conductor_protocol_error)?;
+                    let sandbox_state = self
+                        .execution_sandbox_state(execution_id)
+                        .map_err(|error| BackendError::Protocol(error.to_string()))?;
                     let context = callables::ToolExecutionContext {
-                        authority: self
-                            .execution_authority(execution_id)
-                            .map_err(conductor_protocol_error)?,
+                        execution_id: execution_id.clone(),
+                        authority,
+                        sandbox_state,
                     };
                     let outcome = callables
                         .invoke_tool(&context, &invocation.callable, &invocation.arguments_json)
@@ -1836,6 +2373,12 @@ impl ConductorRuntime {
                             self.record_file_observation(execution_id, observation)
                                 .map_err(conductor_protocol_error)?;
                         }
+                    }
+                    for patch in outcome.diagnostic_write_patches.iter().cloned() {
+                        self.record_domain_event(DomainEvent::DiagnosticWritePatchCaptured {
+                            patch,
+                        })
+                        .map_err(conductor_protocol_error)?;
                     }
                     outcome.into_backend_result()
                 }
@@ -1874,6 +2417,19 @@ impl ConductorRuntime {
         }
     }
 
+    fn execution_sandbox_state(
+        &mut self,
+        execution_id: &ExecutionId,
+    ) -> Result<std::sync::Arc<sandbox::ExecutionSandboxState>, std::io::Error> {
+        if let Some(state) = self.sandbox_states.get(execution_id) {
+            return Ok(std::sync::Arc::clone(state));
+        }
+        let state = sandbox::ExecutionSandboxState::create()?;
+        self.sandbox_states
+            .insert(execution_id.clone(), std::sync::Arc::clone(&state));
+        Ok(state)
+    }
+
     fn new_config_revision_id(&self) -> ConfigRevisionId {
         ConfigRevisionId::parse(format!("config-{}", self.next_config_revision + 1))
             .expect("generated config revision id")
@@ -1899,6 +2455,73 @@ impl ConductorRuntime {
 
 fn conductor_protocol_error(error: ConductorError) -> BackendError {
     BackendError::Protocol(error.to_string())
+}
+
+fn validate_json_schema(schema: &Value, value: &Value) -> Result<(), String> {
+    let validator = jsonschema::validator_for(schema)
+        .map_err(|error| format!("invalid configured JSON schema: {error}"))?;
+    if let Err(error) = validator.validate(value) {
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+fn redact_event(
+    event: &mut ExecutionEvent,
+    secret_names: &BTreeSet<String>,
+    secret_values: &BTreeSet<String>,
+) {
+    match &mut event.kind {
+        ExecutionEventKind::UserInput { text }
+        | ExecutionEventKind::AssistantContentDelta { text }
+        | ExecutionEventKind::ReasoningDelta { text }
+        | ExecutionEventKind::ToolCallArguments {
+            arguments: text, ..
+        }
+        | ExecutionEventKind::ToolCallFinished { output: text, .. }
+        | ExecutionEventKind::Error { message: text, .. } => {
+            if let Ok(mut value) = serde_json::from_str::<Value>(text) {
+                redact_value(&mut value, secret_names, secret_values);
+                *text = value.to_string();
+            } else {
+                redact_text(text, secret_values);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_value(
+    value: &mut Value,
+    secret_names: &BTreeSet<String>,
+    secret_values: &BTreeSet<String>,
+) {
+    match value {
+        Value::String(text) => redact_text(text, secret_values),
+        Value::Array(values) => {
+            for value in values {
+                redact_value(value, secret_names, secret_values);
+            }
+        }
+        Value::Object(values) => {
+            for (name, value) in values {
+                if secret_names.contains(name) {
+                    *value = Value::String("[REDACTED]".to_owned());
+                } else {
+                    redact_value(value, secret_names, secret_values);
+                }
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn redact_text(text: &mut String, secrets: &BTreeSet<String>) {
+    for secret in secrets {
+        if text.contains(secret) {
+            *text = text.replace(secret, "[REDACTED]");
+        }
+    }
 }
 
 fn is_terminal(state: &ExecutionState) -> bool {
@@ -2173,6 +2796,179 @@ mod tests {
     }
 
     #[test]
+    fn invocation_restrictions_are_attenuated_and_replayed() {
+        let mut runtime = ConductorRuntime::new();
+        let parent_authority = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &["/run/parent.sock"],
+            &["TOKEN", "OTHER"],
+            &["agent.child", "tool.write"],
+        );
+        let child_maximum = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &["/run/parent.sock", "/run/other.sock"],
+            &["TOKEN"],
+            &["tool.write"],
+        );
+        let restrictions = authority(
+            FilesystemAuthority::ReadOnly,
+            NetworkAuthority::None,
+            RepositoryAuthority::Read,
+            &["/run/parent.sock"],
+            &["TOKEN"],
+            &[],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                parent_authority,
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                child_maximum.clone(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let child = runtime
+            .start_agent_with_restrictions(
+                &parent.id,
+                &CallableId::parse("agent.child").unwrap(),
+                "child",
+                &restrictions,
+            )
+            .unwrap();
+        let expected = child_maximum.attenuate(&restrictions);
+        assert_eq!(runtime.execution_authority(&child.id).unwrap(), expected);
+
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert_eq!(restored.execution_authority(&child.id).unwrap(), expected);
+    }
+
+    #[test]
+    fn debug_bundle_is_complete_and_redacts_granted_secret_fields() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.debug"),
+                authority(
+                    FilesystemAuthority::Write,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &["TOKEN"],
+                    &[],
+                ),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.audit"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let workspace_id = WorkspaceId::parse("workspace:debug").unwrap();
+        runtime.bind_workspace(workspace_id.clone()).unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let root = runtime.submit(&session.id, "inspect").unwrap();
+        let audit = runtime
+            .start_agent(
+                &root.id,
+                &CallableId::parse("agent.audit").unwrap(),
+                "attempt a diagnostic edit",
+            )
+            .unwrap();
+        runtime
+            .record_domain_event(DomainEvent::DiagnosticWritePatchCaptured {
+                patch: DiagnosticWritePatch {
+                    execution_id: audit.id,
+                    path: PathBuf::from("src/lib.rs"),
+                    patch: "+diagnostic only\n".to_owned(),
+                },
+            })
+            .unwrap();
+        runtime.resolve_invocation(&root.id).unwrap();
+        let tool_call_id = runtime.new_tool_call_id();
+        runtime
+            .push_event(
+                &root.id,
+                ExecutionEventKind::ToolCallStarted {
+                    tool_call_id: tool_call_id.clone(),
+                    callable: CallableId::parse("debug.tool").unwrap(),
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &root.id,
+                ExecutionEventKind::ToolCallArguments {
+                    tool_call_id: tool_call_id.clone(),
+                    arguments: json!({"TOKEN": "credential-value", "safe": true}).to_string(),
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &root.id,
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id,
+                    output: "done".to_owned(),
+                    success: true,
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &root.id,
+                ExecutionEventKind::AssistantContentDelta {
+                    text: "result".to_owned(),
+                },
+            )
+            .unwrap();
+        runtime
+            .record_domain_event(DomainEvent::WorkspaceCheckpointCaptured {
+                execution_id: root.id.clone(),
+                workspace_id: workspace_id.clone(),
+                files: BTreeMap::new(),
+            })
+            .unwrap();
+        let bundle = runtime
+            .build_session_debug_bundle(
+                &session.id,
+                WorkspaceDescriptor {
+                    id: workspace_id,
+                    root: PathBuf::from("/debug-workspace"),
+                    scratch_paths: BTreeSet::new(),
+                },
+                &BTreeMap::new(),
+            )
+            .unwrap();
+        let serialized = serde_json::to_string(&bundle).unwrap();
+
+        assert_eq!(bundle.executions.len(), 2);
+        assert_eq!(bundle.resolved_routing.len(), 1);
+        assert_eq!(bundle.tool_activity.len(), 3);
+        assert_eq!(bundle.checkpoints.len(), 1);
+        assert_eq!(bundle.diagnostic_write_patches.len(), 1);
+        assert_eq!(bundle.conversation.len(), 2);
+        assert!(bundle.workspace_authority[&root.id].secrets.is_empty());
+        assert!(!serialized.contains("credential-value"));
+        assert!(serialized.contains("[REDACTED]"));
+    }
+
+    #[test]
     fn child_creation_requires_parent_callable_delegation() {
         let mut runtime = ConductorRuntime::new();
         runtime
@@ -2427,6 +3223,7 @@ mod tests {
         }
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: CallableDescriptor {
                     id: CallableId::parse("orchestration.parallel").unwrap(),
@@ -2439,18 +3236,21 @@ mod tests {
                 },
                 nodes: vec![
                     phenix_core::OrchestrationNode {
+                        input_bindings: Default::default(),
                         id: OrchestrationNodeId::parse("fail").unwrap(),
                         callable: CallableId::parse("agent.fail").unwrap(),
                         depends_on: Vec::new(),
                         objective: None,
                     },
                     phenix_core::OrchestrationNode {
+                        input_bindings: Default::default(),
                         id: OrchestrationNodeId::parse("active").unwrap(),
                         callable: CallableId::parse("agent.active").unwrap(),
                         depends_on: Vec::new(),
                         objective: None,
                     },
                     phenix_core::OrchestrationNode {
+                        input_bindings: Default::default(),
                         id: OrchestrationNodeId::parse("done").unwrap(),
                         callable: CallableId::parse("agent.done").unwrap(),
                         depends_on: Vec::new(),
@@ -2466,7 +3266,7 @@ mod tests {
             .start_orchestration(
                 &root.id,
                 &CallableId::parse("orchestration.parallel").unwrap(),
-                "parallel work",
+                json!({"objective": "parallel work"}),
             )
             .unwrap();
         let children = runtime

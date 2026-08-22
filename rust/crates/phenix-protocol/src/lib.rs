@@ -2,10 +2,11 @@
 
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor,
-    CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget,
+    CallableId, ConfigRevisionId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget,
     RoutingProfileDescriptor, SessionId, SessionSummary, SkillDescriptor,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeSnapshot {
@@ -24,6 +25,12 @@ pub enum Command {
     GetCallableCatalog,
     GetRoutingCatalog,
     GetSkillCatalog,
+    ExportSessionDebug {
+        session_id: SessionId,
+    },
+    RequestWorkspaceCheckpoint {
+        execution_id: ExecutionId,
+    },
     CreateSession {
         parent_session: Option<SessionId>,
         name: Option<String>,
@@ -41,6 +48,10 @@ pub enum Command {
         session_id: SessionId,
         target: ExecutionTarget,
     },
+    RebaseSession {
+        session_id: SessionId,
+        config_revision: ConfigRevisionId,
+    },
     CloseSession {
         session_id: SessionId,
     },
@@ -51,7 +62,7 @@ pub enum Command {
     StartCallable {
         session_id: SessionId,
         callable: CallableId,
-        objective: String,
+        input: Value,
     },
     CancelExecution {
         execution_id: ExecutionId,
@@ -102,6 +113,9 @@ pub enum Reply {
     },
     BackendCatalog {
         catalog: BackendCatalog,
+    },
+    SessionDebug {
+        bundle: Box<phenix_core::SessionDebugBundle>,
     },
     Accepted,
 }
@@ -187,14 +201,17 @@ mod tests {
             command: Command::StartCallable {
                 session_id: SessionId::parse("session-1").expect("valid session id"),
                 callable: CallableId::parse("orchestration.implement").expect("valid callable id"),
-                objective: "implement change".to_owned(),
+                input: serde_json::json!({"objective": "implement change"}),
             },
         };
         let value = serde_json::to_value(message).expect("serialize callable start");
         assert_eq!(value["command"]["type"], "start_callable");
         assert_eq!(value["command"]["session_id"], "session-1");
         assert_eq!(value["command"]["callable"], "orchestration.implement");
-        assert_eq!(value["command"]["objective"], "implement change");
+        assert_eq!(
+            value["command"]["input"],
+            serde_json::json!({"objective": "implement change"})
+        );
         assert!(value["command"].get("backend").is_none());
         assert!(value["command"].get("provider").is_none());
     }
@@ -283,6 +300,47 @@ mod tests {
         let value = serde_json::to_value(message).expect("serialize session close");
         assert_eq!(value["command"]["type"], "close_session");
         assert_eq!(value["command"]["session_id"], "session-1");
+    }
+
+    #[test]
+    fn session_rebase_is_an_explicit_revision_operation() {
+        let message = ClientMessage {
+            id: 13,
+            command: Command::RebaseSession {
+                session_id: SessionId::parse("session-1").unwrap(),
+                config_revision: ConfigRevisionId::parse("config-3").unwrap(),
+            },
+        };
+        let value = serde_json::to_value(message).unwrap();
+        assert_eq!(value["command"]["type"], "rebase_session");
+        assert_eq!(value["command"]["session_id"], "session-1");
+        assert_eq!(value["command"]["config_revision"], "config-3");
+    }
+
+    #[test]
+    fn session_debug_export_is_an_explicit_operation() {
+        let message = ClientMessage {
+            id: 12,
+            command: Command::ExportSessionDebug {
+                session_id: SessionId::parse("session-1").unwrap(),
+            },
+        };
+        let value = serde_json::to_value(message).unwrap();
+        assert_eq!(value["command"]["type"], "export_session_debug");
+        assert_eq!(value["command"]["session_id"], "session-1");
+    }
+
+    #[test]
+    fn workspace_checkpoint_request_is_explicit() {
+        let value = serde_json::to_value(ClientMessage {
+            id: 13,
+            command: Command::RequestWorkspaceCheckpoint {
+                execution_id: ExecutionId::parse("execution-1").unwrap(),
+            },
+        })
+        .unwrap();
+        assert_eq!(value["command"]["type"], "request_workspace_checkpoint");
+        assert_eq!(value["command"]["execution_id"], "execution-1");
     }
 
     #[test]

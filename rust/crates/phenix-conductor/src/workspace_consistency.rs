@@ -40,6 +40,14 @@ impl WorkspaceConsistency {
         &self.root
     }
 
+    pub fn descriptor(&self, id: phenix_core::WorkspaceId) -> WorkspaceDescriptor {
+        WorkspaceDescriptor {
+            id,
+            root: self.root.clone(),
+            scratch_paths: self.scratch_paths.clone(),
+        }
+    }
+
     pub fn checkpoint_baseline(
         &self,
     ) -> Result<BTreeMap<PathBuf, FileVersion>, WorkspaceConsistencyError> {

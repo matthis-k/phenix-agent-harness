@@ -6,8 +6,8 @@ use phenix_conductor::{ConductorRuntime, ConductorServer};
 use phenix_core::{
     BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
     ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
-    ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
-    RoutingProfile, RoutingProfileId,
+    ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId,
+    OrchestrationValueBinding, ProviderId, RoutingProfile, RoutingProfileId,
 };
 use phenix_protocol::{ClientMessage, Command, Reply, ResponsePayload, ServerMessage};
 use serde_json::{json, Value};
@@ -125,10 +125,12 @@ impl BackendSession for OrchestrationSession {
             vec![result.output]
         };
 
-        host.emit(BackendEvent::ContentDelta(format!(
-            "{} completed",
-            self.model
-        )))?;
+        let content = if self.model == "root" {
+            format!("{} completed", self.model)
+        } else {
+            json!({ "model": self.model, "status": "completed" }).to_string()
+        };
+        host.emit(BackendEvent::ContentDelta(content))?;
         self.recorder.turns.lock().unwrap().push(ObservedTurn {
             model: self.model.clone(),
             prompt: request.prompt,
@@ -162,6 +164,12 @@ fn node(
     objective: Option<&str>,
 ) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: BTreeMap::from([(
+            "objective".to_owned(),
+            OrchestrationValueBinding::Input {
+                pointer: "/objective".to_owned(),
+            },
+        )]),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable,
         depends_on: depends_on
@@ -218,6 +226,7 @@ fn root_model_discovers_and_starts_orchestration_then_worker_runs_mock_agents() 
     let orchestration = CallableId::parse(ORCHESTRATION_ID).unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
             nodes: vec![
@@ -404,6 +413,7 @@ fn dag_runtime_starts_all_ready_nodes_and_waits_for_join_dependencies() {
 
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
             nodes: vec![
@@ -422,7 +432,7 @@ fn dag_runtime_starts_all_ready_nodes_and_waits_for_join_dependencies() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.parallel").unwrap(),
-            "parallel work",
+            serde_json::json!({"objective": "parallel work"}),
         )
         .unwrap();
 

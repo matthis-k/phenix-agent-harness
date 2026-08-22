@@ -153,7 +153,11 @@ pub(super) fn invoke(
         ORCHESTRATION_START_ID => {
             parse_start(&invocation.arguments_json).and_then(|(orchestration, objective)| {
                 runtime
-                    .start_orchestration(execution_id, &orchestration, objective)
+                    .start_orchestration(
+                        execution_id,
+                        &orchestration,
+                        json!({"objective": objective}),
+                    )
                     .map(|execution| start_output(&execution))
                     .map_err(|error| error.to_string())
             })

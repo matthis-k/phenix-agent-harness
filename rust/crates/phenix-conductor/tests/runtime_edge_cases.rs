@@ -34,6 +34,7 @@ fn node(
     objective: Option<&str>,
 ) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable: CallableId::parse(callable).unwrap(),
         depends_on: depends_on
@@ -432,6 +433,7 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.edge", CallableKind::Orchestration),
             nodes: vec![
@@ -446,7 +448,7 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.edge").unwrap(),
-            "orchestration",
+            serde_json::json!({"objective": "orchestration"}),
         )
         .unwrap();
 
