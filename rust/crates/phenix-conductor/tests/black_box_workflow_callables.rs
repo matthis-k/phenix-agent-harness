@@ -203,10 +203,16 @@ fn root_model_discovers_and_starts_orchestration_then_worker_runs_mock_agents() 
     let scout = CallableId::parse("agent.scout").unwrap();
     let verifier = CallableId::parse("agent.verifier").unwrap();
     runtime
-        .register_agent(descriptor(scout.as_str(), CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor(scout.as_str(), CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
-        .register_agent(descriptor(verifier.as_str(), CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor(verifier.as_str(), CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
 
     let orchestration = CallableId::parse(ORCHESTRATION_ID).unwrap();
@@ -388,7 +394,10 @@ fn dag_runtime_starts_all_ready_nodes_and_waits_for_join_dependencies() {
     let join = CallableId::parse("agent.join").unwrap();
     for callable in [&alpha, &beta, &join] {
         runtime
-            .register_agent(descriptor(callable.as_str(), CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor(callable.as_str(), CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
     }
 

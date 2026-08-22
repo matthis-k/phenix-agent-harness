@@ -120,7 +120,10 @@ fn provider_backed_agent_is_not_reinterpreted_as_model_execution() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state),
         )
         .unwrap();
@@ -149,7 +152,10 @@ fn mock_provider_executes_an_ordinary_child_and_emits_canonical_events() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state.clone()),
         )
         .unwrap();
@@ -213,7 +219,10 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
     let step = CallableId::parse("agent.native").unwrap();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state.clone()),
         )
         .unwrap();
@@ -263,7 +272,10 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::failing(state.clone()),
         )
         .unwrap();
@@ -343,7 +355,10 @@ fn policy_runs_before_provider_code_and_leaves_no_execution_side_effect() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state.clone()),
         )
         .unwrap();
@@ -384,7 +399,10 @@ fn cancelled_provider_child_cannot_be_dispatched_after_cancellation() {
     let mut runtime = ConductorRuntime::new();
     runtime
         .register_provider_agent(
-            descriptor("agent.native", CallableKind::Agent),
+            phenix_core::AgentDefinition::new(
+                descriptor("agent.native", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ),
             MockProvider::emitting(state.clone()),
         )
         .unwrap();

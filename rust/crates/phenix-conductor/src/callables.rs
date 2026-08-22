@@ -225,13 +225,13 @@ impl CallableRegistry {
     }
 
     /// Register the canonical model-backed agent provider.
-    pub fn register_agent<D>(&mut self, definition: D) -> Result<(), CallableRegistryError>
-    where
-        D: Into<AgentDefinition>,
-    {
+    pub fn register_agent(
+        &mut self,
+        definition: AgentDefinition,
+    ) -> Result<(), CallableRegistryError> {
         self.insert(
             CallableEntry::Agent {
-                definition: definition.into(),
+                definition,
                 provider: ExecutionProviderBinding::Model,
             },
             CallableKind::Agent,
@@ -240,18 +240,17 @@ impl CallableRegistry {
 
     /// Register an agent whose execution mechanism is conductor-neutral and
     /// supplied by an explicit provider rather than the model backend path.
-    pub fn register_provider_agent<D, P>(
+    pub fn register_provider_agent<P>(
         &mut self,
-        definition: D,
+        definition: AgentDefinition,
         provider: P,
     ) -> Result<(), CallableRegistryError>
     where
-        D: Into<AgentDefinition>,
         P: ExecutionProvider + 'static,
     {
         self.insert(
             CallableEntry::Agent {
-                definition: definition.into(),
+                definition,
                 provider: ExecutionProviderBinding::Provider(Arc::new(provider)),
             },
             CallableKind::Agent,
@@ -725,7 +724,10 @@ mod tests {
     fn ids_are_unique_across_callable_kinds() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_agent(descriptor("same", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("same", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         assert!(matches!(
             registry.register_tool(
@@ -742,10 +744,19 @@ mod tests {
         let model = CallableId::parse("model").unwrap();
         let native = CallableId::parse("native").unwrap();
         registry
-            .register_agent(descriptor("model", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("model", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         registry
-            .register_provider_agent(descriptor("native", CallableKind::Agent), TestProvider)
+            .register_provider_agent(
+                phenix_core::AgentDefinition::new(
+                    descriptor("native", CallableKind::Agent),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ),
+                TestProvider,
+            )
             .unwrap();
 
         assert_eq!(
@@ -762,7 +773,13 @@ mod tests {
     fn orchestrations_validate_executable_callable_references() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_provider_agent(descriptor("native", CallableKind::Agent), TestProvider)
+            .register_provider_agent(
+                phenix_core::AgentDefinition::new(
+                    descriptor("native", CallableKind::Agent),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ),
+                TestProvider,
+            )
             .unwrap();
         registry
             .register_orchestration(OrchestrationDefinition {
@@ -776,7 +793,10 @@ mod tests {
     fn orchestrations_reject_duplicate_node_ids() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_agent(descriptor("worker", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
@@ -800,7 +820,10 @@ mod tests {
     fn orchestrations_reject_unknown_dependencies() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_agent(descriptor("worker", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
@@ -818,7 +841,10 @@ mod tests {
     fn orchestrations_reject_dependency_cycles() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_agent(descriptor("worker", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
@@ -840,7 +866,10 @@ mod tests {
         let mut registry = CallableRegistry::default();
         for callable in ["alpha", "beta", "gamma"] {
             registry
-                .register_agent(descriptor(callable, CallableKind::Agent))
+                .register_agent(phenix_core::AgentDefinition::new(
+                    descriptor(callable, CallableKind::Agent),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ))
                 .unwrap();
         }
         let orchestration = CallableId::parse("orchestration").unwrap();
@@ -893,7 +922,10 @@ mod tests {
     fn session_agent_entrypoint_is_parentless_and_uses_session_target() {
         let mut runtime = ConductorRuntime::new();
         runtime
-            .register_agent(descriptor("scout", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("scout", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let execution = runtime
@@ -928,7 +960,10 @@ mod tests {
     fn session_workflow_entrypoint_creates_normal_child_execution_tree() {
         let mut runtime = ConductorRuntime::new();
         runtime
-            .register_agent(descriptor("worker", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
