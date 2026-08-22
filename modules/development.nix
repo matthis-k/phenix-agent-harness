@@ -78,6 +78,12 @@
           label = "conductor / black_box_workflow_callables";
         }
         {
+          id = "conductor-durable-retries";
+          package = "phenix-conductor";
+          test = "durable_retries";
+          label = "conductor / durable_retries";
+        }
+        {
           id = "conductor-execution-providers";
           package = "phenix-conductor";
           test = "execution_provider_runtime";

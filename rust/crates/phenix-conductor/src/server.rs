@@ -1672,6 +1672,14 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.execution_id = Some(id);
             error
         }
+        ConductorError::InvalidRetry(id) => {
+            let mut error = protocol_error(
+                ErrorCode::InvalidRequest,
+                format!("execution cannot be retried: {id}"),
+            );
+            error.execution_id = Some(id);
+            error
+        }
         ConductorError::NonModelExecution(id) => {
             let mut error = protocol_error(
                 ErrorCode::UnsupportedCapability,
