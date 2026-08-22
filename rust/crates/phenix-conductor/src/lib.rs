@@ -11,7 +11,7 @@ mod routing;
 mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
-pub use context::{ContextError, ContextRegistry};
+pub use context::{ContextError, ContextRegistry, SkillRegistry};
 pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
     ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest,
@@ -258,6 +258,7 @@ pub struct ConductorRuntime {
     callables: CallableRegistry,
     routing: RoutingRegistry,
     context: ContextRegistry,
+    skills: SkillRegistry,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
     policy: InvocationPolicy,
     event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
@@ -295,6 +296,7 @@ impl ConductorRuntime {
             callables: CallableRegistry::default(),
             routing: RoutingRegistry::default(),
             context: ContextRegistry::default(),
+            skills: SkillRegistry::default(),
             skill_activations: BTreeMap::new(),
             policy: InvocationPolicy::new(),
             event_sink: None,
@@ -444,19 +446,23 @@ impl ConductorRuntime {
         self.context = context;
     }
 
+    pub fn install_skill_registry(&mut self, skills: SkillRegistry) {
+        self.skills = skills;
+    }
+
     #[must_use]
     pub fn skill_descriptors(&self) -> Vec<SkillDescriptor> {
-        self.context.skill_descriptors()
+        self.skills.skill_descriptors()
     }
 
     #[must_use]
     pub fn has_model_invocable_skills(&self) -> bool {
-        self.context.has_model_invocable_skills()
+        self.skills.has_model_invocable_skills()
     }
 
     #[must_use]
     pub fn has_skills(&self) -> bool {
-        self.context.has_skills()
+        self.skills.has_skills()
     }
 
     pub fn load_skill(
@@ -464,7 +470,7 @@ impl ConductorRuntime {
         execution_id: &ExecutionId,
         id: &SkillId,
     ) -> Result<String, ConductorError> {
-        let payload = self.context.model_skill_payload(id)?;
+        let payload = self.skills.model_skill_payload(id)?;
         self.skill_activations
             .entry(execution_id.clone())
             .or_default()
@@ -485,7 +491,7 @@ impl ConductorRuntime {
         {
             return Err(ContextError::InactiveSkill(id.clone()).into());
         }
-        Ok(self.context.skill_resource_payload(id, path)?)
+        Ok(self.skills.skill_resource_payload(id, path)?)
     }
 
     #[must_use]
@@ -1018,7 +1024,9 @@ impl ConductorRuntime {
             route
         };
 
-        let (prompt, explicit_skills) = self.context.compose_prompt_with_activations(&input)?;
+        let (prompt, explicit_skills) = self
+            .context
+            .compose_prompt_with_activations(&self.skills, &input)?;
         if !explicit_skills.is_empty() {
             self.skill_activations
                 .entry(execution_id.clone())
