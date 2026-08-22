@@ -628,6 +628,11 @@ impl ConductorServer {
                 self.respond(output, id, Ok(Reply::SkillCatalog { skills }))?;
                 return Ok(());
             }
+            Command::ExportSessionDebug { session_id } => {
+                let reply = self.export_session_debug(session_id);
+                self.respond(output, id, reply)?;
+                return Ok(());
+            }
             _ => {}
         }
         let persist = matches!(
@@ -721,6 +726,9 @@ impl ConductorServer {
             Command::GetSkillCatalog => {
                 unreachable!("skill catalog handled before dispatch")
             }
+            Command::ExportSessionDebug { .. } => {
+                unreachable!("debug export handled before dispatch")
+            }
         };
 
         if persist {
@@ -749,6 +757,38 @@ impl ConductorServer {
         self.persist()?;
         self.respond(output, request_id, Ok(Reply::Execution { execution }))?;
         enqueue_pending_execution_group(&self.runtime, &execution_id, executions)
+    }
+
+    fn export_session_debug(&self, session_id: &SessionId) -> Result<Reply, ProtocolError> {
+        let runtime = self
+            .lock_runtime()
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?;
+        let session = runtime.session(session_id).map_err(map_conductor_error)?;
+        let (workspace, versions) = match &self.workspace_consistency {
+            Some(consistency) => {
+                let versions = consistency.checkpoint_baseline().map_err(|error| {
+                    protocol_error(ErrorCode::BackendProtocol, error.to_string())
+                })?;
+                (
+                    consistency.descriptor(session.workspace_id.clone()),
+                    versions,
+                )
+            }
+            None => (
+                WorkspaceDescriptor {
+                    id: session.workspace_id,
+                    root: PathBuf::new(),
+                    scratch_paths: BTreeSet::new(),
+                },
+                BTreeMap::new(),
+            ),
+        };
+        runtime
+            .build_session_debug_bundle(session_id, workspace, &versions)
+            .map(|bundle| Reply::SessionDebug {
+                bundle: Box::new(bundle),
+            })
+            .map_err(map_conductor_error)
     }
 
     fn start_callable(

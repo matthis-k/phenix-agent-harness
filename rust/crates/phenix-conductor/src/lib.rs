@@ -38,12 +38,14 @@ use phenix_backend::{
 };
 use phenix_core::{
     AgentDefinition, AttemptGroup, AttemptGroupId, CallableDescriptor, CallableId, CallableKind,
-    ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
-    ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
-    ExecutionTerminationCause, ExecutionWorkspaceValidity, FileObservation, FileVersion,
-    ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
-    RoutingProfile, RoutingProfileDescriptor, SessionId, SessionState, SessionSummary,
-    SkillDescriptor, SkillId, ToolCallId, WorkspaceId, WorkspaceLeaseRequest,
+    ConfigRevisionId, DebugConversationMessage, DebugConversationRole, DebugOrchestration,
+    DebugResolvedRoute, DebugWorkspaceCheckpoint, ExecutionAuthority, ExecutionEvent,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet, ExecutionState,
+    ExecutionSummary, ExecutionTarget, ExecutionTerminationCause, ExecutionWorkspaceValidity,
+    FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
+    OrchestrationFailureDecisionRecord, OrchestrationNodeId, RoutingProfile,
+    RoutingProfileDescriptor, SessionDebugBundle, SessionId, SessionState, SessionSummary,
+    SkillDescriptor, SkillId, ToolCallId, WorkspaceDescriptor, WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde::{Deserialize, Serialize};
@@ -2040,6 +2042,213 @@ impl ConductorRuntime {
         }
     }
 
+    pub fn session(&self, session_id: &SessionId) -> Result<SessionSummary, ConductorError> {
+        self.sessions
+            .get(session_id)
+            .map(|record| record.summary.clone())
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))
+    }
+
+    pub fn build_session_debug_bundle(
+        &self,
+        session_id: &SessionId,
+        workspace: WorkspaceDescriptor,
+        current_versions: &BTreeMap<PathBuf, FileVersion>,
+    ) -> Result<SessionDebugBundle, ConductorError> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?
+            .summary
+            .clone();
+        if workspace.id != session.workspace_id {
+            return Err(ConductorError::WorkspaceMismatch {
+                expected: session.workspace_id,
+                actual: workspace.id,
+            });
+        }
+        let execution_ids = self
+            .executions
+            .values()
+            .filter(|record| record.summary.session_id == *session_id)
+            .map(|record| record.summary.id.clone())
+            .collect::<BTreeSet<_>>();
+        let secret_names = self
+            .executions
+            .values()
+            .filter(|record| execution_ids.contains(&record.summary.id))
+            .flat_map(|record| record.authority.secrets.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let secret_values = secret_names
+            .iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .filter(|value| !value.is_empty())
+            .collect::<BTreeSet<_>>();
+        let mut events = self
+            .events
+            .iter()
+            .filter(|event| event.session_id == *session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        for event in &mut events {
+            redact_event(event, &secret_names, &secret_values);
+        }
+
+        let mut bundle = SessionDebugBundle::new(session, workspace);
+        bundle.executions = self
+            .executions
+            .values()
+            .filter(|record| execution_ids.contains(&record.summary.id))
+            .map(|record| record.summary.clone())
+            .collect();
+        bundle.events = events.clone();
+        bundle.attempt_groups = self
+            .attempt_groups
+            .values()
+            .filter(|group| execution_ids.contains(&group.parent_execution))
+            .cloned()
+            .collect();
+        for event in &events {
+            match &event.kind {
+                ExecutionEventKind::UserInput { text } => {
+                    bundle.conversation.push(DebugConversationMessage {
+                        execution_id: event.execution_id.clone(),
+                        role: DebugConversationRole::User,
+                        content: text.clone(),
+                    })
+                }
+                ExecutionEventKind::AssistantContentDelta { text } => {
+                    if let Some(last) = bundle.conversation.last_mut().filter(|message| {
+                        message.execution_id == event.execution_id
+                            && message.role == DebugConversationRole::Assistant
+                    }) {
+                        last.content.push_str(text);
+                    } else {
+                        bundle.conversation.push(DebugConversationMessage {
+                            execution_id: event.execution_id.clone(),
+                            role: DebugConversationRole::Assistant,
+                            content: text.clone(),
+                        });
+                    }
+                }
+                ExecutionEventKind::ToolCallStarted { .. }
+                | ExecutionEventKind::ToolCallArguments { .. }
+                | ExecutionEventKind::ToolCallFinished { .. } => {
+                    bundle.tool_activity.push(event.clone());
+                }
+                ExecutionEventKind::ExecutionTerminated { cause } => {
+                    bundle
+                        .termination_causes
+                        .insert(event.execution_id.clone(), cause.clone());
+                }
+                _ => {}
+            }
+        }
+        for execution_id in &execution_ids {
+            let record = &self.executions[execution_id];
+            let mut authority = record.authority.clone();
+            authority.secrets.clear();
+            bundle
+                .workspace_authority
+                .insert(execution_id.clone(), authority);
+            let read_set = self
+                .read_sets
+                .get(execution_id)
+                .cloned()
+                .unwrap_or_else(|| ExecutionReadSet::new(execution_id.clone()));
+            bundle.workspace_validity.insert(
+                execution_id.clone(),
+                read_set.validity_against(current_versions),
+            );
+            bundle.read_sets.push(read_set);
+            if record.summary.kind == ExecutionKind::Orchestration {
+                let callable = record
+                    .summary
+                    .callable
+                    .as_ref()
+                    .expect("orchestration callable invariant");
+                let definition = self
+                    .configuration_revision(&record.config_revision)?
+                    .callables
+                    .orchestration(callable)?
+                    .clone();
+                let node_bindings = self
+                    .orchestration_nodes
+                    .iter()
+                    .filter(|(child_id, _)| {
+                        self.executions.get(*child_id).is_some_and(|child| {
+                            child.summary.parent_execution.as_ref() == Some(execution_id)
+                        })
+                    })
+                    .map(|(child_id, node_id)| (node_id.clone(), child_id.clone()))
+                    .collect();
+                let mut node_inputs = self
+                    .orchestration_node_inputs
+                    .iter()
+                    .filter(|((parent_id, _), _)| parent_id == execution_id)
+                    .map(|((_, node_id), input)| (node_id.clone(), input.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                for value in node_inputs.values_mut() {
+                    redact_value(value, &secret_names, &secret_values);
+                }
+                bundle.orchestrations.push(DebugOrchestration {
+                    execution_id: execution_id.clone(),
+                    definition,
+                    node_bindings,
+                    node_inputs,
+                    synthesis_execution: self.orchestration_synthesis.get(execution_id).cloned(),
+                });
+            }
+        }
+        bundle.resolved_routing = self
+            .resolved_routes
+            .iter()
+            .filter(|(execution_id, _)| execution_ids.contains(*execution_id))
+            .map(|(execution_id, route)| DebugResolvedRoute {
+                execution_id: execution_id.clone(),
+                requested_target: route.requested_target.clone(),
+                model: route.model.clone(),
+                config_revision: route.config_revision.clone(),
+            })
+            .collect();
+        bundle.failure_decisions = self
+            .orchestration_decisions
+            .values()
+            .filter(|decision| execution_ids.contains(&decision.parent_execution))
+            .cloned()
+            .collect();
+        bundle.execution_outputs = self
+            .execution_outputs
+            .iter()
+            .filter(|(execution_id, _)| execution_ids.contains(*execution_id))
+            .map(|(execution_id, output)| {
+                let mut output = output.clone();
+                redact_value(&mut output, &secret_names, &secret_values);
+                (execution_id.clone(), output)
+            })
+            .collect();
+        bundle.checkpoints = self
+            .journal
+            .entries
+            .iter()
+            .filter_map(|entry| match &entry.event {
+                DomainEvent::WorkspaceCheckpointCaptured {
+                    execution_id,
+                    workspace_id,
+                    files,
+                } if execution_ids.contains(execution_id) => Some(DebugWorkspaceCheckpoint {
+                    sequence: entry.sequence,
+                    execution_id: execution_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                    files: files.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        Ok(bundle)
+    }
+
     fn check_callable_policy(
         &self,
         execution_id: &ExecutionId,
@@ -2235,6 +2444,64 @@ fn validate_json_schema(schema: &Value, value: &Value) -> Result<(), String> {
         return Err(error.to_string());
     }
     Ok(())
+}
+
+fn redact_event(
+    event: &mut ExecutionEvent,
+    secret_names: &BTreeSet<String>,
+    secret_values: &BTreeSet<String>,
+) {
+    match &mut event.kind {
+        ExecutionEventKind::UserInput { text }
+        | ExecutionEventKind::AssistantContentDelta { text }
+        | ExecutionEventKind::ReasoningDelta { text }
+        | ExecutionEventKind::ToolCallArguments {
+            arguments: text, ..
+        }
+        | ExecutionEventKind::ToolCallFinished { output: text, .. }
+        | ExecutionEventKind::Error { message: text, .. } => {
+            if let Ok(mut value) = serde_json::from_str::<Value>(text) {
+                redact_value(&mut value, secret_names, secret_values);
+                *text = value.to_string();
+            } else {
+                redact_text(text, secret_values);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_value(
+    value: &mut Value,
+    secret_names: &BTreeSet<String>,
+    secret_values: &BTreeSet<String>,
+) {
+    match value {
+        Value::String(text) => redact_text(text, secret_values),
+        Value::Array(values) => {
+            for value in values {
+                redact_value(value, secret_names, secret_values);
+            }
+        }
+        Value::Object(values) => {
+            for (name, value) in values {
+                if secret_names.contains(name) {
+                    *value = Value::String("[REDACTED]".to_owned());
+                } else {
+                    redact_value(value, secret_names, secret_values);
+                }
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn redact_text(text: &mut String, secrets: &BTreeSet<String>) {
+    for secret in secrets {
+        if text.contains(secret) {
+            *text = text.replace(secret, "[REDACTED]");
+        }
+    }
 }
 
 fn is_terminal(state: &ExecutionState) -> bool {
@@ -2568,6 +2835,94 @@ mod tests {
 
         let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
         assert_eq!(restored.execution_authority(&child.id).unwrap(), expected);
+    }
+
+    #[test]
+    fn debug_bundle_is_complete_and_redacts_granted_secret_fields() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.debug"),
+                authority(
+                    FilesystemAuthority::Write,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &["TOKEN"],
+                    &[],
+                ),
+            ))
+            .unwrap();
+        let workspace_id = WorkspaceId::parse("workspace:debug").unwrap();
+        runtime.bind_workspace(workspace_id.clone()).unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let root = runtime.submit(&session.id, "inspect").unwrap();
+        runtime.resolve_invocation(&root.id).unwrap();
+        let tool_call_id = runtime.new_tool_call_id();
+        runtime
+            .push_event(
+                &root.id,
+                ExecutionEventKind::ToolCallStarted {
+                    tool_call_id: tool_call_id.clone(),
+                    callable: CallableId::parse("debug.tool").unwrap(),
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &root.id,
+                ExecutionEventKind::ToolCallArguments {
+                    tool_call_id: tool_call_id.clone(),
+                    arguments: json!({"TOKEN": "credential-value", "safe": true}).to_string(),
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &root.id,
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id,
+                    output: "done".to_owned(),
+                    success: true,
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &root.id,
+                ExecutionEventKind::AssistantContentDelta {
+                    text: "result".to_owned(),
+                },
+            )
+            .unwrap();
+        runtime
+            .record_domain_event(DomainEvent::WorkspaceCheckpointCaptured {
+                execution_id: root.id.clone(),
+                workspace_id: workspace_id.clone(),
+                files: BTreeMap::new(),
+            })
+            .unwrap();
+        let bundle = runtime
+            .build_session_debug_bundle(
+                &session.id,
+                WorkspaceDescriptor {
+                    id: workspace_id,
+                    root: PathBuf::from("/debug-workspace"),
+                    scratch_paths: BTreeSet::new(),
+                },
+                &BTreeMap::new(),
+            )
+            .unwrap();
+        let serialized = serde_json::to_string(&bundle).unwrap();
+
+        assert_eq!(bundle.executions.len(), 1);
+        assert_eq!(bundle.resolved_routing.len(), 1);
+        assert_eq!(bundle.tool_activity.len(), 3);
+        assert_eq!(bundle.checkpoints.len(), 1);
+        assert_eq!(bundle.conversation.len(), 2);
+        assert!(bundle.workspace_authority[&root.id].secrets.is_empty());
+        assert!(!serialized.contains("credential-value"));
+        assert!(serialized.contains("[REDACTED]"));
     }
 
     #[test]

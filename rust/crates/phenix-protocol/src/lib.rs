@@ -25,6 +25,9 @@ pub enum Command {
     GetCallableCatalog,
     GetRoutingCatalog,
     GetSkillCatalog,
+    ExportSessionDebug {
+        session_id: SessionId,
+    },
     CreateSession {
         parent_session: Option<SessionId>,
         name: Option<String>,
@@ -107,6 +110,9 @@ pub enum Reply {
     },
     BackendCatalog {
         catalog: BackendCatalog,
+    },
+    SessionDebug {
+        bundle: Box<phenix_core::SessionDebugBundle>,
     },
     Accepted,
 }
@@ -306,6 +312,19 @@ mod tests {
         assert_eq!(value["command"]["type"], "rebase_session");
         assert_eq!(value["command"]["session_id"], "session-1");
         assert_eq!(value["command"]["config_revision"], "config-3");
+    }
+
+    #[test]
+    fn session_debug_export_is_an_explicit_operation() {
+        let message = ClientMessage {
+            id: 12,
+            command: Command::ExportSessionDebug {
+                session_id: SessionId::parse("session-1").unwrap(),
+            },
+        };
+        let value = serde_json::to_value(message).unwrap();
+        assert_eq!(value["command"]["type"], "export_session_debug");
+        assert_eq!(value["command"]["session_id"], "session-1");
     }
 
     #[test]
