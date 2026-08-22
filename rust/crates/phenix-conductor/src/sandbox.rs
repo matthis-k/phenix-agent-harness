@@ -440,7 +440,7 @@ fi
   --enable-seccomp \
   --ready-fd=3 \
   "$child_pid" tap0 \
-  3>&9 2>"$slirp_error" &
+  3>&9 >"$slirp_error.stdout" 2>"$slirp_error" &
 network_pid=$!
 
 network_ready=
