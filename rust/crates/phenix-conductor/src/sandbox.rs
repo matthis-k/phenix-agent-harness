@@ -391,7 +391,8 @@ info=$3
 gate=$4
 ready_pipe=$5
 slirp_error=$6
-shift 6
+test_watchdog_seconds=$7
+shift 7
 
 exec 8<>"$gate"
 exec 9<>"$ready_pipe"
@@ -454,8 +455,31 @@ if [ "$network_ready" != 1 ]; then
 fi
 
 printf 1 >&8
+sandbox_timeout="$slirp_error.sandbox-timeout"
+sandbox_watchdog_pid=
+if [ "$test_watchdog_seconds" -gt 0 ]; then
+  (
+    sleep "$test_watchdog_seconds"
+    if kill -0 "$sandbox_pid" 2>/dev/null; then
+      : >"$sandbox_timeout"
+      kill -KILL "$sandbox_pid" 2>/dev/null || true
+    fi
+  ) &
+  sandbox_watchdog_pid=$!
+fi
 wait "$sandbox_pid"
 sandbox_status=$?
+if [ -n "$sandbox_watchdog_pid" ]; then
+  kill "$sandbox_watchdog_pid" 2>/dev/null || true
+  wait "$sandbox_watchdog_pid" 2>/dev/null || true
+fi
+if [ -e "$sandbox_timeout" ]; then
+  kill "$network_pid" 2>/dev/null || true
+  wait "$network_pid" 2>/dev/null || true
+  printf '%s\\n' 'workspace sandbox did not exit after network release' >&2
+  while IFS= read -r line; do printf '%s\\n' "$line" >&2; done <"$slirp_error"
+  exit 125
+fi
 if ! kill -0 "$network_pid" 2>/dev/null; then
   wait "$network_pid" 2>/dev/null || true
   printf '%s\n' 'outbound network helper stopped before sandbox exit' >&2
@@ -527,6 +551,7 @@ fn run_with_outbound_network(process: &Command, state_root: &Path) -> Result<Out
         .arg(&gate)
         .arg(&ready)
         .arg(&slirp_error)
+        .arg(if cfg!(test) { "20" } else { "0" })
         .args(process.get_args());
     if let Some(directory) = process.get_current_dir() {
         wrapper.current_dir(directory);
@@ -782,7 +807,7 @@ mod tests {
             .arg("--")
             .arg(bash)
             .arg("-c")
-            .arg("test -S \"$1\" && test ! -e \"$2\"")
+            .arg("test -S \"$1\" && test ! -S \"$2\"")
             .arg("phenix-ipc-test")
             .arg(&granted)
             .arg(&ungranted)
