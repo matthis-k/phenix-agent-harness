@@ -540,7 +540,8 @@ fn run_with_outbound_network(process: &Command, state_root: &Path) -> Result<Out
 
     let shell = env::var_os("PHENIX_BASH").unwrap_or_else(|| OsString::from("bash"));
     let slirp = env::var_os("PHENIX_SLIRP4NETNS").unwrap_or_else(|| OsString::from("slirp4netns"));
-    let mut wrapper = Command::new(&shell);
+    let unshare = env::var_os("PHENIX_UNSHARE").unwrap_or_else(|| OsString::from("unshare"));
+    let mut wrapper = Command::new(&unshare);
     wrapper
         .env_clear()
         .envs(
@@ -548,6 +549,10 @@ fn run_with_outbound_network(process: &Command, state_root: &Path) -> Result<Out
                 .get_envs()
                 .filter_map(|(name, value)| value.map(|value| (name, value))),
         )
+        .arg("--user")
+        .arg("--map-root-user")
+        .arg("--")
+        .arg(&shell)
         .arg("-c")
         .arg(OUTBOUND_NETWORK_SCRIPT)
         .arg("phenix-outbound-network")
@@ -564,8 +569,8 @@ fn run_with_outbound_network(process: &Command, state_root: &Path) -> Result<Out
     }
     let output = wrapper.output().map_err(|error| {
         format!(
-            "failed to start outbound sandbox network wrapper {}: {error}",
-            Path::new(&shell).display()
+            "failed to start outbound sandbox network supervisor {}: {error}",
+            Path::new(&unshare).display()
         )
     });
     let _ = fs::remove_dir_all(&control);
