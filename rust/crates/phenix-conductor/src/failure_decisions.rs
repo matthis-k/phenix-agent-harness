@@ -345,10 +345,11 @@ Retry context JSON:
             state: ExecutionState::Pending,
         };
         let payload = ExecutionPayload::Invocation { input: objective };
-        self.record_domain_event(DomainEvent::ExecutionCreated {
-            execution: child.clone(),
-            payload: JournalExecutionPayload::from(&payload),
-        })?;
+        self.record_execution_created(
+            child.clone(),
+            JournalExecutionPayload::from(&payload),
+            None,
+        )?;
         Ok(child)
     }
 
@@ -617,6 +618,7 @@ Orchestration objective:
                     &node.callable,
                     node_objective,
                     Some(node.id),
+                    None,
                 )?;
             }
             return Ok(());

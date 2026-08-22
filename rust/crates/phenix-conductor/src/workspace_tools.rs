@@ -1,10 +1,12 @@
 mod transaction;
 
 use super::workspace_consistency::WorkspaceConsistency;
+use crate::sandbox::{ExecutionSandbox, ExecutionSandboxState, WorkspaceMount};
 use crate::{CompiledConfiguration, ConductorError, ConductorRuntime, ToolOutcome};
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, FileVersion,
-    FilesystemAuthority, CAPABILITY_FILESYSTEM_READ, CAPABILITY_FILESYSTEM_WRITE,
+    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionAuthority, FileVersion, FilesystemAuthority, CAPABILITY_FILESYSTEM_READ,
+    CAPABILITY_FILESYSTEM_WRITE,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -13,6 +15,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use transaction::{TransactionOutput, WorkspaceTransaction};
 
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
@@ -129,11 +132,7 @@ pub(super) fn register_into(
             FilesystemAuthority::ReadOnly,
         ),
         move |context, arguments| {
-            execute_bash(
-                &bash_consistency,
-                context.authority.filesystem,
-                arguments,
-            )
+            execute_bash(&bash_consistency, &context.authority, &context.sandbox_state, arguments)
         },
     )?;
 
@@ -383,7 +382,8 @@ fn nullable_file_version_schema() -> Value {
 
 fn execute_bash(
     consistency: &WorkspaceConsistency,
-    filesystem: FilesystemAuthority,
+    authority: &ExecutionAuthority,
+    sandbox_state: &Arc<ExecutionSandboxState>,
     arguments: &str,
 ) -> Result<String, String> {
     let input: BashInput = serde_json::from_str(arguments)
@@ -393,13 +393,17 @@ fn execute_bash(
     }
 
     let bash = std::env::var_os("PHENIX_BASH").unwrap_or_else(|| OsString::from("bash"));
-    let output = match filesystem {
+    let output = match authority.filesystem {
         FilesystemAuthority::ReadOnly => {
-            execute_read_only_bash(consistency, &bash, &input.command)?
+            execute_read_only_bash(consistency, authority, sandbox_state, &bash, &input.command)?
         }
         FilesystemAuthority::Write => {
-            let transaction = WorkspaceTransaction::begin(consistency.clone())
-                .map_err(|error| error.to_string())?;
+            let transaction = WorkspaceTransaction::begin(
+                consistency.clone(),
+                authority.clone(),
+                Arc::clone(sandbox_state),
+            )
+            .map_err(|error| error.to_string())?;
             let output = transaction
                 .execute(&bash, &input.command)
                 .map_err(|error| error.to_string())?;
@@ -418,6 +422,8 @@ fn execute_bash(
 
 fn execute_read_only_bash(
     consistency: &WorkspaceConsistency,
+    authority: &ExecutionAuthority,
+    sandbox_state: &ExecutionSandboxState,
     bash: &OsStr,
     command: &str,
 ) -> Result<TransactionOutput, String> {
@@ -426,28 +432,13 @@ fn execute_read_only_bash(
         .prepare_scratch_mounts()
         .map_err(|error| error.to_string())?;
     let mut process = Command::new(&bwrap);
-    process
-        .arg("--die-with-parent")
-        .arg("--unshare-pid")
-        .arg("--ro-bind")
-        .arg("/")
-        .arg("/")
-        .arg("--dev-bind")
-        .arg("/dev")
-        .arg("/dev")
-        .arg("--proc")
-        .arg("/proc")
-        .arg("--tmpfs")
-        .arg("/tmp");
-    for (_, absolute) in scratch_mounts {
-        process.arg("--bind").arg(&absolute).arg(&absolute);
-    }
+    ExecutionSandbox::new(authority, sandbox_state).configure_bwrap(
+        &mut process,
+        consistency.root(),
+        &scratch_mounts,
+        WorkspaceMount::ReadOnly,
+    )?;
     let output = process
-        .arg("--chdir")
-        .arg(consistency.root())
-        .arg("--setenv")
-        .arg("TMPDIR")
-        .arg("/tmp")
         .arg("--")
         .arg(bash)
         .arg("-c")
@@ -850,15 +841,27 @@ mod tests {
         WorkspaceConsistency::new(&descriptor(root, scratch_paths)).unwrap()
     }
 
+    fn bash_context(
+        filesystem: FilesystemAuthority,
+    ) -> (ExecutionAuthority, Arc<ExecutionSandboxState>) {
+        let authority = ExecutionAuthority {
+            filesystem,
+            ..ExecutionAuthority::default()
+        };
+        (authority, ExecutionSandboxState::create().unwrap())
+    }
+
     #[test]
     fn bash_executes_transactionally_in_the_bound_workspace() {
         let workspace = temp_workspace("bash-tool");
         fs::write(workspace.join("marker.txt"), "workspace-marker").unwrap();
         let consistency = consistency(&workspace, BTreeSet::new());
+        let (authority, state) = bash_context(FilesystemAuthority::Write);
 
         let output = execute_bash(
             &consistency,
-            FilesystemAuthority::Write,
+            &authority,
+            &state,
             r#"{"command":"printf '%s\\n' \"$(cat marker.txt)\" \"$PWD\"; printf changed > marker.txt"}"#,
         )
         .unwrap();
@@ -878,9 +881,11 @@ mod tests {
     fn nonzero_exit_is_reported_without_failing_the_tool_call() {
         let workspace = temp_workspace("bash-nonzero");
         let consistency = consistency(&workspace, BTreeSet::new());
+        let (authority, state) = bash_context(FilesystemAuthority::ReadOnly);
         let output = execute_bash(
             &consistency,
-            FilesystemAuthority::ReadOnly,
+            &authority,
+            &state,
             r#"{"command":"printf failure >&2; exit 7"}"#,
         )
         .unwrap();
@@ -895,10 +900,12 @@ mod tests {
         let workspace = temp_workspace("bash-read-only");
         fs::write(workspace.join("source.txt"), "protected").unwrap();
         let consistency = consistency(&workspace, BTreeSet::from([PathBuf::from("target")]));
+        let (authority, state) = bash_context(FilesystemAuthority::ReadOnly);
 
         let output = execute_bash(
             &consistency,
-            FilesystemAuthority::ReadOnly,
+            &authority,
+            &state,
             r#"{"command":"printf changed > source.txt; source_status=$?; printf scratch > target/cache; printf tmp > /tmp/cache; cat /tmp/cache; exit $source_status"}"#,
         )
         .unwrap();

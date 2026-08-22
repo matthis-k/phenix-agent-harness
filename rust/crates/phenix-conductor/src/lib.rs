@@ -10,6 +10,7 @@ mod journal;
 mod persistence;
 mod policy;
 mod routing;
+mod sandbox;
 mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
@@ -437,6 +438,7 @@ pub struct ConductorRuntime {
     events: Vec<ExecutionEvent>,
     journal: RuntimeJournal,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
+    sandbox_states: BTreeMap<ExecutionId, std::sync::Arc<sandbox::ExecutionSandboxState>>,
     policy: InvocationPolicy,
     event_sinks: BTreeMap<u64, std::sync::mpsc::Sender<ExecutionEvent>>,
     next_event_subscription: u64,
@@ -485,6 +487,7 @@ impl ConductorRuntime {
             read_sets: BTreeMap::new(),
             events: Vec::new(),
             skill_activations: BTreeMap::new(),
+            sandbox_states: BTreeMap::new(),
             policy: InvocationPolicy::new(),
             event_sinks: BTreeMap::new(),
             next_event_subscription: 0,
@@ -512,10 +515,7 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    fn record_domain_event(&mut self, mut event: DomainEvent) -> Result<(), ConductorError> {
-        if let DomainEvent::ExecutionCreated { execution, payload } = &mut event {
-            payload.set_authority(self.effective_authority_for_execution(execution)?);
-        }
+    fn record_domain_event(&mut self, event: DomainEvent) -> Result<(), ConductorError> {
         let frontend_event = match &event {
             DomainEvent::FrontendEvent { event } => Some(event.clone()),
             _ => None,
@@ -560,6 +560,20 @@ impl ConductorRuntime {
                 .retain(|_, sink| sink.send(event.clone()).is_ok());
         }
         Ok(())
+    }
+
+    fn record_execution_created(
+        &mut self,
+        execution: ExecutionSummary,
+        mut payload: JournalExecutionPayload,
+        restrictions: Option<&ExecutionAuthority>,
+    ) -> Result<(), ConductorError> {
+        let configured = self.effective_authority_for_execution(&execution)?;
+        let effective = restrictions.map_or(configured.clone(), |requested| {
+            configured.attenuate(requested)
+        });
+        payload.set_authority(effective);
+        self.record_domain_event(DomainEvent::ExecutionCreated { execution, payload })
     }
 
     pub fn register_invocation_guard<G>(&mut self, guard: G)
@@ -1260,6 +1274,15 @@ impl ConductorRuntime {
         session_id: &SessionId,
         text: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
+        self.submit_with_restrictions(session_id, text, None)
+    }
+
+    pub fn submit_with_restrictions(
+        &mut self,
+        session_id: &SessionId,
+        text: impl Into<String>,
+        restrictions: Option<&ExecutionAuthority>,
+    ) -> Result<ExecutionSummary, ConductorError> {
         let text = text.into();
         if text.trim().is_empty() {
             return Err(ConductorError::EmptyInput);
@@ -1281,13 +1304,14 @@ impl ConductorRuntime {
             target,
             state: ExecutionState::Pending,
         };
-        self.record_domain_event(DomainEvent::ExecutionCreated {
-            execution: summary.clone(),
-            payload: JournalExecutionPayload::Invocation {
+        self.record_execution_created(
+            summary.clone(),
+            JournalExecutionPayload::Invocation {
                 input: text.clone(),
                 authority: ExecutionAuthority::read_only(),
             },
-        })?;
+            restrictions,
+        )?;
         self.accept_root_submission(&summary)?;
         self.push_event(&summary.id, ExecutionEventKind::UserInput { text })?;
         self.push_event(
@@ -1347,7 +1371,17 @@ impl ConductorRuntime {
         callable: &CallableId,
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        self.start_agent_with_node(parent_id, callable, objective, None)
+        self.start_agent_with_node(parent_id, callable, objective, None, None)
+    }
+
+    pub fn start_agent_with_restrictions(
+        &mut self,
+        parent_id: &ExecutionId,
+        callable: &CallableId,
+        objective: impl Into<String>,
+        restrictions: &ExecutionAuthority,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        self.start_agent_with_node(parent_id, callable, objective, None, Some(restrictions))
     }
 
     fn start_agent_with_node(
@@ -1356,6 +1390,7 @@ impl ConductorRuntime {
         callable: &CallableId,
         objective: impl Into<String>,
         orchestration_node: Option<OrchestrationNodeId>,
+        restrictions: Option<&ExecutionAuthority>,
     ) -> Result<ExecutionSummary, ConductorError> {
         let callables = self
             .configuration_for_execution(parent_id)?
@@ -1384,6 +1419,7 @@ impl ConductorRuntime {
             ExecutionPayload::Invocation {
                 input: objective.into(),
             },
+            restrictions,
         )?;
         if let Some(node_id) = orchestration_node {
             self.record_domain_event(DomainEvent::OrchestrationNodeStarted {
@@ -1428,6 +1464,7 @@ impl ConductorRuntime {
             ExecutionPayload::Orchestration {
                 objective: objective.into(),
             },
+            None,
         )?;
         self.set_state(&summary.id, ExecutionState::Running)?;
         self.advance_orchestration(&summary.id)?;
@@ -1445,6 +1482,7 @@ impl ConductorRuntime {
         kind: ExecutionKind,
         callable: CallableId,
         payload: ExecutionPayload,
+        restrictions: Option<&ExecutionAuthority>,
     ) -> Result<ExecutionSummary, ConductorError> {
         let parent = self
             .executions
@@ -1467,10 +1505,11 @@ impl ConductorRuntime {
             target: parent.target,
             state: ExecutionState::Pending,
         };
-        self.record_domain_event(DomainEvent::ExecutionCreated {
-            execution: child.clone(),
-            payload: JournalExecutionPayload::from(&payload),
-        })?;
+        self.record_execution_created(
+            child.clone(),
+            JournalExecutionPayload::from(&payload),
+            restrictions,
+        )?;
         self.push_event(
             parent_id,
             ExecutionEventKind::ChildExecutionStarted {
@@ -1823,6 +1862,7 @@ impl ConductorRuntime {
         }
         if is_terminal(&state) {
             self.skill_activations.remove(execution_id);
+            self.sandbox_states.remove(execution_id);
             if let Some(parent) = parent {
                 self.push_event(
                     &parent,
@@ -1986,10 +2026,15 @@ impl ConductorRuntime {
         ) {
             Ok(()) => match serde_json::from_str::<Value>(&invocation.arguments_json) {
                 Ok(_) => {
+                    let authority = self
+                        .execution_authority(execution_id)
+                        .map_err(conductor_protocol_error)?;
+                    let sandbox_state = self
+                        .execution_sandbox_state(execution_id)
+                        .map_err(|error| BackendError::Protocol(error.to_string()))?;
                     let context = callables::ToolExecutionContext {
-                        authority: self
-                            .execution_authority(execution_id)
-                            .map_err(conductor_protocol_error)?,
+                        authority,
+                        sandbox_state,
                     };
                     let outcome = callables
                         .invoke_tool(&context, &invocation.callable, &invocation.arguments_json)
@@ -2035,6 +2080,19 @@ impl ConductorRuntime {
         } else {
             Ok(())
         }
+    }
+
+    fn execution_sandbox_state(
+        &mut self,
+        execution_id: &ExecutionId,
+    ) -> Result<std::sync::Arc<sandbox::ExecutionSandboxState>, std::io::Error> {
+        if let Some(state) = self.sandbox_states.get(execution_id) {
+            return Ok(std::sync::Arc::clone(state));
+        }
+        let state = sandbox::ExecutionSandboxState::create()?;
+        self.sandbox_states
+            .insert(execution_id.clone(), std::sync::Arc::clone(&state));
+        Ok(state)
     }
 
     fn new_config_revision_id(&self) -> ConfigRevisionId {
@@ -2333,6 +2391,68 @@ mod tests {
             runtime.execution_authority(&child.id).unwrap(),
             parent_authority.attenuate(&child_maximum)
         );
+    }
+
+    #[test]
+    fn invocation_restrictions_are_attenuated_and_replayed() {
+        let mut runtime = ConductorRuntime::new();
+        let parent_authority = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &["/run/parent.sock"],
+            &["TOKEN", "OTHER"],
+            &["agent.child", "tool.write"],
+        );
+        let child_maximum = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &["/run/parent.sock", "/run/other.sock"],
+            &["TOKEN"],
+            &["tool.write"],
+        );
+        let restrictions = authority(
+            FilesystemAuthority::ReadOnly,
+            NetworkAuthority::None,
+            RepositoryAuthority::Read,
+            &["/run/parent.sock"],
+            &["TOKEN"],
+            &[],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                parent_authority,
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                child_maximum.clone(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let child = runtime
+            .start_agent_with_restrictions(
+                &parent.id,
+                &CallableId::parse("agent.child").unwrap(),
+                "child",
+                &restrictions,
+            )
+            .unwrap();
+        let expected = child_maximum.attenuate(&restrictions);
+        assert_eq!(runtime.execution_authority(&child.id).unwrap(), expected);
+
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert_eq!(restored.execution_authority(&child.id).unwrap(), expected);
     }
 
     #[test]

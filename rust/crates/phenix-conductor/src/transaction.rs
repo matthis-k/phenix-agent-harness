@@ -1,5 +1,7 @@
 use super::super::workspace_consistency::WorkspaceConsistencyError;
 use super::WorkspaceConsistency;
+use crate::sandbox::{ExecutionSandbox, ExecutionSandboxState, WorkspaceMount};
+use phenix_core::ExecutionAuthority;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display, Formatter};
@@ -7,10 +9,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SANDBOX_SNAPSHOT_RELATIVE: &str = ".git/phenix-transaction/snapshot";
-const SANDBOX_RESULT_STATUS_RELATIVE: &str = ".git/phenix-transaction/result-status";
+const SANDBOX_SNAPSHOT_RELATIVE: &str = ".phenix-transaction/snapshot";
+const SANDBOX_RESULT_STATUS_RELATIVE: &str = ".phenix-transaction/result-status";
 const COMMAND_SCRIPT: &str = r#"
 bash_path=$1
 rsync_path=$2
@@ -36,12 +39,12 @@ while :; do
   [ "$descendants" -eq 0 ] && break
 done
 
-git_dir="$workspace/.git"
-snapshot="$workspace/.git/phenix-transaction/snapshot"
-excludes="$workspace/.git/phenix-transaction/excludes"
-result_status="$workspace/.git/phenix-transaction/result-status"
+control="$workspace/.phenix-transaction"
+snapshot="$control/snapshot"
+excludes="$control/excludes"
+result_status="$control/result-status"
 
-"$rm_path" -rf -- "$git_dir" || exit $?
+"$rm_path" -rf -- "$control" || exit $?
 "$mkdir_path" -p -- "$snapshot" || exit $?
 printf '%s' "$exclude_rules" > "$excludes" || exit $?
 
@@ -74,10 +77,16 @@ pub(super) struct WorkspaceTransaction {
     scratch_mounts: Vec<(PathBuf, PathBuf)>,
     paths: TransactionPaths,
     rsync: OsString,
+    authority: ExecutionAuthority,
+    sandbox_state: Arc<ExecutionSandboxState>,
 }
 
 impl WorkspaceTransaction {
-    pub fn begin(consistency: WorkspaceConsistency) -> Result<Self, TransactionError> {
+    pub fn begin(
+        consistency: WorkspaceConsistency,
+        authority: ExecutionAuthority,
+        sandbox_state: Arc<ExecutionSandboxState>,
+    ) -> Result<Self, TransactionError> {
         let scratch_mounts = consistency.prepare_scratch_mounts()?;
         let baseline = consistency.checkpoint_baseline()?;
         let paths = TransactionPaths::create(consistency.root())?;
@@ -89,6 +98,8 @@ impl WorkspaceTransaction {
             scratch_mounts,
             paths,
             rsync,
+            authority,
+            sandbox_state,
         })
     }
 
@@ -106,7 +117,7 @@ impl WorkspaceTransaction {
                 source,
             })?;
         let output = self
-            .sandbox_command(&bwrap, &self.paths.command_work)
+            .sandbox_command(&bwrap, &self.paths.command_work)?
             .arg("--")
             .arg(bash)
             .arg("-c")
@@ -187,39 +198,20 @@ impl WorkspaceTransaction {
         Ok(())
     }
 
-    fn sandbox_command(&self, bwrap: &OsStr, work: &Path) -> Command {
+    fn sandbox_command(&self, bwrap: &OsStr, work: &Path) -> Result<Command, TransactionError> {
         let mut process = Command::new(bwrap);
-        process
-            .arg("--die-with-parent")
-            .arg("--unshare-pid")
-            .arg("--ro-bind")
-            .arg("/")
-            .arg("/")
-            .arg("--dev-bind")
-            .arg("/dev")
-            .arg("/dev")
-            .arg("--proc")
-            .arg("/proc")
-            .arg("--tmpfs")
-            .arg("/tmp")
-            .arg("--overlay-src")
-            .arg(self.consistency.root())
-            .arg("--overlay")
-            .arg(&self.paths.upper)
-            .arg(work)
-            .arg(self.consistency.root());
-
-        for (_, absolute) in &self.scratch_mounts {
-            process.arg("--bind").arg(absolute).arg(absolute);
-        }
-
-        process
-            .arg("--chdir")
-            .arg(self.consistency.root())
-            .arg("--setenv")
-            .arg("TMPDIR")
-            .arg("/tmp");
-        process
+        ExecutionSandbox::new(&self.authority, &self.sandbox_state)
+            .configure_bwrap(
+                &mut process,
+                self.consistency.root(),
+                &self.scratch_mounts,
+                WorkspaceMount::Overlay {
+                    upper: &self.paths.upper,
+                    work,
+                },
+            )
+            .map_err(TransactionError::SandboxConfiguration)?;
+        Ok(process)
     }
 }
 
@@ -289,7 +281,7 @@ impl TransactionPaths {
         &self,
         scratch_mounts: &[(PathBuf, PathBuf)],
     ) -> Result<(), TransactionError> {
-        let mut rules = String::from(".git\n");
+        let mut rules = String::from(".git\n.phenix-transaction\n");
         for (relative, _) in scratch_mounts {
             let pattern = relative.to_string_lossy();
             rules.push('/');
@@ -329,6 +321,7 @@ pub(super) enum TransactionError {
         exit_code: i32,
         stderr: String,
     },
+    SandboxConfiguration(String),
     ApplyFailed {
         exit_code: i32,
         stderr: String,
@@ -366,6 +359,9 @@ impl Display for TransactionError {
                 "workspace sandbox failed with exit code {exit_code}: {}",
                 stderr.trim()
             ),
+            Self::SandboxConfiguration(message) => {
+                write!(f, "workspace sandbox configuration failed: {message}")
+            }
             Self::ApplyFailed { exit_code, stderr } => write!(
                 f,
                 "workspace transaction apply failed with exit code {exit_code}: {}",
@@ -390,6 +386,7 @@ impl Error for TransactionError {
             Self::TempInsideWorkspace(_)
             | Self::CreateTempExhausted(_)
             | Self::InvalidSandboxStatus { .. }
+            | Self::SandboxConfiguration(_)
             | Self::SandboxFailed { .. }
             | Self::ApplyFailed { .. } => None,
         }
@@ -446,6 +443,20 @@ mod tests {
         std::env::var_os("PHENIX_BASH").unwrap_or_else(|| OsString::from("bash"))
     }
 
+    fn begin_transaction(
+        consistency: WorkspaceConsistency,
+    ) -> Result<WorkspaceTransaction, TransactionError> {
+        let authority = ExecutionAuthority {
+            filesystem: phenix_core::FilesystemAuthority::Write,
+            ..ExecutionAuthority::default()
+        };
+        WorkspaceTransaction::begin(
+            consistency,
+            authority,
+            ExecutionSandboxState::create().unwrap(),
+        )
+    }
+
     #[test]
     fn protected_changes_apply_git_changes_discard_and_scratch_writes_persist() {
         let fixture = Fixture::new("overlay");
@@ -454,10 +465,9 @@ mod tests {
         fs::write(fixture.root.join("source.txt"), "old").unwrap();
         fs::write(fixture.root.join(".git/index"), "git-old").unwrap();
         fs::write(fixture.root.join("target/cache"), "scratch-old").unwrap();
-        let transaction = WorkspaceTransaction::begin(
-            fixture.consistency(BTreeSet::from([PathBuf::from("target")])),
-        )
-        .unwrap();
+        let transaction =
+            begin_transaction(fixture.consistency(BTreeSet::from([PathBuf::from("target")])))
+                .unwrap();
 
         let output = transaction
             .execute(
@@ -501,8 +511,7 @@ mod tests {
         let fixture = Fixture::new("checksum");
         let source = fixture.root.join("source.txt");
         fs::write(&source, "old").unwrap();
-        let transaction =
-            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+        let transaction = begin_transaction(fixture.consistency(BTreeSet::new())).unwrap();
         transaction
             .execute(&bash(), "printf new > source.txt")
             .unwrap();
@@ -524,13 +533,12 @@ mod tests {
     fn user_command_cannot_modify_transaction_control_state() {
         let fixture = Fixture::new("controls");
         fs::write(fixture.root.join("source.txt"), "old").unwrap();
-        let transaction =
-            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+        let transaction = begin_transaction(fixture.consistency(BTreeSet::new())).unwrap();
 
         let output = transaction
             .execute(
                 &bash(),
-                "rm -rf .git; mkdir -p .git/phenix-transaction/snapshot; printf tamper > .git/phenix-transaction/snapshot/source.txt; printf 99 > .git/phenix-transaction/result-status; printf new > source.txt",
+                "rm -rf .phenix-transaction; mkdir -p .phenix-transaction/snapshot; printf tamper > .phenix-transaction/snapshot/source.txt; printf 99 > .phenix-transaction/result-status; printf new > source.txt",
             )
             .unwrap();
 
@@ -554,13 +562,12 @@ mod tests {
     fn background_user_process_cannot_modify_transaction_control_state() {
         let fixture = Fixture::new("background-controls");
         fs::write(fixture.root.join("source.txt"), "old").unwrap();
-        let transaction =
-            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+        let transaction = begin_transaction(fixture.consistency(BTreeSet::new())).unwrap();
 
         let output = transaction
             .execute(
                 &bash(),
-                "printf new > source.txt; (while :; do mkdir -p .git/phenix-transaction/snapshot; printf tamper > .git/phenix-transaction/snapshot/source.txt; printf 99 > .git/phenix-transaction/result-status; done) >/dev/null 2>&1 &",
+                "printf new > source.txt; (while :; do mkdir -p .phenix-transaction/snapshot; printf tamper > .phenix-transaction/snapshot/source.txt; printf 99 > .phenix-transaction/result-status; done) >/dev/null 2>&1 &",
             )
             .unwrap();
 
@@ -584,8 +591,7 @@ mod tests {
     fn nonzero_user_command_still_commits_its_protected_result() {
         let fixture = Fixture::new("nonzero");
         fs::write(fixture.root.join("source.txt"), "old").unwrap();
-        let transaction =
-            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+        let transaction = begin_transaction(fixture.consistency(BTreeSet::new())).unwrap();
 
         let output = transaction
             .execute(
@@ -607,8 +613,7 @@ mod tests {
     fn concurrent_protected_path_creation_rejects_the_overlay_result() {
         let fixture = Fixture::new("conflict");
         fs::write(fixture.root.join("source.txt"), "old").unwrap();
-        let transaction =
-            WorkspaceTransaction::begin(fixture.consistency(BTreeSet::new())).unwrap();
+        let transaction = begin_transaction(fixture.consistency(BTreeSet::new())).unwrap();
         transaction
             .execute(&bash(), "printf agent > source.txt")
             .unwrap();

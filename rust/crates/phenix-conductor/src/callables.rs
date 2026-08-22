@@ -1,7 +1,7 @@
 use crate::{
-    CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
-    ExecutionProvider, ExecutionProviderBinding, ExecutionProviderKind, InvocationPolicyContext,
-    InvocationSubject, JournalExecutionPayload,
+    CallableOperation, ConductorError, ConductorRuntime, ExecutionPayload, ExecutionProvider,
+    ExecutionProviderBinding, ExecutionProviderKind, InvocationPolicyContext, InvocationSubject,
+    JournalExecutionPayload,
 };
 use phenix_backend::ToolResult;
 use phenix_core::{
@@ -18,6 +18,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub(crate) struct ToolExecutionContext {
     pub authority: ExecutionAuthority,
+    pub sandbox_state: Arc<crate::sandbox::ExecutionSandboxState>,
 }
 
 type ToolHandler = dyn Fn(&ToolExecutionContext, &str) -> Result<ToolOutcome, String> + Send + Sync;
@@ -569,6 +570,16 @@ impl ConductorRuntime {
         callable: &CallableId,
         objective: impl Into<String>,
     ) -> Result<ExecutionSummary, ConductorError> {
+        self.start_session_callable_with_restrictions(session_id, callable, objective, None)
+    }
+
+    pub fn start_session_callable_with_restrictions(
+        &mut self,
+        session_id: &SessionId,
+        callable: &CallableId,
+        objective: impl Into<String>,
+        restrictions: Option<&ExecutionAuthority>,
+    ) -> Result<ExecutionSummary, ConductorError> {
         let objective = objective.into();
         if objective.trim().is_empty() {
             return Err(ConductorError::EmptyInput);
@@ -597,7 +608,7 @@ impl ConductorRuntime {
                     ExecutionPayload::Invocation {
                         input: objective.clone(),
                     },
-                    objective,
+                    restrictions,
                 )
             }
             CallableKind::Orchestration => {
@@ -636,7 +647,7 @@ impl ConductorRuntime {
                     ExecutionPayload::Orchestration {
                         objective: objective.clone(),
                     },
-                    objective,
+                    restrictions,
                 )?;
                 self.set_state(&summary.id, ExecutionState::Running)?;
                 self.advance_orchestration(&summary.id)?;
@@ -688,8 +699,12 @@ impl ConductorRuntime {
         kind: ExecutionKind,
         callable: CallableId,
         payload: ExecutionPayload,
-        user_input: String,
+        restrictions: Option<&ExecutionAuthority>,
     ) -> Result<ExecutionSummary, ConductorError> {
+        let user_input = match &payload {
+            ExecutionPayload::Invocation { input } => input.clone(),
+            ExecutionPayload::Orchestration { objective } => objective.clone(),
+        };
         let target = self
             .sessions
             .get(session_id)
@@ -706,10 +721,11 @@ impl ConductorRuntime {
             target,
             state: ExecutionState::Pending,
         };
-        self.record_domain_event(DomainEvent::ExecutionCreated {
-            execution: summary.clone(),
-            payload: JournalExecutionPayload::from(&payload),
-        })?;
+        self.record_execution_created(
+            summary.clone(),
+            JournalExecutionPayload::from(&payload),
+            restrictions,
+        )?;
         self.accept_root_submission(&summary)?;
         self.push_event(
             &summary.id,
@@ -987,6 +1003,7 @@ mod tests {
             .unwrap();
         let context = ToolExecutionContext {
             authority: ExecutionAuthority::read_only(),
+            sandbox_state: crate::sandbox::ExecutionSandboxState::create().unwrap(),
         };
         let result = registry
             .invoke_tool(
