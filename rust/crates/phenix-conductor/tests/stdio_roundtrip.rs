@@ -195,7 +195,7 @@ mod unix_service {
         (
             root.clone(),
             root.join("conductor.sock"),
-            root.join("state.json"),
+            root.join("state.sqlite3"),
         )
     }
 

@@ -3,7 +3,7 @@ use phenix_backend_acp::{AcpBackend, AcpBackendConfig};
 use phenix_backend_native::{PhenixBackend, BACKEND_ID as PHENIX_BACKEND_ID};
 use phenix_conductor::{
     CompiledConfiguration, ConductorError, ConductorRuntime, ConductorServer, ContextRegistry,
-    JsonFileStore, SkillRegistry,
+    SkillRegistry, SqliteStore,
 };
 use phenix_core::{BackendId, ProviderId};
 use std::error::Error;
@@ -30,7 +30,7 @@ struct Arguments {
     #[arg(long, value_name = "FILE")]
     configuration: Option<PathBuf>,
 
-    /// Durable conductor checkpoint. If omitted the process is ephemeral.
+    /// Durable conductor SQLite database. If omitted the process is ephemeral.
     #[arg(long, value_name = "FILE")]
     state: Option<PathBuf>,
 
@@ -66,9 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let workspace = workspace::Workspace::discover(&cwd)?;
     let mut server = match arguments.state {
-        Some(path) => {
-            ConductorServer::load_or_new(JsonFileStore::new(path), workspace.id().clone())?
-        }
+        Some(path) => ConductorServer::load_or_new(SqliteStore::new(path), workspace.id().clone())?,
         None => {
             let mut runtime = ConductorRuntime::new();
             runtime.bind_workspace(workspace.id().clone())?;

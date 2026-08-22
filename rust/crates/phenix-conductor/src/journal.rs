@@ -15,7 +15,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
-pub const JOURNAL_FORMAT_VERSION: u64 = 2;
+pub const JOURNAL_FORMAT_VERSION: u64 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -114,6 +114,11 @@ pub enum DomainEvent {
     ExecutionCreated {
         execution: ExecutionSummary,
         payload: JournalExecutionPayload,
+    },
+    RootSubmissionAccepted {
+        session_id: SessionId,
+        execution_id: ExecutionId,
+        ingress_order: u64,
     },
     ExecutionStateChanged {
         execution_id: ExecutionId,
@@ -241,6 +246,8 @@ pub(crate) struct DurableProjection<'a> {
     pub current_config_revision: &'a mut ConfigRevisionId,
     pub sessions: &'a mut BTreeMap<SessionId, SessionRecord>,
     pub executions: &'a mut BTreeMap<ExecutionId, ExecutionRecord>,
+    pub root_ingress: &'a mut BTreeMap<ExecutionId, u64>,
+    pub next_root_ingress: &'a mut BTreeMap<SessionId, u64>,
     pub attempt_groups: &'a mut BTreeMap<AttemptGroupId, AttemptGroup>,
     pub orchestration_decisions: &'a mut BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
     pub orchestration_interfaces: &'a mut BTreeMap<ExecutionId, ExecutionId>,
@@ -565,6 +572,48 @@ pub(crate) fn apply_domain_event(
                 }
             }
             *state.next_execution += 1;
+        }
+        DomainEvent::RootSubmissionAccepted {
+            session_id,
+            execution_id,
+            ingress_order,
+        } => {
+            let execution = state.executions.get(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "root ingress references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.summary.session_id != *session_id
+                || execution.summary.parent_execution.is_some()
+                || execution.summary.state != ExecutionState::Pending
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "root ingress does not match pending root execution {execution_id}"
+                )));
+            }
+            let expected = state
+                .next_root_ingress
+                .get(session_id)
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(1);
+            if *ingress_order != expected {
+                return Err(JournalError::InvalidEvent(format!(
+                    "session {session_id} ingress order expected {expected}, found {ingress_order}"
+                )));
+            }
+            if state
+                .root_ingress
+                .insert(execution_id.clone(), *ingress_order)
+                .is_some()
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "root execution {execution_id} was accepted more than once"
+                )));
+            }
+            state
+                .next_root_ingress
+                .insert(session_id.clone(), *ingress_order);
         }
         DomainEvent::ExecutionStateChanged {
             execution_id,

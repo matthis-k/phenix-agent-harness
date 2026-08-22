@@ -22,13 +22,13 @@ pub use failure_decisions::OrchestrationFailureDecisionRequest;
 pub use journal::{
     DomainEvent, JournalEntry, JournalError, JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
-pub use persistence::{JsonFileStore, PersistenceError};
+pub use persistence::{PersistenceError, SqliteStore};
 pub use policy::{
     CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
     InvocationPolicyContext, InvocationSubject, PolicyDenial,
 };
 pub use routing::{RoutingRegistry, RoutingRegistryError};
-pub use server::{ConductorServer, ServerError};
+pub use server::{ConductorServer, ConductorService, ServerError};
 
 use journal::{apply_domain_event, DurableProjection};
 use phenix_backend::{
@@ -413,6 +413,8 @@ pub struct ConductorRuntime {
     workspace_id: WorkspaceId,
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
+    root_ingress: BTreeMap<ExecutionId, u64>,
+    next_root_ingress: BTreeMap<SessionId, u64>,
     attempt_groups: BTreeMap<AttemptGroupId, AttemptGroup>,
     orchestration_decisions: BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
     orchestration_interfaces: BTreeMap<ExecutionId, ExecutionId>,
@@ -423,7 +425,8 @@ pub struct ConductorRuntime {
     journal: RuntimeJournal,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
     policy: InvocationPolicy,
-    event_sink: Option<std::sync::mpsc::SyncSender<ExecutionEvent>>,
+    event_sinks: BTreeMap<u64, std::sync::mpsc::Sender<ExecutionEvent>>,
+    next_event_subscription: u64,
     next_config_revision: u64,
     next_session: u64,
     next_execution: u64,
@@ -459,6 +462,8 @@ impl ConductorRuntime {
             workspace_id,
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
+            root_ingress: BTreeMap::new(),
+            next_root_ingress: BTreeMap::new(),
             attempt_groups: BTreeMap::new(),
             orchestration_decisions: BTreeMap::new(),
             orchestration_interfaces: BTreeMap::new(),
@@ -468,7 +473,8 @@ impl ConductorRuntime {
             events: Vec::new(),
             skill_activations: BTreeMap::new(),
             policy: InvocationPolicy::new(),
-            event_sink: None,
+            event_sinks: BTreeMap::new(),
+            next_event_subscription: 0,
             next_config_revision: 1,
             next_session: 0,
             next_execution: 0,
@@ -514,6 +520,8 @@ impl ConductorRuntime {
                 current_config_revision: &mut self.config_revision,
                 sessions: &mut self.sessions,
                 executions: &mut self.executions,
+                root_ingress: &mut self.root_ingress,
+                next_root_ingress: &mut self.next_root_ingress,
                 attempt_groups: &mut self.attempt_groups,
                 orchestration_decisions: &mut self.orchestration_decisions,
                 orchestration_interfaces: &mut self.orchestration_interfaces,
@@ -535,13 +543,8 @@ impl ConductorRuntime {
             return Err(error.into());
         }
         if let Some(event) = frontend_event {
-            if self
-                .event_sink
-                .as_ref()
-                .is_some_and(|sink| sink.send(event).is_err())
-            {
-                self.event_sink = None;
-            }
+            self.event_sinks
+                .retain(|_, sink| sink.send(event.clone()).is_ok());
         }
         Ok(())
     }
@@ -1186,6 +1189,7 @@ impl ConductorRuntime {
                 authority: ExecutionAuthority::read_only(),
             },
         })?;
+        self.accept_root_submission(&summary)?;
         self.push_event(&summary.id, ExecutionEventKind::UserInput { text })?;
         self.push_event(
             &summary.id,
@@ -1194,6 +1198,48 @@ impl ConductorRuntime {
             },
         )?;
         Ok(summary)
+    }
+
+    pub(crate) fn accept_root_submission(
+        &mut self,
+        execution: &ExecutionSummary,
+    ) -> Result<(), ConductorError> {
+        let ingress_order = self
+            .next_root_ingress
+            .get(&execution.session_id)
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.record_domain_event(DomainEvent::RootSubmissionAccepted {
+            session_id: execution.session_id.clone(),
+            execution_id: execution.id.clone(),
+            ingress_order,
+        })
+    }
+
+    #[must_use]
+    pub fn root_ingress_order(&self, execution_id: &ExecutionId) -> Option<u64> {
+        self.root_ingress.get(execution_id).copied()
+    }
+
+    #[must_use]
+    pub fn pending_roots_in_ingress_order(&self) -> Vec<ExecutionSummary> {
+        let mut roots = self
+            .executions
+            .values()
+            .filter(|execution| {
+                execution.summary.parent_execution.is_none()
+                    && execution.summary.state == ExecutionState::Pending
+            })
+            .map(|execution| execution.summary.clone())
+            .collect::<Vec<_>>();
+        roots.sort_by(|left, right| {
+            left.session_id.cmp(&right.session_id).then_with(|| {
+                self.root_ingress_order(&left.id)
+                    .cmp(&self.root_ingress_order(&right.id))
+            })
+        });
+        roots
     }
 
     pub fn start_agent(
@@ -1696,13 +1742,31 @@ impl ConductorRuntime {
         &mut self,
         capacity: usize,
     ) -> std::sync::mpsc::Receiver<ExecutionEvent> {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(capacity.max(1));
-        self.event_sink = Some(sender);
-        receiver
+        self.subscribe_events_with_id(capacity).1
+    }
+
+    pub fn subscribe_events_with_id(
+        &mut self,
+        _capacity: usize,
+    ) -> (u64, std::sync::mpsc::Receiver<ExecutionEvent>) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.next_event_subscription = self.next_event_subscription.saturating_add(1);
+        let subscription = self.next_event_subscription;
+        self.event_sinks.insert(subscription, sender);
+        (subscription, receiver)
+    }
+
+    pub fn unsubscribe_event_subscription(&mut self, subscription: u64) {
+        self.event_sinks.remove(&subscription);
     }
 
     pub fn unsubscribe_events(&mut self) {
-        self.event_sink = None;
+        self.event_sinks.clear();
+    }
+
+    #[must_use]
+    pub fn event_subscription_count(&self) -> usize {
+        self.event_sinks.len()
     }
 
     #[must_use]

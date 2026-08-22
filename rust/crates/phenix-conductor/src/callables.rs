@@ -710,6 +710,7 @@ impl ConductorRuntime {
             execution: summary.clone(),
             payload: JournalExecutionPayload::from(&payload),
         })?;
+        self.accept_root_submission(&summary)?;
         self.push_event(
             &summary.id,
             ExecutionEventKind::UserInput { text: user_input },
