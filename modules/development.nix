@@ -387,12 +387,17 @@
                   stepName = "Unit tests";
                 };
                 runtimeInputs = pkgs: [
+                  pkgs.bash
                   pkgs.bubblewrap
                   pkgs.cargo
                   pkgs.coreutils
                   pkgs.git
+                  pkgs.iproute2
+                  pkgs.ripgrep
                   pkgs.rsync
                   pkgs.rustc
+                  pkgs.slirp4netns
+                  pkgs.util-linux
                 ];
                 exec = ''
                   ${rustRoot}
@@ -406,7 +411,7 @@
                       -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null
                   fi
 
-                  cargo test --workspace --lib --bins --locked
+                  timeout --signal=KILL 180 cargo test --workspace --lib --bins --locked -- --nocapture --test-threads=1
                 '';
               };
 
@@ -519,6 +524,7 @@
           pkgs.rust-analyzer
           pkgs.rustc
           pkgs.rustfmt
+          pkgs.slirp4netns
           pkgs.statix
           pkgs.taplo
           maintenancePackage.package
