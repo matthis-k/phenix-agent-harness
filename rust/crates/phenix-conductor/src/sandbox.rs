@@ -396,7 +396,6 @@ shift 7
 
 exec 8<>"$gate"
 exec 9<>"$ready_pipe"
-exec 10<>"$exit_pipe"
 
 "$bwrap" --info-fd 3 --block-fd 4 "$@" 3>"$info" 4<&8 &
 sandbox_pid=$!
@@ -442,8 +441,9 @@ fi
   --ready-fd=3 \
   --exit-fd=4 \
   "$child_pid" tap0 \
-  3>&9 4<&10- 2>"$slirp_error" &
+  3>&9 4<"$exit_pipe" 2>"$slirp_error" &
 network_pid=$!
+exec 10>"$exit_pipe"
 
 network_ready=
 IFS= read -r -n 1 -t 15 network_ready <&9 || true
