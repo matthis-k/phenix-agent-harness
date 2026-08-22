@@ -60,6 +60,10 @@ pub enum ConductorError {
     EmptyInput,
     InvalidLifecycle(ExecutionId),
     InvalidRetry(ExecutionId),
+    DelegationDenied {
+        parent_execution: ExecutionId,
+        callable: CallableId,
+    },
     NonModelExecution(ExecutionId),
     NonProviderExecution(ExecutionId),
     PolicyDenied {
@@ -90,6 +94,13 @@ impl Display for ConductorError {
             Self::EmptyInput => f.write_str("input must not be empty"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
             Self::InvalidRetry(id) => write!(f, "execution cannot be retried: {id}"),
+            Self::DelegationDenied {
+                parent_execution,
+                callable,
+            } => write!(
+                f,
+                "execution {parent_execution} may not delegate callable {callable}"
+            ),
             Self::NonModelExecution(id) => {
                 write!(f, "execution is not model-provider backed: {id}")
             }
@@ -573,11 +584,26 @@ impl ConductorRuntime {
         execution: &ExecutionSummary,
     ) -> Result<ExecutionAuthority, ConductorError> {
         match execution.kind {
-            ExecutionKind::Root => Ok(authority_envelope(
-                self.callables
-                    .agent_definitions()
-                    .map(|definition| &definition.authority),
-            )),
+            ExecutionKind::Root => {
+                let mut authority = authority_envelope(
+                    self.callables
+                        .agent_definitions()
+                        .map(|definition| &definition.authority),
+                );
+                authority.callables.extend(
+                    self.callables
+                        .descriptors()
+                        .into_iter()
+                        .filter(|descriptor| {
+                            matches!(
+                                descriptor.kind,
+                                CallableKind::Agent | CallableKind::Orchestration
+                            )
+                        })
+                        .map(|descriptor| descriptor.id),
+                );
+                Ok(authority)
+            }
             ExecutionKind::Agent => {
                 let Some(callable) = execution.callable.as_ref() else {
                     return Ok(ExecutionAuthority::read_only());
@@ -598,7 +624,11 @@ impl ConductorRuntime {
                             .map(|definition| &definition.authority)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(authority_envelope(authorities))
+                let mut authority = authority_envelope(authorities);
+                authority
+                    .callables
+                    .extend(definition.nodes.iter().map(|node| node.callable.clone()));
+                Ok(authority)
             }
         }
     }
@@ -921,9 +951,14 @@ impl ConductorRuntime {
         let parent = self
             .executions
             .get(parent_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?
-            .summary
-            .clone();
+            .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?;
+        if !parent.authority.callables.contains(&callable) {
+            return Err(ConductorError::DelegationDenied {
+                parent_execution: parent_id.clone(),
+                callable,
+            });
+        }
+        let parent = parent.summary.clone();
         self.ensure_session_active(&parent.session_id)?;
         let child = ExecutionSummary {
             id: self.new_execution_id(),
@@ -1879,6 +1914,53 @@ mod tests {
     }
 
     #[test]
+    fn child_creation_requires_parent_callable_delegation() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.allowed"],
+                ),
+            ))
+            .unwrap();
+        for callable in ["agent.allowed", "agent.denied"] {
+            runtime
+                .register_agent(AgentDefinition::new(
+                    agent(callable),
+                    ExecutionAuthority::read_only(),
+                ))
+                .unwrap();
+        }
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let before = runtime.snapshot().executions.len();
+        let denied = CallableId::parse("agent.denied").unwrap();
+
+        assert_eq!(
+            runtime
+                .start_agent(&parent.id, &denied, "denied child")
+                .unwrap_err(),
+            ConductorError::DelegationDenied {
+                parent_execution: parent.id,
+                callable: denied,
+            }
+        );
+        assert_eq!(runtime.snapshot().executions.len(), before);
+    }
+
+    #[test]
     fn root_authority_is_the_configured_agent_envelope() {
         let mut runtime = ConductorRuntime::new();
         let scout = authority(
@@ -1906,16 +1988,25 @@ mod tests {
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let root = runtime.submit(&session.id, "work").unwrap();
 
-        assert_eq!(
-            runtime.execution_authority(&root.id).unwrap(),
-            authority_envelope([&scout, &worker])
-        );
+        let mut expected = authority_envelope([&scout, &worker]);
+        expected.callables.extend([
+            CallableId::parse("agent.scout").unwrap(),
+            CallableId::parse("agent.worker").unwrap(),
+        ]);
+        assert_eq!(runtime.execution_authority(&root.id).unwrap(), expected);
     }
 
     #[test]
     fn execution_authority_roundtrips_and_rejects_parent_expansion() {
         let mut runtime = ConductorRuntime::new();
-        let parent_authority = ExecutionAuthority::read_only();
+        let parent_authority = authority(
+            FilesystemAuthority::ReadOnly,
+            NetworkAuthority::None,
+            RepositoryAuthority::Read,
+            &[],
+            &[],
+            &["agent.child"],
+        );
         let child_maximum = authority(
             FilesystemAuthority::Write,
             NetworkAuthority::Outbound,
@@ -1931,7 +2022,10 @@ mod tests {
             ))
             .unwrap();
         runtime
-            .register_agent(AgentDefinition::new(agent("agent.child"), child_maximum))
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                child_maximum.clone(),
+            ))
             .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let parent = runtime
@@ -1952,10 +2046,10 @@ mod tests {
         let restored = ConductorRuntime::restore(journal.clone()).unwrap();
         assert_eq!(
             restored.execution_authority(&child.id).unwrap(),
-            parent_authority
+            parent_authority.attenuate(&child_maximum)
         );
 
-        let mut corrupted = journal;
+        let mut corrupted = journal.clone();
         let child_payload = corrupted
             .entries
             .iter_mut()
@@ -1979,6 +2073,23 @@ mod tests {
         assert!(matches!(
             ConductorRuntime::restore(corrupted),
             Err(PersistenceError::InvalidJournal(message)) if message.contains("authority exceeds parent")
+        ));
+
+        let mut corrupted = journal;
+        let child_execution = corrupted
+            .entries
+            .iter_mut()
+            .find_map(|entry| match &mut entry.event {
+                DomainEvent::ExecutionCreated { execution, .. } if execution.id == child.id => {
+                    Some(execution)
+                }
+                _ => None,
+            })
+            .expect("child creation is durable");
+        child_execution.callable = Some(CallableId::parse("agent.other").unwrap());
+        assert!(matches!(
+            ConductorRuntime::restore(corrupted),
+            Err(PersistenceError::InvalidJournal(message)) if message.contains("not delegated by parent")
         ));
     }
 
@@ -2155,14 +2266,25 @@ mod tests {
     #[test]
     fn failed_parent_cancels_deep_active_subtree() {
         let mut runtime = ConductorRuntime::new();
-        for callable in ["agent.parent", "agent.child"] {
-            runtime
-                .register_agent(AgentDefinition::new(
-                    agent(callable),
-                    ExecutionAuthority::read_only(),
-                ))
-                .unwrap();
-        }
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.child"],
+                ),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
         let session = runtime.create_session(None, None, fixed("a")).unwrap();
         let root = runtime.submit(&session.id, "root").unwrap();
         let parent = runtime

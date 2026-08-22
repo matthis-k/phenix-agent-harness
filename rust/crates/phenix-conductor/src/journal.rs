@@ -456,6 +456,14 @@ pub(crate) fn apply_domain_event(
                         execution.id
                     ))
                 })?;
+                if let Some(callable) = execution.callable.as_ref() {
+                    if !parent.authority.callables.contains(callable) {
+                        return Err(JournalError::InvalidEvent(format!(
+            "execution {} callable {callable} is not delegated by parent {parent_id}",
+            execution.id
+        )));
+                    }
+                }
                 if !parent.authority.permits(payload.authority()) {
                     return Err(JournalError::InvalidEvent(format!(
                         "execution {} authority exceeds parent {parent_id}",
