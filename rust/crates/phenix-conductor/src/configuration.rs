@@ -1,4 +1,4 @@
-use phenix_conductor::{ConductorError, ConductorRuntime};
+use phenix_conductor::{CompiledConfiguration, ConductorError};
 use phenix_core::{AgentDefinition, OrchestrationDefinition, RoutingProfile};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -36,17 +36,20 @@ impl RuntimeConfiguration {
         })
     }
 
-    pub fn apply(self, runtime: &mut ConductorRuntime) -> Result<(), ConfigurationError> {
+    pub fn compile(
+        self,
+        mut configuration: CompiledConfiguration,
+    ) -> Result<CompiledConfiguration, ConfigurationError> {
         for agent in self.agents {
-            runtime.register_agent(agent)?;
+            configuration.register_agent(agent)?;
         }
         for orchestration in self.orchestrations {
-            runtime.register_orchestration(orchestration)?;
+            configuration.register_orchestration(orchestration)?;
         }
         for profile in self.routing_profiles {
-            runtime.register_routing_profile(profile)?;
+            configuration.register_routing_profile(profile)?;
         }
-        Ok(())
+        Ok(configuration)
     }
 }
 
@@ -104,6 +107,7 @@ impl From<ConductorError> for ConfigurationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_conductor::ConductorRuntime;
     use phenix_core::{
         BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
         ExecutionAuthority, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId,
@@ -112,6 +116,15 @@ mod tests {
     };
     use serde_json::json;
     use std::collections::BTreeMap;
+
+    fn install_configuration(
+        runtime: &mut ConductorRuntime,
+        configuration: RuntimeConfiguration,
+    ) -> Result<(), ConfigurationError> {
+        let base = runtime.current_compiled_configuration()?;
+        runtime.reload_configuration(configuration.compile(base)?)?;
+        Ok(())
+    }
 
     fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
         CallableDescriptor {
@@ -171,12 +184,13 @@ mod tests {
         .unwrap();
         let configuration: RuntimeConfiguration = serde_json::from_str(&encoded).unwrap();
         let mut runtime = ConductorRuntime::new();
-        configuration.apply(&mut runtime).unwrap();
+        install_configuration(&mut runtime, configuration).unwrap();
 
-        assert_eq!(runtime.callable_descriptors().len(), 2);
+        assert_eq!(runtime.callable_descriptors().unwrap().len(), 2);
         assert_eq!(
             runtime
                 .callable_descriptors()
+                .unwrap()
                 .into_iter()
                 .map(|item| item.id)
                 .collect::<Vec<_>>(),
@@ -216,7 +230,7 @@ mod tests {
         let encoded = serde_json::to_string(&configuration).unwrap();
         let decoded: RuntimeConfiguration = serde_json::from_str(&encoded).unwrap();
         let mut runtime = ConductorRuntime::new();
-        decoded.apply(&mut runtime).unwrap();
+        install_configuration(&mut runtime, decoded).unwrap();
         let session = runtime
             .create_session(None, None, ExecutionTarget::Fixed(target("worker")))
             .unwrap();
@@ -251,7 +265,7 @@ mod tests {
             ..RuntimeConfiguration::default()
         };
         let mut runtime = ConductorRuntime::new();
-        configuration.apply(&mut runtime).unwrap();
+        install_configuration(&mut runtime, configuration).unwrap();
 
         let session = runtime
             .create_session(None, None, ExecutionTarget::Fixed(target("worker")))
@@ -283,7 +297,7 @@ mod tests {
             ..RuntimeConfiguration::default()
         };
         assert!(matches!(
-            configuration.apply(&mut ConductorRuntime::new()),
+            install_configuration(&mut ConductorRuntime::new(), configuration),
             Err(ConfigurationError::Runtime(_))
         ));
     }

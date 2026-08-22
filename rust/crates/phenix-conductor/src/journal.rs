@@ -1,4 +1,6 @@
-use crate::{ExecutionPayload, ExecutionRecord, SessionRecord};
+use crate::{
+    ConfigRevisionFingerprint, ConfigRevisionSlot, ExecutionPayload, ExecutionRecord, SessionRecord,
+};
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, ExecutionAuthority, ExecutionEvent,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet, ExecutionState,
@@ -13,7 +15,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
-pub const JOURNAL_FORMAT_VERSION: u64 = 1;
+pub const JOURNAL_FORMAT_VERSION: u64 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -87,8 +89,16 @@ pub struct ResolvedRoute {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DomainEvent {
+    ConfigurationRevisionActivated {
+        revision: ConfigRevisionId,
+        fingerprint: ConfigRevisionFingerprint,
+    },
     SessionCreated {
         session: SessionSummary,
+    },
+    SessionConfigRebased {
+        session_id: SessionId,
+        config_revision: ConfigRevisionId,
     },
     SessionRenamed {
         session_id: SessionId,
@@ -162,15 +172,20 @@ pub struct JournalEntry {
 pub struct RuntimeJournal {
     pub format_version: u64,
     pub config_revision: ConfigRevisionId,
+    pub config_fingerprint: ConfigRevisionFingerprint,
     pub entries: Vec<JournalEntry>,
 }
 
 impl RuntimeJournal {
     #[must_use]
-    pub fn new(config_revision: ConfigRevisionId) -> Self {
+    pub fn new(
+        config_revision: ConfigRevisionId,
+        config_fingerprint: ConfigRevisionFingerprint,
+    ) -> Self {
         Self {
             format_version: JOURNAL_FORMAT_VERSION,
             config_revision,
+            config_fingerprint,
             entries: Vec::new(),
         }
     }
@@ -222,7 +237,8 @@ impl Display for JournalError {
 impl Error for JournalError {}
 
 pub(crate) struct DurableProjection<'a> {
-    pub config_revision: &'a ConfigRevisionId,
+    pub config_revisions: &'a mut BTreeMap<ConfigRevisionId, ConfigRevisionSlot>,
+    pub current_config_revision: &'a mut ConfigRevisionId,
     pub sessions: &'a mut BTreeMap<SessionId, SessionRecord>,
     pub executions: &'a mut BTreeMap<ExecutionId, ExecutionRecord>,
     pub attempt_groups: &'a mut BTreeMap<AttemptGroupId, AttemptGroup>,
@@ -232,6 +248,7 @@ pub(crate) struct DurableProjection<'a> {
     pub resolved_routes: &'a mut BTreeMap<ExecutionId, ResolvedRoute>,
     pub read_sets: &'a mut BTreeMap<ExecutionId, ExecutionReadSet>,
     pub events: &'a mut Vec<ExecutionEvent>,
+    pub next_config_revision: &'a mut u64,
     pub next_session: &'a mut u64,
     pub next_execution: &'a mut u64,
     pub next_attempt_group: &'a mut u64,
@@ -336,11 +353,36 @@ pub(crate) fn apply_domain_event(
     event: &DomainEvent,
 ) -> Result<(), JournalError> {
     match event {
-        DomainEvent::SessionCreated { session } => {
-            if session.config_revision != *state.config_revision {
+        DomainEvent::ConfigurationRevisionActivated {
+            revision,
+            fingerprint,
+        } => {
+            let expected =
+                ConfigRevisionId::parse(format!("config-{}", *state.next_config_revision + 1))
+                    .expect("generated config revision id");
+            if revision != &expected || state.config_revisions.contains_key(revision) {
                 return Err(JournalError::InvalidEvent(format!(
-                    "session {} uses config revision {}, expected {}",
-                    session.id, session.config_revision, state.config_revision
+                    "configuration revision activation expected {expected}, found {revision}"
+                )));
+            }
+            state.config_revisions.insert(
+                revision.clone(),
+                ConfigRevisionSlot {
+                    fingerprint: fingerprint.clone(),
+                    configuration: None,
+                },
+            );
+            *state.current_config_revision = revision.clone();
+            *state.next_config_revision += 1;
+        }
+        DomainEvent::SessionCreated { session } => {
+            if !state
+                .config_revisions
+                .contains_key(&session.config_revision)
+            {
+                return Err(JournalError::InvalidEvent(format!(
+                    "session {} references unknown config revision {}",
+                    session.id, session.config_revision
                 )));
             }
             if session.state != SessionState::Active {
@@ -392,6 +434,27 @@ pub(crate) fn apply_domain_event(
                 }
             }
             *state.next_session += 1;
+        }
+        DomainEvent::SessionConfigRebased {
+            session_id,
+            config_revision,
+        } => {
+            if !state.config_revisions.contains_key(config_revision) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "session {session_id} rebase references unknown config revision {config_revision}"
+                )));
+            }
+            let session = state.sessions.get_mut(session_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "rebase references unknown session {session_id}"
+                ))
+            })?;
+            if session.summary.state == SessionState::Closed {
+                return Err(JournalError::InvalidEvent(format!(
+                    "closed session {session_id} cannot be rebased"
+                )));
+            }
+            session.summary.config_revision = config_revision.clone();
         }
         DomainEvent::SessionRenamed { session_id, name } => {
             let session = state.sessions.get_mut(session_id).ok_or_else(|| {
@@ -460,6 +523,7 @@ pub(crate) fn apply_domain_event(
                     execution.id
                 )));
             }
+            let mut config_revision = session.summary.config_revision.clone();
             if let Some(parent_id) = &execution.parent_execution {
                 let parent = state.executions.get(parent_id).ok_or_else(|| {
                     JournalError::InvalidEvent(format!(
@@ -467,6 +531,7 @@ pub(crate) fn apply_domain_event(
                         execution.id
                     ))
                 })?;
+                config_revision = parent.config_revision.clone();
                 if let Some(callable) = execution.callable.as_ref() {
                     if !parent.authority.callables.contains(callable) {
                         return Err(JournalError::InvalidEvent(format!(
@@ -489,6 +554,7 @@ pub(crate) fn apply_domain_event(
                         summary: execution.clone(),
                         payload: materialized_payload,
                         authority: payload.authority().clone(),
+                        config_revision,
                     });
                 }
                 Entry::Occupied(_) => {
@@ -930,10 +996,10 @@ pub(crate) fn apply_domain_event(
                     "resolved route references non-invocation execution {execution_id}"
                 )));
             }
-            if route.config_revision != *state.config_revision {
+            if route.config_revision != execution.config_revision {
                 return Err(JournalError::InvalidEvent(format!(
-                    "resolved route for {execution_id} uses config revision {} instead of {}",
-                    route.config_revision, state.config_revision
+                    "resolved route for {execution_id} uses config revision {} instead of pinned {}",
+                    route.config_revision, execution.config_revision
                 )));
             }
             if route.requested_target != execution.summary.target {

@@ -1,4 +1,6 @@
-use crate::{ConductorRuntime, OrchestrationFailureDecisionRequest, ResolvedInvocation};
+use crate::{
+    ConductorError, ConductorRuntime, OrchestrationFailureDecisionRequest, ResolvedInvocation,
+};
 use phenix_backend::{BackendError, ToolInvocation, ToolResult};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
@@ -43,12 +45,15 @@ struct SkillResourceReadInput {
     path: String,
 }
 
-pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut ResolvedInvocation) {
+pub(super) fn extend_semantic_tools(
+    runtime: &ConductorRuntime,
+    resolved: &mut ResolvedInvocation,
+) -> Result<(), ConductorError> {
     let is_root = runtime.snapshot().executions.iter().any(|execution| {
         execution.id == resolved.execution_id && execution.kind == ExecutionKind::Root
     });
     let has_orchestrations = runtime
-        .callable_descriptors()
+        .callable_descriptors_for_execution(&resolved.execution_id)?
         .iter()
         .any(|descriptor| descriptor.kind == CallableKind::Orchestration);
     if is_root && has_orchestrations {
@@ -63,15 +68,16 @@ pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut R
             .callables
             .push(orchestration_decide_failure_descriptor());
     }
-    if runtime.has_model_invocable_skills() {
+    if runtime.has_model_invocable_skills_for_execution(&resolved.execution_id)? {
         resolved.tools.callables.push(skill_load_descriptor());
     }
-    if runtime.has_skills() {
+    if runtime.has_skills_for_execution(&resolved.execution_id)? {
         resolved
             .tools
             .callables
             .push(skill_resource_read_descriptor());
     }
+    Ok(())
 }
 
 pub(super) fn is_semantic_tool(id: &CallableId) -> bool {
@@ -119,14 +125,18 @@ pub(super) fn invoke(
         .map_err(conductor_protocol_error)?;
 
     let outcome = match invocation.callable.as_str() {
-        ORCHESTRATION_LIST_ID => parse_list(&invocation.arguments_json).map(|()| {
-            list_output(
-                runtime
-                    .callable_descriptors()
-                    .into_iter()
-                    .filter(|descriptor| descriptor.kind == CallableKind::Orchestration)
-                    .collect(),
-            )
+        ORCHESTRATION_LIST_ID => parse_list(&invocation.arguments_json).and_then(|()| {
+            runtime
+                .callable_descriptors_for_execution(execution_id)
+                .map(|descriptors| {
+                    list_output(
+                        descriptors
+                            .into_iter()
+                            .filter(|descriptor| descriptor.kind == CallableKind::Orchestration)
+                            .collect(),
+                    )
+                })
+                .map_err(|error| error.to_string())
         }),
         SKILL_LOAD_ID => parse_skill_load(&invocation.arguments_json).and_then(|skill| {
             runtime

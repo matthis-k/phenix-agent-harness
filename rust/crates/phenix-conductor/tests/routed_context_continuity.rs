@@ -172,6 +172,11 @@ fn routed_context_is_reconstructed_from_the_journal_after_runtime_restore() {
         )
         .unwrap();
 
+    let revision = first_server.runtime().current_config_revision().clone();
+    let configuration = first_server
+        .runtime()
+        .current_compiled_configuration()
+        .unwrap();
     let journal = first_server.runtime().journal().clone();
     let journal_json = serde_json::to_string(&journal).unwrap();
     assert!(journal_json.contains("remember alpha"));
@@ -180,7 +185,7 @@ fn routed_context_is_reconstructed_from_the_journal_after_runtime_restore() {
 
     let mut restored = ConductorRuntime::restore(journal).unwrap();
     restored
-        .register_routing_profile(route("route-b", "model-b"))
+        .bind_configuration_revision(&revision, configuration)
         .unwrap();
 
     let restored_state = Arc::new(MockBackendState::default());

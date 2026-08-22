@@ -1,6 +1,7 @@
 use phenix_core::{
     CallableId, ModelTarget, RoutingProfile, RoutingProfileDescriptor, RoutingProfileId,
 };
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -22,12 +23,17 @@ impl Display for RoutingRegistryError {
 
 impl Error for RoutingRegistryError {}
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RoutingRegistry {
     profiles: BTreeMap<RoutingProfileId, RoutingProfile>,
 }
 
 impl RoutingRegistry {
+    pub(crate) fn semantic_manifest(&self) -> Value {
+        serde_json::to_value(&self.profiles)
+            .expect("routing profiles contain only JSON-serializable values")
+    }
+
     pub fn register(&mut self, profile: RoutingProfile) -> Result<(), RoutingRegistryError> {
         if self.profiles.contains_key(&profile.id) {
             return Err(RoutingRegistryError::Duplicate(profile.id));

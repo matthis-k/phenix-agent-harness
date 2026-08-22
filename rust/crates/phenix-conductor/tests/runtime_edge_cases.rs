@@ -1,5 +1,5 @@
 use phenix_backend::ToolPresentation;
-use phenix_conductor::{ConductorError, ConductorRuntime};
+use phenix_conductor::{ConductorError, ConductorRuntime, RuntimeJournal};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
     ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, OrchestrationDefinition,
@@ -50,6 +50,18 @@ fn fixed_target() -> ExecutionTarget {
 
 fn session_id(index: u64) -> SessionId {
     SessionId::parse(format!("session-{index}")).unwrap()
+}
+
+fn restore_default_configuration(journal: RuntimeJournal) -> ConductorRuntime {
+    let revision = journal.config_revision.clone();
+    let configuration = ConductorRuntime::new()
+        .current_compiled_configuration()
+        .unwrap();
+    let mut restored = ConductorRuntime::restore(journal).unwrap();
+    restored
+        .bind_configuration_revision(&revision, configuration)
+        .unwrap();
+    restored
 }
 
 #[test]
@@ -122,6 +134,12 @@ fn frontend_layer_can_start_a_registered_top_level_callable_without_a_wrapper_ex
 #[test]
 fn rejected_top_level_callable_does_not_create_durable_execution_state() {
     let mut runtime = ConductorRuntime::new();
+    runtime
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("scout", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
+        .unwrap();
     let session = runtime.create_session(None, None, fixed_target()).unwrap();
     let before_entries = runtime.journal().entries.len();
     let before_events = runtime.events_since(0);
@@ -137,12 +155,6 @@ fn rejected_top_level_callable_does_not_create_durable_execution_state() {
     assert_eq!(runtime.journal().entries.len(), before_entries);
     assert_eq!(runtime.events_since(0), before_events);
 
-    runtime
-        .register_agent(phenix_core::AgentDefinition::new(
-            descriptor("scout", CallableKind::Agent),
-            phenix_core::ExecutionAuthority::read_only(),
-        ))
-        .unwrap();
     let execution = runtime
         .start_session_callable(
             &session.id,
@@ -245,7 +257,7 @@ fn cancelled_turn_can_be_followed_by_a_new_turn_after_replay() {
 
     let cursor = cancelled.snapshot.last_event_sequence;
     let session = cancelled.snapshot.sessions[0].id.clone();
-    let restored = ConductorRuntime::restore(cancelled.journal).unwrap();
+    let restored = restore_default_configuration(cancelled.journal);
     let continued = ProtocolHarness::model(MockModelScript::reply("recovered"))
         .runtime(restored)
         .commands([
@@ -283,7 +295,7 @@ fn failed_turn_can_be_followed_by_a_new_turn_after_replay() {
 
     let cursor = failed.snapshot.last_event_sequence;
     let session = failed.snapshot.sessions[0].id.clone();
-    let restored = ConductorRuntime::restore(failed.journal).unwrap();
+    let restored = restore_default_configuration(failed.journal);
     let continued = ProtocolHarness::model(MockModelScript::reply("healthy again"))
         .runtime(restored)
         .commands([

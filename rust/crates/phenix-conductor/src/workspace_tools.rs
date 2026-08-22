@@ -1,7 +1,7 @@
 mod transaction;
 
 use super::workspace_consistency::WorkspaceConsistency;
-use crate::{ConductorError, ConductorRuntime, ToolOutcome};
+use crate::{CompiledConfiguration, ConductorError, ConductorRuntime, ToolOutcome};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, FileVersion,
     FilesystemAuthority, CAPABILITY_FILESYSTEM_READ, CAPABILITY_FILESYSTEM_WRITE,
@@ -85,10 +85,20 @@ pub(super) fn register(
     runtime: &mut ConductorRuntime,
     consistency: WorkspaceConsistency,
 ) -> Result<(), ConductorError> {
+    let mut configuration = runtime.current_compiled_configuration()?;
+    register_into(&mut configuration, consistency)?;
+    runtime.reload_configuration(configuration)?;
+    Ok(())
+}
+
+pub(super) fn register_into(
+    configuration: &mut CompiledConfiguration,
+    consistency: WorkspaceConsistency,
+) -> Result<(), ConductorError> {
     let root = consistency.root().to_path_buf();
 
     let bash_consistency = consistency.clone();
-    runtime.register_contextual_tool(
+    configuration.register_contextual_tool(
         tool_descriptor(
             "bash",
             format!(
@@ -128,7 +138,7 @@ pub(super) fn register(
     )?;
 
     let read_consistency = consistency.clone();
-    runtime.register_tool(
+    configuration.register_tool(
         tool_descriptor(
             "read",
             format!(
@@ -177,7 +187,7 @@ pub(super) fn register(
     )?;
 
     let write_consistency = consistency.clone();
-    runtime.register_tool(
+    configuration.register_tool(
         tool_descriptor(
             "write",
             format!(
@@ -216,7 +226,7 @@ pub(super) fn register(
     )?;
 
     let edit_consistency = consistency.clone();
-    runtime.register_tool(
+    configuration.register_tool(
         tool_descriptor(
             "edit",
             format!(
@@ -264,7 +274,7 @@ pub(super) fn register(
         move |arguments| execute_edit(&edit_consistency, arguments),
     )?;
 
-    runtime.register_tool(
+    configuration.register_tool(
         tool_descriptor(
             "grep",
             format!(
@@ -1059,6 +1069,7 @@ mod tests {
         register(&mut runtime, consistency(&workspace, BTreeSet::new())).unwrap();
         let descriptors = runtime
             .tool_descriptors()
+            .unwrap()
             .into_iter()
             .map(|descriptor| (descriptor.id.as_str().to_owned(), descriptor.capabilities))
             .collect::<BTreeMap<_, _>>();
@@ -1080,6 +1091,7 @@ mod tests {
         assert_eq!(
             runtime
                 .tool_descriptors()
+                .unwrap()
                 .into_iter()
                 .map(|descriptor| descriptor.id.as_str().to_owned())
                 .collect::<Vec<_>>(),

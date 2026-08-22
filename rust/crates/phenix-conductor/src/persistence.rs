@@ -1,6 +1,6 @@
 use crate::{
     journal::{apply_domain_event, DurableProjection},
-    ConductorRuntime, RuntimeJournal,
+    ConductorRuntime, ConfigRevisionSlot, RuntimeJournal,
 };
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -122,13 +122,24 @@ impl ConductorRuntime {
             .map_err(|error| PersistenceError::InvalidJournal(error.to_string()))?;
 
         let config_revision = journal.config_revision.clone();
+        let config_fingerprint = journal.config_fingerprint.clone();
         let mut runtime = Self::new();
         runtime.config_revision = config_revision.clone();
-        runtime.journal = RuntimeJournal::new(config_revision);
+        runtime.config_revisions.clear();
+        runtime.config_revisions.insert(
+            config_revision.clone(),
+            ConfigRevisionSlot {
+                fingerprint: config_fingerprint.clone(),
+                configuration: None,
+            },
+        );
+        runtime.next_config_revision = 1;
+        runtime.journal = RuntimeJournal::new(config_revision, config_fingerprint);
 
         for entry in &journal.entries {
             let mut projection = DurableProjection {
-                config_revision: &runtime.config_revision,
+                config_revisions: &mut runtime.config_revisions,
+                current_config_revision: &mut runtime.config_revision,
                 sessions: &mut runtime.sessions,
                 executions: &mut runtime.executions,
                 attempt_groups: &mut runtime.attempt_groups,
@@ -138,6 +149,7 @@ impl ConductorRuntime {
                 resolved_routes: &mut runtime.resolved_routes,
                 read_sets: &mut runtime.read_sets,
                 events: &mut runtime.events,
+                next_config_revision: &mut runtime.next_config_revision,
                 next_session: &mut runtime.next_session,
                 next_execution: &mut runtime.next_execution,
                 next_attempt_group: &mut runtime.next_attempt_group,
@@ -164,7 +176,7 @@ impl ConductorRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DomainEvent;
+    use crate::{ConductorError, DomainEvent};
     use phenix_core::{
         BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
         ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
@@ -263,6 +275,8 @@ mod tests {
                 "orchestration objective",
             )
             .unwrap();
+        let revision = runtime.current_config_revision().clone();
+        let configuration = runtime.current_compiled_configuration().unwrap();
         let before_snapshot = runtime.snapshot();
         let before_events = runtime.events_since(0);
         let cursor = before_snapshot.last_event_sequence;
@@ -275,9 +289,13 @@ mod tests {
         let mut restored = ConductorRuntime::restore(journal).unwrap();
         assert_eq!(restored.snapshot(), before_snapshot);
         assert_eq!(restored.events_since(0), before_events);
-        assert!(restored.callable_descriptors().is_empty());
-
-        bind_workflow_config(&mut restored);
+        assert!(matches!(
+            restored.callable_descriptors(),
+            Err(ConductorError::UnboundConfigRevision(id)) if id == revision
+        ));
+        restored
+            .bind_configuration_revision(&revision, configuration)
+            .unwrap();
         let first_child = restored
             .snapshot()
             .executions
@@ -361,8 +379,11 @@ mod tests {
         let execution = runtime.submit(&session.id, "work").unwrap();
         runtime.resolve_invocation(&execution.id).unwrap();
 
-        let mut restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
-        let resolved = restored.resolve_invocation(&execution.id).unwrap();
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        let resolved = restored
+            .resolved_routes
+            .get(&execution.id)
+            .expect("resolved route survives journal replay");
         assert_eq!(resolved.model, concrete);
     }
 

@@ -1,16 +1,15 @@
 use crate::{
-    ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload, ExecutionProvider,
-    ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost, ExecutionProviderKind,
-    JsonFileStore, PersistenceError,
+    CompiledConfiguration, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
+    ExecutionProvider, ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost,
+    ExecutionProviderKind, JsonFileStore, PersistenceError,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
 };
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,
-    ExecutionEventKind, ExecutionId, ExecutionState, ExecutionTarget, FileVersion,
-    RoutingProfileDescriptor, SessionId, SessionState, WorkspaceDescriptor, WorkspaceId,
-    WorkspaceLeaseMode,
+    ExecutionEventKind, ExecutionId, ExecutionState, ExecutionTarget, FileVersion, SessionId,
+    SessionState, WorkspaceDescriptor, WorkspaceId, WorkspaceLeaseMode,
 };
 use phenix_protocol::{
     ClientMessage, Command, ErrorCode, ProtocolError, Reply, ResponsePayload, ServerMessage,
@@ -295,6 +294,18 @@ impl ConductorServer {
         Ok(())
     }
 
+    pub fn install_workspace_tools_into(
+        &self,
+        configuration: &mut CompiledConfiguration,
+    ) -> Result<(), ServerError> {
+        let consistency = self
+            .workspace_consistency
+            .clone()
+            .ok_or(ServerError::WorkspaceConsistencyNotInstalled)?;
+        workspace_tools::register_into(configuration, consistency)?;
+        Ok(())
+    }
+
     pub fn install_workspace_tools(&mut self) -> Result<(), ServerError> {
         let consistency = self
             .workspace_consistency
@@ -453,17 +464,17 @@ impl ConductorServer {
                 );
             }
             Command::GetCallableCatalog => {
-                let callables = self.lock_runtime()?.callable_descriptors();
+                let callables = self.lock_runtime()?.callable_descriptors()?;
                 self.respond(output, id, Ok(Reply::CallableCatalog { callables }))?;
                 return Ok(());
             }
             Command::GetRoutingCatalog => {
-                let profiles = self.lock_runtime()?.routing_profiles();
+                let profiles = self.lock_runtime()?.routing_profiles()?;
                 self.respond(output, id, Ok(Reply::RoutingCatalog { profiles }))?;
                 return Ok(());
             }
             Command::GetSkillCatalog => {
-                let skills = self.lock_runtime()?.skill_descriptors();
+                let skills = self.lock_runtime()?.skill_descriptors()?;
                 self.respond(output, id, Ok(Reply::SkillCatalog { skills }))?;
                 return Ok(());
             }
@@ -1003,8 +1014,10 @@ fn execute_model_execution(
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
         let mut resolved = runtime_guard.resolve_invocation(execution_id);
-        if let Ok(resolved) = &mut resolved {
-            semantic_tools::extend_semantic_tools(&runtime_guard, resolved);
+        if let Ok(invocation) = &mut resolved {
+            if let Err(error) = semantic_tools::extend_semantic_tools(&runtime_guard, invocation) {
+                resolved = Err(error);
+            }
         }
         resolved
     };
@@ -1504,10 +1517,6 @@ impl ConductorRuntime {
             .get(execution_id)
             .map(|record| record.summary.state.clone())
     }
-
-    fn routing_profiles(&self) -> Vec<RoutingProfileDescriptor> {
-        self.routing.descriptors()
-    }
 }
 
 fn is_terminal_state(state: &ExecutionState) -> bool {
@@ -1635,6 +1644,28 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.session_id = Some(id);
             error
         }
+        ConductorError::UnknownConfigRevision(id) => protocol_error(
+            ErrorCode::UnknownId,
+            format!("unknown configuration revision: {id}"),
+        ),
+        ConductorError::UnboundConfigRevision(id) => protocol_error(
+            ErrorCode::InvalidRequest,
+            format!("configuration revision is not bound in this process: {id}"),
+        ),
+        ConductorError::ConfigRevisionAlreadyBound(id) => protocol_error(
+            ErrorCode::InvalidRequest,
+            format!("configuration revision is already bound: {id}"),
+        ),
+        ConductorError::ConfigRevisionFingerprintMismatch {
+            revision,
+            expected,
+            actual,
+        } => protocol_error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "configuration revision fingerprint mismatch for {revision}: expected {expected}, found {actual}"
+            ),
+        ),
         ConductorError::ClosedSession(id) => {
             let mut error = protocol_error(
                 ErrorCode::InvalidRequest,
