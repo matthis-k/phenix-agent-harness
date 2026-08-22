@@ -460,8 +460,24 @@ printf 1 >&8
 wait "$sandbox_pid"
 sandbox_status=$?
 exec 10>&-
+network_timeout="$slirp_error.timeout"
+(
+  sleep 5
+  if kill -0 "$network_pid" 2>/dev/null; then
+    : >"$network_timeout"
+    kill "$network_pid" 2>/dev/null || true
+  fi
+) &
+watchdog_pid=$!
 wait "$network_pid"
 network_status=$?
+kill "$watchdog_pid" 2>/dev/null || true
+wait "$watchdog_pid" 2>/dev/null || true
+if [ -e "$network_timeout" ]; then
+  printf '%s\\n' 'outbound network helper did not stop after sandbox exit' >&2
+  while IFS= read -r line; do printf '%s\\n' "$line" >&2; done <"$slirp_error"
+  exit 125
+fi
 if [ "$network_status" -ne 0 ]; then
   while IFS= read -r line; do printf '%s\n' "$line" >&2; done <"$slirp_error"
   exit 125
