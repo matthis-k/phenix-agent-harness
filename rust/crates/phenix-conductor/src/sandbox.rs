@@ -100,6 +100,8 @@ impl<'a> ExecutionSandbox<'a> {
             .arg("/tmp")
             .arg("--tmpfs")
             .arg("/run")
+            .arg("--dir")
+            .arg("/phenix-home")
             .arg("--bind")
             .arg(self.state.home())
             .arg("/phenix-home");
