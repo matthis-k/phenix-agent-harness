@@ -1,5 +1,13 @@
-use crate::{AttemptGroup, ExecutionEvent, ExecutionSummary, SessionSummary, WorkspaceDescriptor};
+use crate::{
+    AttemptGroup, ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionId,
+    ExecutionReadSet, ExecutionSummary, ExecutionTarget, ExecutionTerminationCause,
+    ExecutionWorkspaceValidity, FileVersion, ModelTarget, OrchestrationDefinition,
+    OrchestrationFailureDecisionRecord, OrchestrationNodeId, SessionSummary, WorkspaceDescriptor,
+    WorkspaceId,
+};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -16,6 +24,76 @@ pub struct SessionDebugBundle {
     pub events: Vec<ExecutionEvent>,
     #[serde(default)]
     pub attempt_groups: Vec<AttemptGroup>,
+    #[serde(default)]
+    pub conversation: Vec<DebugConversationMessage>,
+    #[serde(default)]
+    pub orchestrations: Vec<DebugOrchestration>,
+    #[serde(default)]
+    pub resolved_routing: Vec<DebugResolvedRoute>,
+    #[serde(default)]
+    pub tool_activity: Vec<ExecutionEvent>,
+    #[serde(default)]
+    pub failure_decisions: Vec<OrchestrationFailureDecisionRecord>,
+    #[serde(default)]
+    pub termination_causes: BTreeMap<ExecutionId, ExecutionTerminationCause>,
+    #[serde(default)]
+    pub workspace_authority: BTreeMap<ExecutionId, ExecutionAuthority>,
+    #[serde(default)]
+    pub read_sets: Vec<ExecutionReadSet>,
+    #[serde(default)]
+    pub workspace_validity: BTreeMap<ExecutionId, ExecutionWorkspaceValidity>,
+    #[serde(default)]
+    pub checkpoints: Vec<DebugWorkspaceCheckpoint>,
+    #[serde(default)]
+    pub execution_outputs: BTreeMap<ExecutionId, Value>,
+    #[serde(default)]
+    pub diagnostic_write_patches: Vec<DiagnosticWritePatch>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DebugConversationRole {
+    User,
+    Assistant,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DebugConversationMessage {
+    pub execution_id: ExecutionId,
+    pub role: DebugConversationRole,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DebugOrchestration {
+    pub execution_id: ExecutionId,
+    pub definition: OrchestrationDefinition,
+    pub node_bindings: BTreeMap<OrchestrationNodeId, ExecutionId>,
+    pub node_inputs: BTreeMap<OrchestrationNodeId, Value>,
+    pub synthesis_execution: Option<ExecutionId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DebugResolvedRoute {
+    pub execution_id: ExecutionId,
+    pub requested_target: ExecutionTarget,
+    pub model: ModelTarget,
+    pub config_revision: ConfigRevisionId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DebugWorkspaceCheckpoint {
+    pub sequence: u64,
+    pub execution_id: ExecutionId,
+    pub workspace_id: WorkspaceId,
+    pub files: BTreeMap<std::path::PathBuf, FileVersion>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DiagnosticWritePatch {
+    pub execution_id: ExecutionId,
+    pub path: std::path::PathBuf,
+    pub patch: String,
 }
 
 impl SessionDebugBundle {
@@ -28,6 +106,18 @@ impl SessionDebugBundle {
             executions: Vec::new(),
             events: Vec::new(),
             attempt_groups: Vec::new(),
+            conversation: Vec::new(),
+            orchestrations: Vec::new(),
+            resolved_routing: Vec::new(),
+            tool_activity: Vec::new(),
+            failure_decisions: Vec::new(),
+            termination_causes: BTreeMap::new(),
+            workspace_authority: BTreeMap::new(),
+            read_sets: Vec::new(),
+            workspace_validity: BTreeMap::new(),
+            checkpoints: Vec::new(),
+            execution_outputs: BTreeMap::new(),
+            diagnostic_write_patches: Vec::new(),
         }
     }
 }

@@ -1,10 +1,12 @@
 mod transaction;
 
 use super::workspace_consistency::WorkspaceConsistency;
+use crate::sandbox::{ExecutionSandbox, ExecutionSandboxState, WorkspaceMount};
 use crate::{CompiledConfiguration, ConductorError, ConductorRuntime, ToolOutcome};
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, FileVersion,
-    FilesystemAuthority, CAPABILITY_FILESYSTEM_READ, CAPABILITY_FILESYSTEM_WRITE,
+    CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+    ExecutionAuthority, ExecutionId, FileVersion, FilesystemAuthority, CAPABILITY_FILESYSTEM_READ,
+    CAPABILITY_FILESYSTEM_WRITE,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -13,6 +15,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use transaction::{TransactionOutput, WorkspaceTransaction};
 
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
@@ -45,6 +48,7 @@ exit "$command_status"
 #[serde(deny_unknown_fields)]
 struct BashInput {
     command: String,
+    capture_attempted_writes: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -114,6 +118,10 @@ pub(super) fn register_into(
                         "type": "string",
                         "minLength": 1,
                         "description": "Bash program to execute in the current Phenix workspace"
+                    },
+                    "capture_attempted_writes": {
+                        "type": "boolean",
+                        "description": "For a read-only execution, run in a disposable overlay and retain attempted source changes only as diagnostic patches"
                     }
                 }
             }),
@@ -131,13 +139,16 @@ pub(super) fn register_into(
         move |context, arguments| {
             execute_bash(
                 &bash_consistency,
-                context.authority.filesystem,
+                &context.execution_id,
+                &context.authority,
+                &context.sandbox_state,
                 arguments,
             )
         },
     )?;
 
     let read_consistency = consistency.clone();
+    let grep_consistency = consistency.clone();
     configuration.register_tool(
         tool_descriptor(
             "read",
@@ -274,11 +285,11 @@ pub(super) fn register_into(
         move |arguments| execute_edit(&edit_consistency, arguments),
     )?;
 
-    configuration.register_tool(
+    configuration.register_contextual_tool(
         tool_descriptor(
             "grep",
             format!(
-                "Search text recursively in the current Phenix workspace ({}). The pattern uses ripgrep regular-expression syntax. .git is excluded. Grep results are not yet recorded as exact file observations.",
+                "Search text recursively in the current Phenix workspace ({}). The pattern uses ripgrep regular-expression syntax. .git is excluded. Every searched UTF-8 file is recorded as an exact file observation.",
                 root.display()
             ),
             json!({
@@ -314,7 +325,7 @@ pub(super) fn register_into(
             }),
             FilesystemAuthority::ReadOnly,
         ),
-        move |arguments| execute_grep(&root, arguments),
+        move |_context, arguments| execute_grep(&grep_consistency, arguments),
     )?;
 
     Ok(())
@@ -383,9 +394,11 @@ fn nullable_file_version_schema() -> Value {
 
 fn execute_bash(
     consistency: &WorkspaceConsistency,
-    filesystem: FilesystemAuthority,
+    execution_id: &ExecutionId,
+    authority: &ExecutionAuthority,
+    sandbox_state: &Arc<ExecutionSandboxState>,
     arguments: &str,
-) -> Result<String, String> {
+) -> Result<ToolOutcome, String> {
     let input: BashInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid bash arguments: {error}"))?;
     if input.command.trim().is_empty() {
@@ -393,31 +406,56 @@ fn execute_bash(
     }
 
     let bash = std::env::var_os("PHENIX_BASH").unwrap_or_else(|| OsString::from("bash"));
-    let output = match filesystem {
-        FilesystemAuthority::ReadOnly => {
-            execute_read_only_bash(consistency, &bash, &input.command)?
-        }
-        FilesystemAuthority::Write => {
-            let transaction = WorkspaceTransaction::begin(consistency.clone())
+    let (output, patches) = match authority.filesystem {
+        FilesystemAuthority::ReadOnly if input.capture_attempted_writes == Some(true) => {
+            let transaction = WorkspaceTransaction::begin(
+                consistency.clone(),
+                authority.clone(),
+                Arc::clone(sandbox_state),
+            )
+            .map_err(|error| error.to_string())?;
+            let output = transaction
+                .execute(&bash, &input.command)
                 .map_err(|error| error.to_string())?;
+            let patches = transaction
+                .diagnostic_patches(execution_id)
+                .map_err(|error| error.to_string())?;
+            (output, patches)
+        }
+        FilesystemAuthority::ReadOnly => (
+            execute_read_only_bash(consistency, authority, sandbox_state, &bash, &input.command)?,
+            Vec::new(),
+        ),
+        FilesystemAuthority::Write => {
+            let transaction = WorkspaceTransaction::begin(
+                consistency.clone(),
+                authority.clone(),
+                Arc::clone(sandbox_state),
+            )
+            .map_err(|error| error.to_string())?;
             let output = transaction
                 .execute(&bash, &input.command)
                 .map_err(|error| error.to_string())?;
             transaction.commit().map_err(|error| error.to_string())?;
-            output
+            (output, Vec::new())
         }
     };
 
-    Ok(json!({
-        "exit_code": output.exit_code,
-        "stdout": capture(&output.stdout),
-        "stderr": capture(&output.stderr),
-    })
-    .to_string())
+    Ok(ToolOutcome::success(
+        json!({
+            "exit_code": output.exit_code,
+            "stdout": capture(&output.stdout),
+            "stderr": capture(&output.stderr),
+        })
+        .to_string(),
+    )
+    .with_diagnostic_write_patches(patches))
 }
 
 fn execute_read_only_bash(
     consistency: &WorkspaceConsistency,
+    authority: &ExecutionAuthority,
+    sandbox_state: &ExecutionSandboxState,
     bash: &OsStr,
     command: &str,
 ) -> Result<TransactionOutput, String> {
@@ -426,28 +464,13 @@ fn execute_read_only_bash(
         .prepare_scratch_mounts()
         .map_err(|error| error.to_string())?;
     let mut process = Command::new(&bwrap);
-    process
-        .arg("--die-with-parent")
-        .arg("--unshare-pid")
-        .arg("--ro-bind")
-        .arg("/")
-        .arg("/")
-        .arg("--dev-bind")
-        .arg("/dev")
-        .arg("/dev")
-        .arg("--proc")
-        .arg("/proc")
-        .arg("--tmpfs")
-        .arg("/tmp");
-    for (_, absolute) in scratch_mounts {
-        process.arg("--bind").arg(&absolute).arg(&absolute);
-    }
+    ExecutionSandbox::new(authority, sandbox_state).configure_bwrap(
+        &mut process,
+        consistency.root(),
+        &scratch_mounts,
+        WorkspaceMount::ReadOnly,
+    )?;
     let output = process
-        .arg("--chdir")
-        .arg(consistency.root())
-        .arg("--setenv")
-        .arg("TMPDIR")
-        .arg("/tmp")
         .arg("--")
         .arg(bash)
         .arg("-c")
@@ -571,13 +594,16 @@ fn execute_edit(consistency: &WorkspaceConsistency, arguments: &str) -> Result<S
     .to_string())
 }
 
-fn execute_grep(workspace: &Path, arguments: &str) -> Result<String, String> {
+fn execute_grep(
+    consistency: &WorkspaceConsistency,
+    arguments: &str,
+) -> Result<ToolOutcome, String> {
     let input: GrepInput = serde_json::from_str(arguments)
         .map_err(|error| format!("invalid grep arguments: {error}"))?;
     if input.pattern.is_empty() {
         return Err("grep pattern must not be empty".to_owned());
     }
-    let relative = search_workspace_path(workspace, input.path.as_deref().unwrap_or("."))?;
+    let relative = search_workspace_path(consistency.root(), input.path.as_deref().unwrap_or("."))?;
     let rg = std::env::var_os("PHENIX_RG").unwrap_or_else(|| OsString::from("rg"));
     let mut command = Command::new(rg);
     command
@@ -599,7 +625,7 @@ fn execute_grep(workspace: &Path, arguments: &str) -> Result<String, String> {
         .arg("--")
         .arg(&input.pattern)
         .arg(&relative)
-        .current_dir(workspace)
+        .current_dir(consistency.root())
         .output()
         .map_err(|error| format!("failed to execute ripgrep: {error}"))?;
     let exit_code = output.status.code().unwrap_or(-1);
@@ -610,13 +636,55 @@ fn execute_grep(workspace: &Path, arguments: &str) -> Result<String, String> {
         ));
     }
 
-    Ok(json!({
-        "pattern": input.pattern,
-        "path": relative.to_string_lossy().into_owned(),
-        "matches": capture(&output.stdout),
-        "stderr": capture(&output.stderr),
+    let mut files =
+        Command::new(std::env::var_os("PHENIX_RG").unwrap_or_else(|| OsString::from("rg")));
+    files
+        .arg("--files")
+        .arg("--hidden")
+        .arg("--no-ignore")
+        .arg("--glob")
+        .arg("!.git/**")
+        .arg("--glob")
+        .arg("!**/.git/**")
+        .arg("--")
+        .arg(&relative)
+        .current_dir(consistency.root());
+    let files = files
+        .output()
+        .map_err(|error| format!("failed to enumerate grep inputs: {error}"))?;
+    if !files.status.success() {
+        return Err(format!(
+            "failed to enumerate grep inputs: {}",
+            capture(&files.stderr)
+        ));
+    }
+    let mut observations = Vec::new();
+    for path in String::from_utf8_lossy(&files.stdout).lines() {
+        match consistency.read_utf8(path) {
+            Ok(read) => {
+                if let Some(observation) = read.observation {
+                    observations.push(observation);
+                }
+            }
+            Err(error) if error.to_string().contains("UTF-8") => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    observations.sort_by(|left, right| left.path.cmp(&right.path));
+    observations.dedup_by(|left, right| left.path == right.path);
+
+    Ok(ToolOutcome {
+        output: json!({
+            "pattern": input.pattern,
+            "path": relative.to_string_lossy().into_owned(),
+            "matches": capture(&output.stdout),
+            "stderr": capture(&output.stderr),
+        })
+        .to_string(),
+        success: true,
+        file_observations: observations,
+        diagnostic_write_patches: Vec::new(),
     })
-    .to_string())
 }
 
 fn search_workspace_path(workspace: &Path, raw: &str) -> Result<PathBuf, String> {
@@ -808,6 +876,7 @@ mod tests {
         objective: &str,
     ) -> OrchestrationNode {
         OrchestrationNode {
+            input_bindings: Default::default(),
             id: OrchestrationNodeId::parse(id).unwrap(),
             callable,
             depends_on: depends_on
@@ -850,19 +919,36 @@ mod tests {
         WorkspaceConsistency::new(&descriptor(root, scratch_paths)).unwrap()
     }
 
+    fn bash_context(
+        filesystem: FilesystemAuthority,
+    ) -> (ExecutionAuthority, Arc<ExecutionSandboxState>) {
+        let authority = ExecutionAuthority {
+            filesystem,
+            ..ExecutionAuthority::default()
+        };
+        (authority, ExecutionSandboxState::create().unwrap())
+    }
+
+    fn bash_execution_id() -> ExecutionId {
+        ExecutionId::parse("execution-bash-test").unwrap()
+    }
+
     #[test]
     fn bash_executes_transactionally_in_the_bound_workspace() {
         let workspace = temp_workspace("bash-tool");
         fs::write(workspace.join("marker.txt"), "workspace-marker").unwrap();
         let consistency = consistency(&workspace, BTreeSet::new());
+        let (authority, state) = bash_context(FilesystemAuthority::Write);
 
         let output = execute_bash(
             &consistency,
-            FilesystemAuthority::Write,
+            &bash_execution_id(),
+            &authority,
+            &state,
             r#"{"command":"printf '%s\\n' \"$(cat marker.txt)\" \"$PWD\"; printf changed > marker.txt"}"#,
         )
         .unwrap();
-        let output: Value = serde_json::from_str(&output).unwrap();
+        let output: Value = serde_json::from_str(&output.output).unwrap();
         let stdout = output["stdout"].as_str().unwrap();
         assert!(stdout.contains("workspace-marker"));
         assert!(stdout.contains(workspace.to_string_lossy().as_ref()));
@@ -878,13 +964,16 @@ mod tests {
     fn nonzero_exit_is_reported_without_failing_the_tool_call() {
         let workspace = temp_workspace("bash-nonzero");
         let consistency = consistency(&workspace, BTreeSet::new());
+        let (authority, state) = bash_context(FilesystemAuthority::ReadOnly);
         let output = execute_bash(
             &consistency,
-            FilesystemAuthority::ReadOnly,
+            &bash_execution_id(),
+            &authority,
+            &state,
             r#"{"command":"printf failure >&2; exit 7"}"#,
         )
         .unwrap();
-        let output: Value = serde_json::from_str(&output).unwrap();
+        let output: Value = serde_json::from_str(&output.output).unwrap();
         assert_eq!(output["exit_code"], 7);
         assert_eq!(output["stderr"], "failure");
         let _ = fs::remove_dir_all(workspace);
@@ -895,14 +984,17 @@ mod tests {
         let workspace = temp_workspace("bash-read-only");
         fs::write(workspace.join("source.txt"), "protected").unwrap();
         let consistency = consistency(&workspace, BTreeSet::from([PathBuf::from("target")]));
+        let (authority, state) = bash_context(FilesystemAuthority::ReadOnly);
 
         let output = execute_bash(
             &consistency,
-            FilesystemAuthority::ReadOnly,
+            &bash_execution_id(),
+            &authority,
+            &state,
             r#"{"command":"printf changed > source.txt; source_status=$?; printf scratch > target/cache; printf tmp > /tmp/cache; cat /tmp/cache; exit $source_status"}"#,
         )
         .unwrap();
-        let output: Value = serde_json::from_str(&output).unwrap();
+        let output: Value = serde_json::from_str(&output.output).unwrap();
 
         assert_ne!(output["exit_code"], 0);
         assert_eq!(output["stdout"], "tmp");
@@ -914,6 +1006,35 @@ mod tests {
             fs::read_to_string(workspace.join("target/cache")).unwrap(),
             "scratch"
         );
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn read_only_bash_can_capture_discarded_attempted_write_patch() {
+        let workspace = temp_workspace("bash-read-only-audit");
+        fs::write(workspace.join("source.txt"), "before\n").unwrap();
+        let consistency = consistency(&workspace, BTreeSet::new());
+        let (authority, state) = bash_context(FilesystemAuthority::ReadOnly);
+
+        let outcome = execute_bash(
+            &consistency,
+            &bash_execution_id(),
+            &authority,
+            &state,
+            r#"{"command":"printf 'after\n' > source.txt","capture_attempted_writes":true}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(workspace.join("source.txt")).unwrap(),
+            "before\n"
+        );
+        assert_eq!(outcome.diagnostic_write_patches.len(), 1);
+        assert_eq!(
+            outcome.diagnostic_write_patches[0].path,
+            PathBuf::from("source.txt")
+        );
+        assert!(outcome.diagnostic_write_patches[0].patch.contains("+after"));
         let _ = fs::remove_dir_all(workspace);
     }
 
@@ -1052,6 +1173,40 @@ mod tests {
     }
 
     #[test]
+    fn grep_observes_only_text_files_in_its_search_scope() {
+        let workspace = temp_workspace("grep-observations");
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        fs::create_dir_all(workspace.join("docs")).unwrap();
+        fs::write(workspace.join("src/lib.rs"), "needle\n").unwrap();
+        fs::write(workspace.join("docs/guide.md"), "unrelated\n").unwrap();
+        let consistency = consistency(&workspace, BTreeSet::new());
+        let outcome = execute_grep(&consistency, r#"{"pattern":"needle","path":"src"}"#).unwrap();
+        let mut read_set =
+            phenix_core::ExecutionReadSet::new(ExecutionId::parse("execution-grep").unwrap());
+        for observation in outcome.file_observations {
+            read_set.observe(observation);
+        }
+        assert_eq!(
+            read_set.files.keys().cloned().collect::<Vec<_>>(),
+            vec![PathBuf::from("src/lib.rs")]
+        );
+
+        fs::write(workspace.join("docs/guide.md"), "changed\n").unwrap();
+        let current = consistency.checkpoint_baseline().unwrap();
+        assert_eq!(
+            read_set.validity_against(&current),
+            phenix_core::ExecutionWorkspaceValidity::Current
+        );
+        fs::write(workspace.join("src/lib.rs"), "changed\n").unwrap();
+        let current = consistency.checkpoint_baseline().unwrap();
+        assert!(matches!(
+            read_set.validity_against(&current),
+            phenix_core::ExecutionWorkspaceValidity::Invalidated { .. }
+        ));
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
     fn dedicated_file_tools_reject_workspace_escape_paths() {
         assert!(relative_workspace_path("../outside").is_err());
         assert!(relative_workspace_path("nested/../../outside").is_err());
@@ -1127,6 +1282,7 @@ mod tests {
         let orchestration_id = CallableId::parse("orchestration.tool-surface").unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: fixture_descriptor(
                     orchestration_id.as_str(),
@@ -1170,7 +1326,11 @@ mod tests {
             .submit(&session.id, "exercise the orchestration")
             .unwrap();
         let orchestration = runtime
-            .start_orchestration(&root.id, &orchestration_id, "change and verify")
+            .start_orchestration(
+                &root.id,
+                &orchestration_id,
+                json!({"objective": "change and verify"}),
+            )
             .unwrap();
 
         let recorder = ToolSurfaceRecorder::default();

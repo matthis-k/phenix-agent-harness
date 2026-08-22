@@ -11,6 +11,8 @@ phenix-backend-acp = { path = "../phenix-backend-acp" }
 phenix-backend-native = { path = "../phenix-backend-native" }
 phenix-core = { path = "../phenix-core" }
 phenix-protocol = { path = "../phenix-protocol" }
+jsonschema.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

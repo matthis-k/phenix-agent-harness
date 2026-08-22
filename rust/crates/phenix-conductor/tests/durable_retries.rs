@@ -42,6 +42,7 @@ fn agent(id: &str, callables: &[&str]) -> AgentDefinition {
 
 fn node(id: &str, callable: &str, depends_on: &[&str]) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable: CallableId::parse(callable).unwrap(),
         depends_on: depends_on
@@ -68,6 +69,7 @@ fn register(runtime: &mut ConductorRuntime, interface: bool) {
     runtime.register_agent(agent("agent.after", &[])).unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             descriptor: descriptor("orchestration.test", CallableKind::Orchestration),
             interface_agent: interface.then(|| CallableId::parse("agent.interface").unwrap()),
             nodes: vec![
@@ -93,7 +95,7 @@ fn setup(
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.test").unwrap(),
-            "recover safely",
+            serde_json::json!({"objective": "recover safely"}),
         )
         .unwrap();
     let first = runtime
@@ -275,6 +277,7 @@ fn interface_without_recovery_authority_cannot_choose_another_child() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             descriptor: descriptor("orchestration.test", CallableKind::Orchestration),
             interface_agent: Some(CallableId::parse("agent.interface").unwrap()),
             nodes: vec![node("primary", "agent.primary", &[])],
@@ -286,7 +289,7 @@ fn interface_without_recovery_authority_cannot_choose_another_child() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.test").unwrap(),
-            "test delegation",
+            serde_json::json!({"objective": "test delegation"}),
         )
         .unwrap();
     let first = runtime

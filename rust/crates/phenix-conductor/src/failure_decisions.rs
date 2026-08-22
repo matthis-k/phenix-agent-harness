@@ -5,8 +5,9 @@ use crate::{
 use phenix_core::{
     AttemptGroup, CallableId, CallableKind, ExecutionEventKind, ExecutionId, ExecutionKind,
     ExecutionState, ExecutionSummary, FailureAttemptSummary, OrchestrationFailureDecision,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId,
+    OrchestrationFailureDecisionRecord, OrchestrationNodeId, OrchestrationValueBinding,
 };
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +19,16 @@ pub enum OrchestrationFailureDecisionRequest {
     },
     Continue,
     Fail,
+}
+
+fn compact_text(value: &str, max_characters: usize) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= max_characters {
+        return normalized;
+    }
+    let mut compact = normalized.chars().take(max_characters).collect::<String>();
+    compact.push('…');
+    compact
 }
 
 impl ConductorRuntime {
@@ -280,24 +291,126 @@ Retry context JSON:
             .as_ref()
             .map(ToString::to_string)
             .unwrap_or_else(|| "execution".to_owned());
-        let reason = self
+        let input = match &execution.payload {
+            ExecutionPayload::Invocation { input } => input.as_str(),
+            ExecutionPayload::Orchestration { input } => {
+                return Ok(FailureAttemptSummary {
+                    execution_id: execution_id.clone(),
+                    attempt,
+                    approach: format!("run orchestration {callable} with input {input}"),
+                    failure_at: self
+                        .orchestration_nodes
+                        .get(execution_id)
+                        .map_or_else(|| "orchestration".to_owned(), |node| format!("node:{node}")),
+                    reason: self.runtime_failure_reason(execution_id),
+                    completed_work: self.runtime_completed_work(execution_id),
+                });
+            }
+        };
+        let approach_input = compact_text(input, 240);
+        let failed_tool = self
             .events
             .iter()
             .rev()
             .filter(|event| event.execution_id == *execution_id)
             .find_map(|event| match &event.kind {
-                ExecutionEventKind::Error { message, .. } => Some(message.clone()),
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id,
+                    success: false,
+                    ..
+                } => Some(tool_call_id.clone()),
                 _ => None,
-            })
-            .unwrap_or_else(|| "execution failed".to_owned());
+            });
+        let failure_at = if let Some(tool_call_id) = failed_tool {
+            let callable = self
+                .events
+                .iter()
+                .find_map(|event| match &event.kind {
+                    ExecutionEventKind::ToolCallStarted {
+                        tool_call_id: started,
+                        callable,
+                    } if started == &tool_call_id && event.execution_id == *execution_id => {
+                        Some(callable.to_string())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| tool_call_id.to_string());
+            format!("tool:{callable}")
+        } else if let Some(node) = self.orchestration_nodes.get(execution_id) {
+            format!("node:{node}")
+        } else {
+            format!("callable:{callable}")
+        };
         Ok(FailureAttemptSummary {
             execution_id: execution_id.clone(),
             attempt,
-            approach: format!("execute {callable}"),
-            failure_at: "execution".to_owned(),
-            reason,
-            completed_work: Vec::new(),
+            approach: format!("run {callable} with input {approach_input}"),
+            failure_at,
+            reason: self.runtime_failure_reason(execution_id),
+            completed_work: self.runtime_completed_work(execution_id),
         })
+    }
+
+    fn runtime_failure_reason(&self, execution_id: &ExecutionId) -> String {
+        self.events
+            .iter()
+            .rev()
+            .filter(|event| event.execution_id == *execution_id)
+            .find_map(|event| match &event.kind {
+                ExecutionEventKind::Error { message, .. } => Some(message.clone()),
+                ExecutionEventKind::ToolCallFinished {
+                    output,
+                    success: false,
+                    ..
+                } => Some(output.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "execution failed".to_owned())
+    }
+
+    fn runtime_completed_work(&self, execution_id: &ExecutionId) -> Vec<String> {
+        let tool_names = self
+            .events
+            .iter()
+            .filter(|event| event.execution_id == *execution_id)
+            .filter_map(|event| match &event.kind {
+                ExecutionEventKind::ToolCallStarted {
+                    tool_call_id,
+                    callable,
+                } => Some((tool_call_id.clone(), callable.clone())),
+                _ => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut completed = self
+            .events
+            .iter()
+            .filter(|event| event.execution_id == *execution_id)
+            .filter_map(|event| match &event.kind {
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id,
+                    success: true,
+                    ..
+                } => Some(format!(
+                    "tool {} completed",
+                    tool_names
+                        .get(tool_call_id)
+                        .map_or_else(|| tool_call_id.to_string(), ToString::to_string)
+                )),
+                ExecutionEventKind::ChildExecutionFinished {
+                    child,
+                    state: ExecutionState::Completed,
+                } => Some(format!("child {child} completed")),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        completed.extend(
+            self.read_sets
+                .get(execution_id)
+                .into_iter()
+                .flat_map(|read_set| read_set.files.keys())
+                .map(|path| format!("observed source {}", path.display())),
+        );
+        completed.into_iter().collect()
     }
 
     fn create_recovery_agent(
@@ -345,10 +458,11 @@ Retry context JSON:
             state: ExecutionState::Pending,
         };
         let payload = ExecutionPayload::Invocation { input: objective };
-        self.record_domain_event(DomainEvent::ExecutionCreated {
-            execution: child.clone(),
-            payload: JournalExecutionPayload::from(&payload),
-        })?;
+        self.record_execution_created(
+            child.clone(),
+            JournalExecutionPayload::from(&payload),
+            None,
+        )?;
         Ok(child)
     }
 
@@ -561,12 +675,12 @@ Failure context JSON:
         &mut self,
         execution_id: &ExecutionId,
     ) -> Result<(), ConductorError> {
-        let (callable, objective, state) = {
+        let (callable, input, state) = {
             let execution = self
                 .executions
                 .get(execution_id)
                 .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-            let ExecutionPayload::Orchestration { objective } = &execution.payload else {
+            let ExecutionPayload::Orchestration { input } = &execution.payload else {
                 return Err(ConductorError::NonModelExecution(execution_id.clone()));
             };
             (
@@ -575,7 +689,7 @@ Failure context JSON:
                     .callable
                     .clone()
                     .expect("orchestration execution has callable"),
-                objective.clone(),
+                input.clone(),
                 execution.summary.state.clone(),
             )
         };
@@ -601,23 +715,37 @@ Failure context JSON:
             .collect::<Vec<_>>();
         if !ready.is_empty() {
             for node in ready {
-                let node_objective = match node.objective {
-                    Some(node_objective) => {
-                        format!(
-                            "{node_objective}
-
-Orchestration objective:
-{objective}"
-                        )
+                let node_input =
+                    self.bind_orchestration_fields(execution_id, &input, &node.input_bindings)?;
+                let descriptor = self
+                    .configuration_for_execution(execution_id)?
+                    .callables
+                    .descriptor(&node.callable)?;
+                crate::validate_json_schema(&descriptor.input_schema, &node_input).map_err(
+                    |message| ConductorError::InvalidExecutionData {
+                        execution_id: execution_id.clone(),
+                        message: format!("node {} input: {message}", node.id),
+                    },
+                )?;
+                let node_prompt = match &node.objective {
+                    Some(objective) => {
+                        format!("{objective}\n\nTyped orchestration input:\n{node_input}")
                     }
-                    None => objective.clone(),
+                    None => node_input.to_string(),
                 };
-                self.start_agent_with_node(
+                let child = self.start_agent_with_node(
                     execution_id,
                     &node.callable,
-                    node_objective,
-                    Some(node.id),
+                    node_prompt,
+                    Some(node.id.clone()),
+                    None,
                 )?;
+                self.record_domain_event(DomainEvent::OrchestrationNodeInputBound {
+                    execution_id: execution_id.clone(),
+                    node_id: node.id,
+                    input: node_input,
+                })?;
+                debug_assert_eq!(child.parent_execution.as_ref(), Some(execution_id));
             }
             return Ok(());
         }
@@ -626,9 +754,199 @@ Orchestration objective:
                 .values()
                 .all(|state| *state == ExecutionState::Completed)
         {
-            self.set_state(execution_id, ExecutionState::Completed)?;
+            if let Some(interface_agent) = definition.interface_agent.as_ref() {
+                self.advance_orchestration_synthesis(execution_id, &input, interface_agent)?;
+            } else {
+                let output = self.bind_orchestration_fields(
+                    execution_id,
+                    &input,
+                    &definition.output_bindings,
+                )?;
+                self.record_execution_output(execution_id, output)?;
+                self.set_state(execution_id, ExecutionState::Completed)?;
+            }
         }
         Ok(())
+    }
+
+    fn advance_orchestration_synthesis(
+        &mut self,
+        execution_id: &ExecutionId,
+        input: &Value,
+        interface_agent: &CallableId,
+    ) -> Result<(), ConductorError> {
+        if let Some(interface_id) = self.orchestration_synthesis.get(execution_id).cloned() {
+            let state = self
+                .executions
+                .get(&interface_id)
+                .expect("synthesis execution invariant")
+                .summary
+                .state
+                .clone();
+            return match state {
+                ExecutionState::Completed => {
+                    let output = self
+                        .execution_outputs
+                        .get(&interface_id)
+                        .cloned()
+                        .ok_or_else(|| ConductorError::InvalidExecutionData {
+                            execution_id: interface_id,
+                            message: "successful synthesis has no typed output".to_owned(),
+                        })?;
+                    self.record_execution_output(execution_id, output)?;
+                    self.set_state(execution_id, ExecutionState::Completed)
+                }
+                ExecutionState::Failed => self.set_state(execution_id, ExecutionState::Failed),
+                ExecutionState::Cancelled => {
+                    self.set_state(execution_id, ExecutionState::Cancelled)
+                }
+                ExecutionState::Interrupted => {
+                    self.set_state(execution_id, ExecutionState::Interrupted)
+                }
+                ExecutionState::Pending | ExecutionState::Running => Ok(()),
+            };
+        }
+        let context = self.orchestration_synthesis_context(execution_id, input)?;
+        let descriptor = self
+            .configuration_for_execution(execution_id)?
+            .callables
+            .descriptor(interface_agent)?;
+        crate::validate_json_schema(&descriptor.input_schema, &context).map_err(|message| {
+            ConductorError::InvalidExecutionData {
+                execution_id: execution_id.clone(),
+                message: format!("interface synthesis input: {message}"),
+            }
+        })?;
+        let interface = self.start_agent_with_node(
+            execution_id,
+            interface_agent,
+            context.to_string(),
+            None,
+            None,
+        )?;
+        self.record_domain_event(DomainEvent::OrchestrationSynthesisStarted {
+            execution_id: execution_id.clone(),
+            interface_execution_id: interface.id,
+        })
+    }
+
+    fn bind_orchestration_fields(
+        &self,
+        execution_id: &ExecutionId,
+        input: &Value,
+        bindings: &BTreeMap<String, OrchestrationValueBinding>,
+    ) -> Result<Value, ConductorError> {
+        let mut object = Map::new();
+        for (field, binding) in bindings {
+            object.insert(
+                field.clone(),
+                self.resolve_orchestration_binding(execution_id, input, binding)?,
+            );
+        }
+        Ok(Value::Object(object))
+    }
+
+    fn resolve_orchestration_binding(
+        &self,
+        execution_id: &ExecutionId,
+        input: &Value,
+        binding: &OrchestrationValueBinding,
+    ) -> Result<Value, ConductorError> {
+        let (value, pointer) = match binding {
+            OrchestrationValueBinding::Input { pointer } => (input, pointer),
+            OrchestrationValueBinding::Literal { value } => return Ok(value.clone()),
+            OrchestrationValueBinding::NodeOutput { node, pointer } => {
+                let child = self.effective_orchestration_node_execution(execution_id, node)?;
+                let value = self.execution_outputs.get(&child).ok_or_else(|| {
+                    ConductorError::InvalidExecutionData {
+                        execution_id: child.clone(),
+                        message: format!("node {node} has no typed output"),
+                    }
+                })?;
+                (value, pointer)
+            }
+        };
+        if pointer.is_empty() {
+            return Ok(value.clone());
+        }
+        value
+            .pointer(pointer)
+            .cloned()
+            .ok_or_else(|| ConductorError::InvalidExecutionData {
+                execution_id: execution_id.clone(),
+                message: format!("binding JSON pointer {pointer:?} did not resolve"),
+            })
+    }
+
+    fn effective_orchestration_node_execution(
+        &self,
+        execution_id: &ExecutionId,
+        node: &OrchestrationNodeId,
+    ) -> Result<ExecutionId, ConductorError> {
+        let mut current = self
+            .orchestration_nodes
+            .iter()
+            .find_map(|(child_id, candidate)| {
+                (candidate == node
+                    && self
+                        .executions
+                        .get(child_id)
+                        .and_then(|execution| execution.summary.parent_execution.as_ref())
+                        == Some(execution_id))
+                .then(|| child_id.clone())
+            })
+            .ok_or_else(|| ConductorError::InvalidExecutionData {
+                execution_id: execution_id.clone(),
+                message: format!("node {node} has no execution binding"),
+            })?;
+        loop {
+            let Some(decision) = self.orchestration_decisions.get(&current) else {
+                return Ok(current);
+            };
+            match &decision.decision {
+                OrchestrationFailureDecision::Retry { execution_id }
+                | OrchestrationFailureDecision::ChooseAnotherChild { execution_id } => {
+                    current = execution_id.clone();
+                }
+                OrchestrationFailureDecision::Continue | OrchestrationFailureDecision::Fail => {
+                    return Ok(current);
+                }
+            }
+        }
+    }
+
+    fn orchestration_synthesis_context(
+        &self,
+        execution_id: &ExecutionId,
+        input: &Value,
+    ) -> Result<Value, ConductorError> {
+        let callable = self
+            .executions
+            .get(execution_id)
+            .and_then(|execution| execution.summary.callable.as_ref())
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let definition = self
+            .configuration_for_execution(execution_id)?
+            .callables
+            .orchestration(callable)?;
+        let mut nodes = Map::new();
+        for node in &definition.nodes {
+            let child = self.effective_orchestration_node_execution(execution_id, &node.id)?;
+            let record = self
+                .executions
+                .get(&child)
+                .expect("effective orchestration node invariant");
+            nodes.insert(
+                node.id.to_string(),
+                json!({
+                    "execution_id": child,
+                    "state": record.summary.state,
+                    "input": self.orchestration_node_inputs.get(&(execution_id.clone(), node.id.clone())),
+                    "output": self.execution_outputs.get(&record.summary.id),
+                }),
+            );
+        }
+        Ok(json!({ "input": input, "nodes": nodes }))
     }
 
     fn orchestration_node_states(
@@ -682,5 +1000,130 @@ Orchestration objective:
                 OrchestrationFailureDecision::Fail => return Ok(ExecutionState::Failed),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_core::{
+        AgentDefinition, BackendId, CallableDescriptor, CallableKind, CallablePolicy,
+        CapabilitySet, ExecutionAuthority, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
+        ProviderId,
+    };
+    use serde_json::json;
+
+    fn target() -> ExecutionTarget {
+        ExecutionTarget::Fixed(ModelTarget {
+            backend: BackendId::parse("mock").unwrap(),
+            provider: ProviderId::parse("mock").unwrap(),
+            model: ModelId::parse("model").unwrap(),
+            inference: InferenceOptions::default(),
+        })
+    }
+
+    #[test]
+    fn retry_provenance_uses_canonical_activity_and_survives_replay() {
+        let mut runtime = ConductorRuntime::new();
+        let callable = CallableId::parse("agent.implement").unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                CallableDescriptor {
+                    id: callable.clone(),
+                    kind: CallableKind::Agent,
+                    description: "implement".to_owned(),
+                    input_schema: json!({"type": "object"}),
+                    output_schema: json!({"type": "object"}),
+                    capabilities: CapabilitySet::default(),
+                    policy: CallablePolicy::default(),
+                },
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, target()).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let child = runtime
+            .start_agent(
+                &root.id,
+                &callable,
+                "Implement the cache without replacing the API",
+            )
+            .unwrap();
+        let read_call = runtime.new_tool_call_id();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallStarted {
+                    tool_call_id: read_call.clone(),
+                    callable: CallableId::parse("read").unwrap(),
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id: read_call,
+                    output: "source inspected".to_owned(),
+                    success: true,
+                },
+            )
+            .unwrap();
+        let build_call = runtime.new_tool_call_id();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallStarted {
+                    tool_call_id: build_call.clone(),
+                    callable: CallableId::parse("build").unwrap(),
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id: build_call,
+                    output: "compiler error".to_owned(),
+                    success: false,
+                },
+            )
+            .unwrap();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::Error {
+                    code: "build_failed".to_owned(),
+                    message: "type mismatch in cache adapter".to_owned(),
+                },
+            )
+            .unwrap();
+        runtime
+            .set_state(&child.id, ExecutionState::Failed)
+            .unwrap();
+        let failure = runtime.runtime_failure_summary(&child.id, 1).unwrap();
+        assert!(failure.approach.contains("Implement the cache"));
+        assert_eq!(failure.failure_at, "tool:build");
+        assert_eq!(failure.reason, "type mismatch in cache adapter");
+        assert_eq!(failure.completed_work, vec!["tool read completed"]);
+        let group = AttemptGroup::from_first_failure(
+            runtime.new_attempt_group_id(),
+            root.id,
+            callable,
+            "Implement the cache",
+            failure.clone(),
+        );
+        runtime
+            .record_domain_event(DomainEvent::AttemptGroupCreated { group })
+            .unwrap();
+
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert_eq!(
+            restored
+                .attempt_group_for_execution(&child.id)
+                .unwrap()
+                .failures,
+            vec![failure]
+        );
     }
 }

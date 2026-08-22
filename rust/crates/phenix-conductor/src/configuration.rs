@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 ///
 /// The conductor owns validation and execution semantics, while applications
 /// own the concrete agent, orchestration, and routing-profile instances supplied in
-/// this file. Durable journals intentionally store only revision references and
-/// runtime state, so this configuration is rebound on process startup.
+/// this file. The durable store keeps revision fingerprints and runtime state.
+/// Process startup recompiles every supplied historical file and binds revisions by
+/// semantic fingerprint.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfiguration {
@@ -111,8 +112,8 @@ mod tests {
     use phenix_core::{
         BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
         ExecutionAuthority, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId,
-        ModelTarget, NetworkAuthority, OrchestrationNode, OrchestrationNodeId, ProviderId,
-        RepositoryAuthority, RoutingProfileId,
+        ModelTarget, NetworkAuthority, OrchestrationNode, OrchestrationNodeId,
+        OrchestrationValueBinding, ProviderId, RepositoryAuthority, RoutingProfileId,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -140,6 +141,12 @@ mod tests {
 
     fn node(id: &str, callable: CallableId, objective: Option<&str>) -> OrchestrationNode {
         OrchestrationNode {
+            input_bindings: BTreeMap::from([(
+                "objective".to_owned(),
+                OrchestrationValueBinding::Input {
+                    pointer: "/objective".to_owned(),
+                },
+            )]),
             id: OrchestrationNodeId::parse(id).unwrap(),
             callable,
             depends_on: Vec::new(),
@@ -160,6 +167,7 @@ mod tests {
     fn application_configuration_rebinds_agents_workflows_and_routes() {
         let agent = descriptor("agent.fixture", CallableKind::Agent);
         let orchestration = OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.fixture", CallableKind::Orchestration),
             nodes: vec![node(
@@ -254,6 +262,7 @@ mod tests {
                 ExecutionAuthority::read_only(),
             )],
             orchestrations: vec![OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor(workflow_id.as_str(), CallableKind::Orchestration),
                 nodes: vec![node(
@@ -272,7 +281,11 @@ mod tests {
             .unwrap();
         let root = runtime.submit(&session.id, "root").unwrap();
         let orchestration = runtime
-            .start_orchestration(&root.id, &workflow_id, "Fix routing selection")
+            .start_orchestration(
+                &root.id,
+                &workflow_id,
+                serde_json::json!({"objective": "Fix routing selection"}),
+            )
             .unwrap();
         let child = runtime
             .snapshot()
@@ -283,7 +296,7 @@ mod tests {
 
         assert_eq!(
             runtime.resolve_invocation(&child.id).unwrap().prompt,
-            "Implement the bounded change.\n\nOrchestration objective:\nFix routing selection"
+            "Implement the bounded change.\n\nTyped orchestration input:\n{\"objective\":\"Fix routing selection\"}"
         );
     }
 

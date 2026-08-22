@@ -24,7 +24,9 @@ clap = { version = "4.5.47", default-features = false, features = ["derive", "er
 futures = "0.3"
 genai = "0.6.0"
 getrandom = "0.4"
+jsonschema = "0.33"
 reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"

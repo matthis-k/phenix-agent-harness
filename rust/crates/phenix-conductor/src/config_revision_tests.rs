@@ -4,6 +4,7 @@ use phenix_core::{
     CapabilitySet, ExecutionAuthority, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
     ProviderId, RoutingProfileId,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn model(name: &str) -> ModelTarget {
     ModelTarget {
@@ -192,4 +193,89 @@ fn replay_requires_and_uses_recorded_revision_bindings() {
         restored.resolve_invocation(&second.id).unwrap().model,
         model("second")
     );
+}
+
+#[test]
+fn sqlite_restart_binds_every_required_historical_revision() {
+    let mut runtime = ConductorRuntime::new();
+    let profile = RoutingProfileId::parse("route").unwrap();
+    let first_configuration = routed_configuration(&profile, "first");
+    let second_configuration = routed_configuration(&profile, "second");
+    let first_revision = runtime
+        .reload_configuration(first_configuration.clone())
+        .unwrap();
+    let session = runtime
+        .create_session(None, None, ExecutionTarget::Routed(profile.clone()))
+        .unwrap();
+    let first = runtime.submit(&session.id, "first").unwrap();
+    let second_revision = runtime
+        .reload_configuration(second_configuration.clone())
+        .unwrap();
+    runtime
+        .rebase_session(&session.id, &second_revision)
+        .unwrap();
+    let second = runtime.submit(&session.id, "second").unwrap();
+
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "phenix-config-revisions-{}-{unique}.sqlite3",
+        std::process::id()
+    ));
+    let store = SqliteStore::new(&path);
+    store.save(runtime.journal()).unwrap();
+    let mut restored = ConductorRuntime::restore(store.load().unwrap()).unwrap();
+    restored
+        .bind_available_configurations(&[first_configuration, second_configuration])
+        .unwrap();
+    restored.ensure_required_configurations_bound().unwrap();
+
+    assert_eq!(
+        restored.execution_config_revision(&first.id).unwrap(),
+        first_revision
+    );
+    assert_eq!(
+        restored.execution_config_revision(&second.id).unwrap(),
+        second_revision
+    );
+    assert_eq!(
+        restored.resolve_invocation(&first.id).unwrap().model,
+        model("first")
+    );
+    assert_eq!(
+        restored.resolve_invocation(&second.id).unwrap().model,
+        model("second")
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn session_rebase_requires_compatible_routing_profile() {
+    let mut runtime = ConductorRuntime::new();
+    let original_profile = RoutingProfileId::parse("original").unwrap();
+    runtime
+        .reload_configuration(routed_configuration(&original_profile, "first"))
+        .unwrap();
+    let session = runtime
+        .create_session(
+            None,
+            None,
+            ExecutionTarget::Routed(original_profile.clone()),
+        )
+        .unwrap();
+    let replacement_profile = RoutingProfileId::parse("replacement").unwrap();
+    let replacement = runtime
+        .reload_configuration(routed_configuration(&replacement_profile, "second"))
+        .unwrap();
+
+    assert!(matches!(
+        runtime.rebase_session(&session.id, &replacement),
+        Err(ConductorError::IncompatibleSessionRebase {
+            session_id,
+            revision,
+            ..
+        }) if session_id == session.id && revision == replacement
+    ));
 }

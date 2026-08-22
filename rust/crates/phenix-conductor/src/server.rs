@@ -1,7 +1,7 @@
 use crate::{
     CompiledConfiguration, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
     ExecutionProvider, ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost,
-    ExecutionProviderKind, JsonFileStore, PersistenceError,
+    ExecutionProviderKind, PersistenceError, SqliteStore,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
@@ -55,7 +55,7 @@ struct ExecutionWorkerContext {
     workspace_leases: WorkspaceLeaseManager,
     workspace_phases: WorkspacePhases,
     workspace_consistency: Option<WorkspaceConsistency>,
-    store: Option<JsonFileStore>,
+    store: Option<SqliteStore>,
     persist_lock: Arc<Mutex<()>>,
 }
 
@@ -238,8 +238,161 @@ pub struct ConductorServer {
     active_scopes: ActiveScopes,
     workspace_leases: WorkspaceLeaseManager,
     workspace_consistency: Option<WorkspaceConsistency>,
-    store: Option<JsonFileStore>,
+    store: Option<SqliteStore>,
     persist_lock: Arc<Mutex<()>>,
+}
+
+#[derive(Clone)]
+pub struct ConductorService {
+    inner: Arc<ConductorServiceInner>,
+}
+
+struct ConductorServiceInner {
+    server: Mutex<ConductorServer>,
+    executions: ExecutionQueue,
+    workers: Mutex<Vec<thread::JoinHandle<Result<(), ServerError>>>>,
+}
+
+impl Drop for ConductorServiceInner {
+    fn drop(&mut self) {
+        let _ = self.executions.close();
+        if let Ok(workers) = self.workers.get_mut() {
+            for worker in workers.drain(..) {
+                let _ = worker.join();
+            }
+        }
+    }
+}
+
+impl ConductorService {
+    pub fn new(server: ConductorServer) -> Result<Self, ServerError> {
+        let executions = ExecutionQueue::default();
+        for root in server.lock_runtime()?.pending_roots_in_ingress_order() {
+            executions.enqueue(ExecutionJob {
+                execution_id: root.id.clone(),
+                session_id: root.session_id,
+                group_id: root.id,
+            })?;
+        }
+        let context = server.worker_context();
+        let workers = (0..EXECUTION_WORKERS)
+            .map(|_| {
+                let executions = executions.clone();
+                let context = context.clone();
+                thread::spawn(move || execution_loop(executions, context))
+            })
+            .collect();
+        Ok(Self {
+            inner: Arc::new(ConductorServiceInner {
+                server: Mutex::new(server),
+                executions,
+                workers: Mutex::new(workers),
+            }),
+        })
+    }
+
+    pub fn serve_connection<R, W>(&self, input: R, output: W) -> Result<(), ServerError>
+    where
+        R: BufRead,
+        W: Write + Send,
+    {
+        let (subscription, event_receiver) = {
+            let server = self
+                .inner
+                .server
+                .lock()
+                .map_err(|_| ServerError::StatePoisoned("conductor service"))?;
+            let subscription = server
+                .runtime
+                .lock()
+                .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?
+                .subscribe_events_with_id(EVENT_BUFFER);
+            subscription
+        };
+        let (output_sender, output_receiver) = mpsc::sync_channel(OUTPUT_BUFFER);
+
+        thread::scope(|scope| {
+            let writer = scope.spawn(move || -> Result<(), ServerError> {
+                let mut output = output;
+                while let Ok(message) = output_receiver.recv() {
+                    serde_json::to_writer(&mut output, &message)?;
+                    output.write_all(b"\n")?;
+                    output.flush()?;
+                }
+                Ok(())
+            });
+            let event_output = output_sender.clone();
+            let relay = scope.spawn(move || {
+                while let Ok(event) = event_receiver.recv() {
+                    if event_output.send(ServerMessage::Event { event }).is_err() {
+                        break;
+                    }
+                }
+            });
+
+            let result = (|| {
+                for line in input.lines() {
+                    let line = line?;
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let mut server = self
+                        .inner
+                        .server
+                        .lock()
+                        .map_err(|_| ServerError::StatePoisoned("conductor service"))?;
+                    match serde_json::from_str::<ClientMessage>(&line) {
+                        Ok(message) => server.handle_message(
+                            message,
+                            &output_sender,
+                            &self.inner.executions,
+                        )?,
+                        Err(error) => server.respond(
+                            &output_sender,
+                            0,
+                            Err(protocol_error(
+                                ErrorCode::InvalidRequest,
+                                format!("invalid client message: {error}"),
+                            )),
+                        )?,
+                    }
+                }
+                Ok(())
+            })();
+
+            if let Ok(server) = self.inner.server.lock() {
+                if let Ok(mut runtime) = server.runtime.lock() {
+                    runtime.unsubscribe_event_subscription(subscription);
+                }
+            }
+            drop(output_sender);
+            relay.join().map_err(|_| ServerError::WorkerPanicked)?;
+            let writer_result = writer.join().map_err(|_| ServerError::WorkerPanicked)?;
+            normal_frontend_disconnect(result).and(normal_frontend_disconnect(writer_result))
+        })
+    }
+}
+
+fn normal_frontend_disconnect(result: Result<(), ServerError>) -> Result<(), ServerError> {
+    match result {
+        Err(ServerError::Io(error)) if is_disconnect_kind(error.kind()) => Ok(()),
+        Err(ServerError::Json(error)) if error.io_error_kind().is_some_and(is_disconnect_kind) => {
+            Ok(())
+        }
+        Err(ServerError::OutputClosed) => Ok(()),
+        result => result,
+    }
+}
+
+fn is_disconnect_kind(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::NotConnected
+            | io::ErrorKind::UnexpectedEof
+    )
 }
 
 impl ConductorServer {
@@ -257,10 +410,7 @@ impl ConductorServer {
         }
     }
 
-    pub fn load_or_new(
-        store: JsonFileStore,
-        workspace_id: WorkspaceId,
-    ) -> Result<Self, ServerError> {
+    pub fn load_or_new(store: SqliteStore, workspace_id: WorkspaceId) -> Result<Self, ServerError> {
         let runtime = match store.load() {
             Ok(journal) => {
                 let mut runtime = ConductorRuntime::restore(journal)?;
@@ -345,9 +495,9 @@ impl ConductorServer {
         R: BufRead,
         W: Write + Send,
     {
-        let event_receiver = {
+        let (event_subscription, event_receiver) = {
             let mut runtime = self.lock_runtime()?;
-            runtime.subscribe_events(EVENT_BUFFER)
+            runtime.subscribe_events_with_id(EVENT_BUFFER)
         };
         let (output_sender, output_receiver) = mpsc::sync_channel(OUTPUT_BUFFER);
         let executions = ExecutionQueue::default();
@@ -402,7 +552,7 @@ impl ConductorServer {
 
             {
                 let mut runtime = self.lock_runtime()?;
-                runtime.unsubscribe_events();
+                runtime.unsubscribe_event_subscription(event_subscription);
             }
             drop(output_sender);
 
@@ -452,13 +602,13 @@ impl ConductorServer {
             Command::StartCallable {
                 session_id,
                 callable,
-                objective,
+                input,
             } => {
                 return self.start_callable(
                     id,
                     session_id.clone(),
                     callable.clone(),
-                    objective.clone(),
+                    input.clone(),
                     output,
                     executions,
                 );
@@ -478,6 +628,11 @@ impl ConductorServer {
                 self.respond(output, id, Ok(Reply::SkillCatalog { skills }))?;
                 return Ok(());
             }
+            Command::ExportSessionDebug { session_id } => {
+                let reply = self.export_session_debug(session_id);
+                self.respond(output, id, reply)?;
+                return Ok(());
+            }
             _ => {}
         }
         let persist = matches!(
@@ -486,7 +641,9 @@ impl ConductorServer {
                 | Command::ForkSession { .. }
                 | Command::RenameSession { .. }
                 | Command::SetSessionTarget { .. }
+                | Command::RebaseSession { .. }
                 | Command::CloseSession { .. }
+                | Command::RequestWorkspaceCheckpoint { .. }
                 | Command::CancelExecution { .. }
         );
 
@@ -535,8 +692,19 @@ impl ConductorServer {
                 .set_session_target(&session_id, target)
                 .map(|session| Reply::Session { session })
                 .map_err(map_conductor_error),
+            Command::RebaseSession {
+                session_id,
+                config_revision,
+            } => self
+                .lock_runtime()?
+                .rebase_session(&session_id, &config_revision)
+                .map(|session| Reply::Session { session })
+                .map_err(map_conductor_error),
             Command::CloseSession { session_id } => self.close_session(&session_id),
             Command::CancelExecution { execution_id } => self.cancel_execution(&execution_id),
+            Command::RequestWorkspaceCheckpoint { execution_id } => {
+                self.capture_workspace_checkpoint(&execution_id)
+            }
             Command::RefreshBackendCatalog { backend_id } => self
                 .refresh_backend(&backend_id)
                 .map(|catalog| Reply::BackendCatalog { catalog })
@@ -561,6 +729,9 @@ impl ConductorServer {
             }
             Command::GetSkillCatalog => {
                 unreachable!("skill catalog handled before dispatch")
+            }
+            Command::ExportSessionDebug { .. } => {
+                unreachable!("debug export handled before dispatch")
             }
         };
 
@@ -592,19 +763,82 @@ impl ConductorServer {
         enqueue_pending_execution_group(&self.runtime, &execution_id, executions)
     }
 
+    fn export_session_debug(&self, session_id: &SessionId) -> Result<Reply, ProtocolError> {
+        let runtime = self
+            .lock_runtime()
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?;
+        let session = runtime.session(session_id).map_err(map_conductor_error)?;
+        let (workspace, versions) = match &self.workspace_consistency {
+            Some(consistency) => {
+                let versions = consistency.checkpoint_baseline().map_err(|error| {
+                    protocol_error(ErrorCode::BackendProtocol, error.to_string())
+                })?;
+                (
+                    consistency.descriptor(session.workspace_id.clone()),
+                    versions,
+                )
+            }
+            None => (
+                WorkspaceDescriptor {
+                    id: session.workspace_id,
+                    root: PathBuf::new(),
+                    scratch_paths: BTreeSet::new(),
+                },
+                BTreeMap::new(),
+            ),
+        };
+        runtime
+            .build_session_debug_bundle(session_id, workspace, &versions)
+            .map(|bundle| Reply::SessionDebug {
+                bundle: Box::new(bundle),
+            })
+            .map_err(map_conductor_error)
+    }
+
+    fn capture_workspace_checkpoint(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Reply, ProtocolError> {
+        let consistency = self.workspace_consistency.as_ref().ok_or_else(|| {
+            protocol_error(
+                ErrorCode::InvalidRequest,
+                "workspace consistency is not installed",
+            )
+        })?;
+        let mut runtime = self
+            .lock_runtime()
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?;
+        let request = runtime
+            .workspace_lease_request(execution_id)
+            .map_err(map_conductor_error)?;
+        if request.mode != WorkspaceLeaseMode::Write {
+            return Err(protocol_error(
+                ErrorCode::InvalidRequest,
+                "workspace checkpoints require filesystem-write authority",
+            ));
+        }
+        let files = consistency
+            .checkpoint_baseline()
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?;
+        runtime
+            .record_workspace_checkpoint(execution_id, request.workspace_id, files)
+            .map_err(map_conductor_error)?;
+        Ok(Reply::Accepted)
+    }
+
     fn start_callable(
         &mut self,
         request_id: u64,
         session_id: SessionId,
         callable: CallableId,
-        objective: String,
+        input: serde_json::Value,
         output: &SyncSender<ServerMessage>,
         executions: &ExecutionQueue,
     ) -> Result<(), ServerError> {
         let execution =
             match self
                 .lock_runtime()?
-                .start_session_callable(&session_id, &callable, objective)
+                .start_session_callable(&session_id, &callable, input)
             {
                 Ok(execution) => execution,
                 Err(error) => {
@@ -763,6 +997,19 @@ impl ConductorServer {
         self.runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))
+    }
+
+    fn worker_context(&self) -> ExecutionWorkerContext {
+        ExecutionWorkerContext {
+            runtime: self.runtime.clone(),
+            backends: self.backends.clone(),
+            active_scopes: self.active_scopes.clone(),
+            workspace_leases: self.workspace_leases.clone(),
+            workspace_phases: Arc::new(Mutex::new(BTreeMap::new())),
+            workspace_consistency: self.workspace_consistency.clone(),
+            store: self.store.clone(),
+            persist_lock: self.persist_lock.clone(),
+        }
     }
 }
 
@@ -1006,7 +1253,7 @@ fn execute_model_execution(
     runtime: &SharedRuntime,
     backends: &BTreeMap<BackendId, SharedBackend>,
     active_scopes: &ActiveScopes,
-    store: Option<&JsonFileStore>,
+    store: Option<&SqliteStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
     let resolved = {
@@ -1137,7 +1384,7 @@ fn execute_provider_execution(
     execution_id: &ExecutionId,
     runtime: &SharedRuntime,
     active_scopes: &ActiveScopes,
-    store: Option<&JsonFileStore>,
+    store: Option<&SqliteStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
     let prepared = {
@@ -1189,7 +1436,7 @@ fn execute_provider_execution(
 fn begin_execution(
     runtime: &SharedRuntime,
     execution_id: &ExecutionId,
-    store: Option<&JsonFileStore>,
+    store: Option<&SqliteStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<bool, ServerError> {
     let should_execute = {
@@ -1224,7 +1471,7 @@ fn finish_model_execution(
     runtime: &SharedRuntime,
     execution_id: &ExecutionId,
     result: Result<(), BackendError>,
-    store: Option<&JsonFileStore>,
+    store: Option<&SqliteStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
     {
@@ -1250,7 +1497,7 @@ fn finish_provider_execution(
     runtime: &SharedRuntime,
     execution_id: &ExecutionId,
     result: Result<(), ExecutionProviderError>,
-    store: Option<&JsonFileStore>,
+    store: Option<&SqliteStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
     {
@@ -1276,7 +1523,7 @@ fn fail_shared_execution(
     runtime: &SharedRuntime,
     execution_id: &ExecutionId,
     error: ProtocolError,
-    store: Option<&JsonFileStore>,
+    store: Option<&SqliteStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), ServerError> {
     {
@@ -1312,7 +1559,7 @@ fn fail_runtime_execution(
 
 fn persist_shared(
     runtime: &SharedRuntime,
-    store: Option<&JsonFileStore>,
+    store: Option<&SqliteStore>,
     persist_lock: &Arc<Mutex<()>>,
 ) -> Result<(), PersistenceError> {
     let Some(store) = store else {
@@ -1333,7 +1580,7 @@ struct SharedRuntimeHost {
     runtime: SharedRuntime,
     execution_id: ExecutionId,
     allowed_tools: BTreeSet<CallableId>,
-    store: Option<JsonFileStore>,
+    store: Option<SqliteStore>,
     persist_lock: Arc<Mutex<()>>,
 }
 
@@ -1402,7 +1649,7 @@ impl BackendHost for SharedRuntimeHost {
 struct SharedProviderHost {
     runtime: SharedRuntime,
     execution_id: ExecutionId,
-    store: Option<JsonFileStore>,
+    store: Option<SqliteStore>,
     persist_lock: Arc<Mutex<()>>,
 }
 
@@ -1666,6 +1913,20 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
                 "configuration revision fingerprint mismatch for {revision}: expected {expected}, found {actual}"
             ),
         ),
+        ConductorError::IncompatibleSessionRebase {
+            session_id,
+            revision,
+            reason,
+        } => {
+            let mut error = protocol_error(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "session {session_id} cannot rebase to configuration revision {revision}: {reason}"
+                ),
+            );
+            error.session_id = Some(session_id);
+            error
+        }
         ConductorError::ClosedSession(id) => {
             let mut error = protocol_error(
                 ErrorCode::InvalidRequest,
@@ -1694,6 +1955,14 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         ),
         ConductorError::EmptyInput => {
             protocol_error(ErrorCode::InvalidRequest, "input must not be empty")
+        }
+        ConductorError::InvalidExecutionData {
+            execution_id,
+            message,
+        } => {
+            let mut error = protocol_error(ErrorCode::InvalidRequest, message);
+            error.execution_id = Some(execution_id);
+            error
         }
         ConductorError::InvalidLifecycle(id) => {
             let mut error = protocol_error(
@@ -1786,16 +2055,56 @@ mod tests {
     use super::*;
     use phenix_backend::{BackendExecutionRequest, BackendSessionRequest};
     use phenix_core::{
-        CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet, InferenceOptions, ModelId,
-        ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
+        AgentDefinition, AuthenticationState, CallableDescriptor, CallableKind, CallablePolicy,
+        CapabilitySet, ExecutionAuthority, FilesystemAuthority, InferenceOptions, ModelDescriptor,
+        ModelId, ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId,
+        ProviderId,
     };
+    use rusqlite::params;
     use serde_json::json;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{mpsc, Condvar};
     use std::time::Duration;
 
     struct CancelOnlySession {
         calls: Arc<AtomicUsize>,
+    }
+
+    struct ImmediateBackend;
+
+    impl Backend for ImmediateBackend {
+        fn capabilities(&self) -> phenix_backend::BackendCapabilities {
+            phenix_backend::BackendCapabilities {
+                tool_presentations: BTreeSet::new(),
+                images: false,
+                persistent_sessions: false,
+            }
+        }
+
+        fn catalog(&mut self) -> Result<BackendCatalog, BackendError> {
+            Ok(BackendCatalog {
+                backend: BackendId::parse("fixture").unwrap(),
+                models: vec![ModelDescriptor {
+                    target: model_target(),
+                    name: "Fixture".to_owned(),
+                    selectable: true,
+                }],
+                authentication_state: AuthenticationState::NotRequired,
+                authentication_methods: Vec::new(),
+            })
+        }
+
+        fn open_session(
+            &mut self,
+            _request: BackendSessionRequest,
+        ) -> Result<Arc<dyn BackendSession>, BackendError> {
+            Ok(Arc::new(CancelOnlySession {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }))
+        }
     }
 
     impl BackendSession for CancelOnlySession {
@@ -1836,6 +2145,7 @@ mod tests {
 
     fn node(id: &str, callable: &str, dependencies: &[&str]) -> OrchestrationNode {
         OrchestrationNode {
+            input_bindings: Default::default(),
             id: OrchestrationNodeId::parse(id).unwrap(),
             callable: CallableId::parse(callable).unwrap(),
             depends_on: dependencies
@@ -1854,6 +2164,165 @@ mod tests {
         }
     }
 
+    fn temporary_database() -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "phenix-conductor-multi-client-{}-{unique}.sqlite3",
+            std::process::id()
+        ))
+    }
+
+    fn connection_request(service: ConductorService, message: ClientMessage) -> Reply {
+        let id = message.id;
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let writer = server.try_clone().unwrap();
+        let connection =
+            thread::spawn(move || service.serve_connection(BufReader::new(server), writer));
+        serde_json::to_writer(&mut client, &message).unwrap();
+        client.write_all(b"\n").unwrap();
+        client.flush().unwrap();
+
+        let mut reader = BufReader::new(client.try_clone().unwrap());
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            match serde_json::from_str::<ServerMessage>(&line).unwrap() {
+                ServerMessage::Response {
+                    id: response_id,
+                    response: ResponsePayload::Ok { result },
+                } if response_id == id => {
+                    drop(reader);
+                    drop(client);
+                    connection.join().unwrap().unwrap();
+                    return result;
+                }
+                ServerMessage::Response {
+                    id: response_id,
+                    response: ResponsePayload::Error { error },
+                } if response_id == id => panic!("request failed: {error:?}"),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn shared_service_routes_responses_per_connection_and_persists_ingress_order() {
+        let database = temporary_database();
+        let store = SqliteStore::new(&database);
+        let workspace_id = WorkspaceId::parse("workspace:multi-client").unwrap();
+        let mut runtime = ConductorRuntime::new();
+        runtime.bind_workspace(workspace_id).unwrap();
+        let session = runtime
+            .create_session(
+                None,
+                Some("shared".to_owned()),
+                ExecutionTarget::Fixed(model_target()),
+            )
+            .unwrap();
+        let mut server = ConductorServer::new(runtime);
+        server.store = Some(store.clone());
+        server.persist().unwrap();
+        server
+            .register_backend(
+                BackendId::parse("fixture").unwrap(),
+                Box::new(ImmediateBackend),
+            )
+            .unwrap();
+        let service = ConductorService::new(server).unwrap();
+
+        let first_service = service.clone();
+        let first_session = session.id.clone();
+        let first = thread::spawn(move || {
+            connection_request(
+                first_service,
+                ClientMessage {
+                    id: 7,
+                    command: Command::Submit {
+                        session_id: first_session,
+                        text: "first".to_owned(),
+                    },
+                },
+            )
+        });
+        let second_service = service.clone();
+        let second_session = session.id.clone();
+        let second = thread::spawn(move || {
+            connection_request(
+                second_service,
+                ClientMessage {
+                    id: 7,
+                    command: Command::Submit {
+                        session_id: second_session,
+                        text: "second".to_owned(),
+                    },
+                },
+            )
+        });
+        let Reply::Execution { execution: first } = first.join().unwrap() else {
+            panic!("first frontend received the wrong reply");
+        };
+        let Reply::Execution { execution: second } = second.join().unwrap() else {
+            panic!("second frontend received the wrong reply");
+        };
+        assert_ne!(first.id, second.id);
+
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        let accepted = connection
+            .prepare(
+                "SELECT execution_id FROM accepted_root_submissions
+                 WHERE session_id = ?1 ORDER BY ingress_order",
+            )
+            .unwrap()
+            .query_map(params![session.id.to_string()], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(accepted.len(), 2);
+        assert!(accepted.contains(&first.id.to_string()));
+        assert!(accepted.contains(&second.id.to_string()));
+
+        let cursor = service
+            .inner
+            .server
+            .lock()
+            .unwrap()
+            .runtime()
+            .events_since(0)[0]
+            .sequence;
+        let Reply::Initialized { events, .. } = connection_request(
+            service.clone(),
+            ClientMessage {
+                id: 7,
+                command: Command::Initialize {
+                    after_sequence: Some(cursor),
+                },
+            },
+        ) else {
+            panic!("reconnecting frontend received the wrong reply");
+        };
+        assert!(!events.is_empty());
+        assert!(events.iter().all(|event| event.sequence > cursor));
+        assert_eq!(
+            service
+                .inner
+                .server
+                .lock()
+                .unwrap()
+                .runtime()
+                .event_subscription_count(),
+            0
+        );
+
+        drop(connection);
+        drop(service);
+        std::fs::remove_file(database).unwrap();
+    }
+
     #[test]
     fn workspace_phase_checkpoints_only_the_first_writer_after_a_read_boundary() {
         let mut phase = WorkspacePhase::default();
@@ -1863,6 +2332,59 @@ mod tests {
         assert!(!phase.enter(WorkspaceLeaseMode::Write));
         assert!(!phase.enter(WorkspaceLeaseMode::Read));
         assert!(phase.enter(WorkspaceLeaseMode::Write));
+    }
+
+    #[test]
+    fn explicit_checkpoint_request_persists_twice_within_one_write_phase() {
+        let workspace = temporary_database().with_extension("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("source.txt"), "one").unwrap();
+        let database = temporary_database();
+        let store = SqliteStore::new(&database);
+        let mut runtime = ConductorRuntime::new();
+        let mut authority = ExecutionAuthority::read_only();
+        authority.filesystem = FilesystemAuthority::Write;
+        runtime
+            .register_agent(AgentDefinition::new(
+                descriptor("agent.writer", CallableKind::Agent),
+                authority,
+            ))
+            .unwrap();
+        let workspace_id = WorkspaceId::parse("workspace:checkpoint").unwrap();
+        runtime.bind_workspace(workspace_id.clone()).unwrap();
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(model_target()))
+            .unwrap();
+        let execution = runtime.submit(&session.id, "write").unwrap();
+        let mut server = ConductorServer::new(runtime);
+        server.store = Some(store.clone());
+        server
+            .install_workspace_consistency(WorkspaceDescriptor {
+                id: workspace_id,
+                root: workspace.clone(),
+                scratch_paths: BTreeSet::new(),
+            })
+            .unwrap();
+
+        server.capture_workspace_checkpoint(&execution.id).unwrap();
+        std::fs::write(workspace.join("source.txt"), "two").unwrap();
+        server.capture_workspace_checkpoint(&execution.id).unwrap();
+        server.persist().unwrap();
+
+        let journal = store.load().unwrap();
+        assert_eq!(
+            journal
+                .entries
+                .iter()
+                .filter(|entry| matches!(
+                    entry.event,
+                    DomainEvent::WorkspaceCheckpointCaptured { .. }
+                ))
+                .count(),
+            2
+        );
+        std::fs::remove_file(database).unwrap();
+        std::fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
@@ -1878,9 +2400,11 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration.tree", CallableKind::Orchestration),
                 nodes: vec![OrchestrationNode {
+                    input_bindings: Default::default(),
                     id: OrchestrationNodeId::parse("child").unwrap(),
                     callable: CallableId::parse("agent.child").unwrap(),
                     depends_on: Vec::new(),
@@ -1897,7 +2421,7 @@ mod tests {
             .start_orchestration(
                 &root.id,
                 &CallableId::parse("orchestration.tree").unwrap(),
-                "tree",
+                json!({"objective": "tree"}),
             )
             .unwrap();
         let child = runtime
@@ -2154,6 +2678,7 @@ mod tests {
         }
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
                 nodes: vec![
@@ -2174,7 +2699,7 @@ mod tests {
         let target = serde_json::to_string(&ExecutionTarget::Fixed(model_target())).unwrap();
         let input = format!(
             "{{\"id\":1,\"command\":{{\"type\":\"create_session\",\"parent_session\":null,\"name\":\"dag\",\"target\":{target}}}}}\n\\
-             {{\"id\":2,\"command\":{{\"type\":\"start_callable\",\"session_id\":\"session-1\",\"callable\":\"orchestration.parallel\",\"objective\":\"run\"}}}}\n"
+             {{\"id\":2,\"command\":{{\"type\":\"start_callable\",\"session_id\":\"session-1\",\"callable\":\"orchestration.parallel\",\"input\":{{\"objective\":\"run\"}}}}}}\n"
         );
         server
             .serve_ndjson(std::io::Cursor::new(input), std::io::sink())

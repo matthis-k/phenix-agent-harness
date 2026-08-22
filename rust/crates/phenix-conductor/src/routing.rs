@@ -42,6 +42,11 @@ impl RoutingRegistry {
         Ok(())
     }
 
+    #[must_use]
+    pub fn contains(&self, profile: &RoutingProfileId) -> bool {
+        self.profiles.contains_key(profile)
+    }
+
     /// Returns the configured routing profiles with the distinct providers that
     /// must be authenticated before the profile can be used.
     #[must_use]

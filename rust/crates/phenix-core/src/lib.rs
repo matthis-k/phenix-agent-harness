@@ -239,6 +239,24 @@ pub struct OrchestrationNode {
     #[serde(default)]
     pub depends_on: Vec<OrchestrationNodeId>,
     pub objective: Option<String>,
+    pub input_bindings: BTreeMap<String, OrchestrationValueBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
+pub enum OrchestrationValueBinding {
+    Input {
+        #[serde(default)]
+        pointer: String,
+    },
+    NodeOutput {
+        node: OrchestrationNodeId,
+        #[serde(default)]
+        pointer: String,
+    },
+    Literal {
+        value: Value,
+    },
 }
 
 /// Canonical parsed orchestration definition.
@@ -253,6 +271,7 @@ pub struct OrchestrationDefinition {
     #[serde(default)]
     pub interface_agent: Option<CallableId>,
     pub nodes: Vec<OrchestrationNode>,
+    pub output_bindings: BTreeMap<String, OrchestrationValueBinding>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -441,18 +460,33 @@ mod tests {
         let definition = OrchestrationDefinition {
             interface_agent: None,
             descriptor: orchestration_descriptor(),
+            output_bindings: BTreeMap::from([(
+                "plan".to_owned(),
+                OrchestrationValueBinding::NodeOutput {
+                    node: OrchestrationNodeId::parse("plan").unwrap(),
+                    pointer: String::new(),
+                },
+            )]),
             nodes: vec![
                 OrchestrationNode {
                     id: OrchestrationNodeId::parse("scout").unwrap(),
                     callable: CallableId::parse("agent.scout").unwrap(),
                     depends_on: Vec::new(),
                     objective: Some("Inspect the repository".to_owned()),
+                    input_bindings: BTreeMap::new(),
                 },
                 OrchestrationNode {
                     id: OrchestrationNodeId::parse("plan").unwrap(),
                     callable: CallableId::parse("agent.plan").unwrap(),
                     depends_on: vec![OrchestrationNodeId::parse("scout").unwrap()],
                     objective: Some("Plan the change".to_owned()),
+                    input_bindings: BTreeMap::from([(
+                        "findings".to_owned(),
+                        OrchestrationValueBinding::NodeOutput {
+                            node: OrchestrationNodeId::parse("scout").unwrap(),
+                            pointer: String::new(),
+                        },
+                    )]),
                 },
             ],
         };

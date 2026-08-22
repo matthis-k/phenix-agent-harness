@@ -34,6 +34,7 @@ fn workflow_node(
     objective: Option<&str>,
 ) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable: CallableId::parse(callable).unwrap(),
         depends_on: depends_on
@@ -59,6 +60,7 @@ fn bind_two_step_workflow(runtime: &mut ConductorRuntime) {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.two-step", CallableKind::Orchestration),
             nodes: vec![
@@ -356,7 +358,7 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.two-step").unwrap(),
-            "orchestration objective",
+            serde_json::json!({"objective": "orchestration objective"}),
         )
         .unwrap();
     let first = runtime

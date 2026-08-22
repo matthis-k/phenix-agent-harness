@@ -66,7 +66,7 @@ impl ExecutionProvider for MockProvider {
                     "provider reasoning".to_owned(),
                 ))?;
                 host.emit(ExecutionProviderEvent::ContentDelta(
-                    "provider result".to_owned(),
+                    json!({"result": "provider result"}).to_string(),
                 ))?;
                 Ok(())
             }
@@ -100,6 +100,7 @@ fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
 
 fn node(id: &str, callable: CallableId, objective: Option<&str>) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable,
         depends_on: Vec::new(),
@@ -206,7 +207,7 @@ fn mock_provider_executes_an_ordinary_child_and_emits_canonical_events() {
                 && matches!(
                     &event.kind,
                     ExecutionEventKind::AssistantContentDelta { text }
-                        if text == "provider result"
+                        if text == r#"{"result":"provider result"}"#
                 )
         })
         .unwrap();
@@ -229,6 +230,7 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             nodes: vec![node("provider", step, Some("provider step"))],
@@ -239,7 +241,7 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.native").unwrap(),
-            "orchestration objective",
+            serde_json::json!({"objective": "orchestration objective"}),
         )
         .unwrap();
     let child = runtime
@@ -283,6 +285,7 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             nodes: vec![node(
@@ -297,7 +300,7 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.native").unwrap(),
-            "orchestration objective",
+            serde_json::json!({"objective": "orchestration objective"}),
         )
         .unwrap();
     let child = runtime

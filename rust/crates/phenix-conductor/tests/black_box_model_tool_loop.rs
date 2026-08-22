@@ -254,6 +254,7 @@ fn node(
     objective: Option<&str>,
 ) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable,
         depends_on: depends_on
@@ -414,6 +415,7 @@ fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() 
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.implement", CallableKind::Orchestration),
             nodes: vec![
@@ -426,7 +428,11 @@ fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() 
     let root = runtime.submit(&session.id, "root").unwrap();
     let workflow_id = CallableId::parse("orchestration.implement").unwrap();
     let orchestration = runtime
-        .start_orchestration(&root.id, &workflow_id, "implement")
+        .start_orchestration(
+            &root.id,
+            &workflow_id,
+            serde_json::json!({"objective": "implement"}),
+        )
         .unwrap();
 
     assert_eq!(orchestration.state, ExecutionState::Running);
@@ -458,6 +464,9 @@ fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() 
         opened: Arc::new(AtomicBool::new(false)),
         expected_model: None,
     };
+    runtime
+        .record_execution_output(&first.id, serde_json::json!({}))
+        .unwrap();
     runtime.drive_execution(&first.id, &mut backend).unwrap();
 
     let snapshot = runtime.snapshot();
@@ -479,6 +488,9 @@ fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() 
             .count(),
         2
     );
+    runtime
+        .record_execution_output(&second.id, serde_json::json!({}))
+        .unwrap();
 
     runtime.drive_execution(&second.id, &mut backend).unwrap();
     let snapshot = runtime.snapshot();
