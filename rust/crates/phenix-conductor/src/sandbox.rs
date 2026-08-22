@@ -397,7 +397,10 @@ shift 7
 exec 8<>"$gate"
 exec 9<>"$ready_pipe"
 
-"$bwrap" --info-fd 3 --block-fd 4 "$@" 3>"$info" 4<&8 &
+sandbox_stdout="$info.stdout"
+sandbox_stderr="$info.stderr"
+"$bwrap" --info-fd 3 --block-fd 4 "$@" \
+  3>"$info" 4<&8 >"$sandbox_stdout" 2>"$sandbox_stderr" &
 sandbox_pid=$!
 
 attempt=0
@@ -505,6 +508,8 @@ if [ -e "$network_timeout" ]; then
   while IFS= read -r line; do printf '%s\n' "$line" >&2; done <"$slirp_error"
   exit 125
 fi
+while IFS= read -r line; do printf '%s\n' "$line"; done <"$sandbox_stdout"
+while IFS= read -r line; do printf '%s\n' "$line" >&2; done <"$sandbox_stderr"
 exit "$sandbox_status"
 "#;
 
