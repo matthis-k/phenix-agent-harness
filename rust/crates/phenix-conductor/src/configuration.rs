@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 ///
 /// The conductor owns validation and execution semantics, while applications
 /// own the concrete agent, orchestration, and routing-profile instances supplied in
-/// this file. Durable journals intentionally store only revision references and
-/// runtime state, so this configuration is rebound on process startup.
+/// this file. The durable store keeps revision fingerprints and runtime state.
+/// Process startup recompiles every supplied historical file and binds revisions by
+/// semantic fingerprint.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfiguration {

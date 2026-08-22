@@ -2,7 +2,7 @@
 
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableDescriptor,
-    CallableId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget,
+    CallableId, ConfigRevisionId, ExecutionEvent, ExecutionId, ExecutionSummary, ExecutionTarget,
     RoutingProfileDescriptor, SessionId, SessionSummary, SkillDescriptor,
 };
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,10 @@ pub enum Command {
     SetSessionTarget {
         session_id: SessionId,
         target: ExecutionTarget,
+    },
+    RebaseSession {
+        session_id: SessionId,
+        config_revision: ConfigRevisionId,
     },
     CloseSession {
         session_id: SessionId,
@@ -283,6 +287,21 @@ mod tests {
         let value = serde_json::to_value(message).expect("serialize session close");
         assert_eq!(value["command"]["type"], "close_session");
         assert_eq!(value["command"]["session_id"], "session-1");
+    }
+
+    #[test]
+    fn session_rebase_is_an_explicit_revision_operation() {
+        let message = ClientMessage {
+            id: 13,
+            command: Command::RebaseSession {
+                session_id: SessionId::parse("session-1").unwrap(),
+                config_revision: ConfigRevisionId::parse("config-3").unwrap(),
+            },
+        };
+        let value = serde_json::to_value(message).unwrap();
+        assert_eq!(value["command"]["type"], "rebase_session");
+        assert_eq!(value["command"]["session_id"], "session-1");
+        assert_eq!(value["command"]["config_revision"], "config-3");
     }
 
     #[test]

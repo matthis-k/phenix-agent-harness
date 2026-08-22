@@ -636,6 +636,7 @@ impl ConductorServer {
                 | Command::ForkSession { .. }
                 | Command::RenameSession { .. }
                 | Command::SetSessionTarget { .. }
+                | Command::RebaseSession { .. }
                 | Command::CloseSession { .. }
                 | Command::CancelExecution { .. }
         );
@@ -683,6 +684,14 @@ impl ConductorServer {
             Command::SetSessionTarget { session_id, target } => self
                 .lock_runtime()?
                 .set_session_target(&session_id, target)
+                .map(|session| Reply::Session { session })
+                .map_err(map_conductor_error),
+            Command::RebaseSession {
+                session_id,
+                config_revision,
+            } => self
+                .lock_runtime()?
+                .rebase_session(&session_id, &config_revision)
                 .map(|session| Reply::Session { session })
                 .map_err(map_conductor_error),
             Command::CloseSession { session_id } => self.close_session(&session_id),
@@ -1829,6 +1838,20 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
                 "configuration revision fingerprint mismatch for {revision}: expected {expected}, found {actual}"
             ),
         ),
+        ConductorError::IncompatibleSessionRebase {
+            session_id,
+            revision,
+            reason,
+        } => {
+            let mut error = protocol_error(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "session {session_id} cannot rebase to configuration revision {revision}: {reason}"
+                ),
+            );
+            error.session_id = Some(session_id);
+            error
+        }
         ConductorError::ClosedSession(id) => {
             let mut error = protocol_error(
                 ErrorCode::InvalidRequest,

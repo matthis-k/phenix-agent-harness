@@ -53,7 +53,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct ConfigRevisionFingerprint(String);
 
 impl Display for ConfigRevisionFingerprint {
@@ -72,6 +72,11 @@ pub enum ConductorError {
         revision: ConfigRevisionId,
         expected: ConfigRevisionFingerprint,
         actual: ConfigRevisionFingerprint,
+    },
+    IncompatibleSessionRebase {
+        session_id: SessionId,
+        revision: ConfigRevisionId,
+        reason: String,
     },
     ClosedSession(SessionId),
     SessionHasActiveExecutions(SessionId),
@@ -122,6 +127,14 @@ impl Display for ConductorError {
             } => write!(
                 f,
                 "configuration revision fingerprint mismatch for {revision}: expected {expected}, found {actual}"
+            ),
+            Self::IncompatibleSessionRebase {
+                session_id,
+                revision,
+                reason,
+            } => write!(
+                f,
+                "session {session_id} cannot rebase to configuration revision {revision}: {reason}"
             ),
             Self::ClosedSession(id) => write!(f, "session is closed: {id}"),
             Self::SessionHasActiveExecutions(id) => {
@@ -640,6 +653,74 @@ impl ConductorRuntime {
         Ok(())
     }
 
+    pub fn bind_available_configurations(
+        &mut self,
+        configurations: &[CompiledConfiguration],
+    ) -> Result<Vec<ConfigRevisionId>, ConductorError> {
+        let available = configurations
+            .iter()
+            .map(|configuration| (configuration.fingerprint(), configuration))
+            .collect::<BTreeMap<_, _>>();
+        let bindings = self
+            .config_revisions
+            .iter()
+            .filter(|(_, slot)| slot.configuration.is_none())
+            .filter_map(|(revision, slot)| {
+                available
+                    .get(&slot.fingerprint)
+                    .map(|configuration| (revision.clone(), (*configuration).clone()))
+            })
+            .collect::<Vec<_>>();
+        let mut bound = Vec::with_capacity(bindings.len());
+        for (revision, configuration) in bindings {
+            self.bind_configuration_revision(&revision, configuration)?;
+            bound.push(revision);
+        }
+        Ok(bound)
+    }
+
+    pub fn activate_configuration(
+        &mut self,
+        configuration: CompiledConfiguration,
+    ) -> Result<ConfigRevisionId, ConductorError> {
+        let fingerprint = configuration.fingerprint();
+        let current = self
+            .config_revisions
+            .get(&self.config_revision)
+            .expect("current configuration revision exists");
+        if current.fingerprint == fingerprint {
+            let revision = self.config_revision.clone();
+            if current.configuration.is_none() {
+                self.bind_configuration_revision(&revision, configuration)?;
+            }
+            return Ok(revision);
+        }
+        self.reload_configuration(configuration)
+    }
+
+    #[must_use]
+    pub fn required_config_revisions(&self) -> BTreeSet<ConfigRevisionId> {
+        let mut revisions = BTreeSet::from([self.config_revision.clone()]);
+        revisions.extend(
+            self.sessions
+                .values()
+                .map(|session| session.summary.config_revision.clone()),
+        );
+        revisions.extend(
+            self.executions
+                .values()
+                .map(|execution| execution.config_revision.clone()),
+        );
+        revisions
+    }
+
+    pub fn ensure_required_configurations_bound(&self) -> Result<(), ConductorError> {
+        for revision in self.required_config_revisions() {
+            self.configuration_revision(&revision)?;
+        }
+        Ok(())
+    }
+
     pub fn reload_configuration(
         &mut self,
         configuration: CompiledConfiguration,
@@ -1101,7 +1182,25 @@ impl ConductorRuntime {
         revision: &ConfigRevisionId,
     ) -> Result<SessionSummary, ConductorError> {
         self.ensure_session_active(session_id)?;
-        self.configuration_revision(revision)?;
+        let session = self
+            .sessions
+            .get(session_id)
+            .expect("active session exists")
+            .summary
+            .clone();
+        if session.config_revision == *revision {
+            return Ok(session);
+        }
+        let configuration = self.configuration_revision(revision)?;
+        if let ExecutionTarget::Routed(profile) = &session.default_target {
+            if !configuration.routing.contains(profile) {
+                return Err(ConductorError::IncompatibleSessionRebase {
+                    session_id: session_id.clone(),
+                    revision: revision.clone(),
+                    reason: format!("routing profile {profile} is unavailable"),
+                });
+            }
+        }
         self.record_domain_event(DomainEvent::SessionConfigRebased {
             session_id: session_id.clone(),
             config_revision: revision.clone(),
