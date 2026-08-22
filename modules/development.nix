@@ -120,6 +120,12 @@
           label = "conductor / runtime_edge_cases";
         }
         {
+          id = "conductor-termination-causes";
+          package = "phenix-conductor";
+          test = "termination_causes";
+          label = "conductor / termination_causes";
+        }
+        {
           id = "conductor-workspace-execution-leases";
           package = "phenix-conductor";
           test = "workspace_execution_leases";

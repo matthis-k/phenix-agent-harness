@@ -37,10 +37,10 @@ use phenix_core::{
     AgentDefinition, AttemptGroup, AttemptGroupId, CallableDescriptor, CallableId, CallableKind,
     ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
     ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
-    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, RoutingProfile, SessionId,
-    SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId, WorkspaceId,
-    WorkspaceLeaseRequest,
+    ExecutionTerminationCause, ExecutionWorkspaceValidity, FileObservation, FileVersion,
+    ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
+    RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId,
+    WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -1191,6 +1191,7 @@ impl ConductorRuntime {
     fn cancel_execution_set(
         &mut self,
         executions: BTreeSet<ExecutionId>,
+        cause: ExecutionTerminationCause,
     ) -> Result<(), ConductorError> {
         for id in executions {
             let state = self
@@ -1201,6 +1202,12 @@ impl ConductorRuntime {
                 .state
                 .clone();
             if !is_terminal(&state) {
+                self.push_event(
+                    &id,
+                    ExecutionEventKind::ExecutionTerminated {
+                        cause: cause.clone(),
+                    },
+                )?;
                 self.set_state(&id, ExecutionState::Cancelled)?;
             }
         }
@@ -1210,12 +1217,22 @@ impl ConductorRuntime {
     fn cancel_descendants(&mut self, root: &ExecutionId) -> Result<(), ConductorError> {
         let mut descendants = self.execution_subtree(root)?;
         descendants.remove(root);
-        self.cancel_execution_set(descendants)
+        self.cancel_execution_set(
+            descendants,
+            ExecutionTerminationCause::AncestorFailure {
+                failed_ancestor: root.clone(),
+            },
+        )
     }
 
     pub fn cancel_execution(&mut self, root: &ExecutionId) -> Result<(), ConductorError> {
         let executions = self.execution_subtree(root)?;
-        self.cancel_execution_set(executions)
+        self.cancel_execution_set(
+            executions,
+            ExecutionTerminationCause::ExplicitCancellation {
+                requested_execution: root.clone(),
+            },
+        )
     }
 
     pub fn push_event(
