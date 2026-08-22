@@ -254,6 +254,7 @@ fn node(
     objective: Option<&str>,
 ) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable,
         depends_on: depends_on
@@ -414,6 +415,7 @@ fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() 
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.implement", CallableKind::Orchestration),
             nodes: vec![

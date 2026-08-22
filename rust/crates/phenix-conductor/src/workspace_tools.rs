@@ -799,6 +799,7 @@ mod tests {
         objective: &str,
     ) -> OrchestrationNode {
         OrchestrationNode {
+            input_bindings: Default::default(),
             id: OrchestrationNodeId::parse(id).unwrap(),
             callable,
             depends_on: depends_on
@@ -1134,6 +1135,7 @@ mod tests {
         let orchestration_id = CallableId::parse("orchestration.tool-surface").unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: fixture_descriptor(
                     orchestration_id.as_str(),
@@ -1177,7 +1179,11 @@ mod tests {
             .submit(&session.id, "exercise the orchestration")
             .unwrap();
         let orchestration = runtime
-            .start_orchestration(&root.id, &orchestration_id, "change and verify")
+            .start_orchestration(
+                &root.id,
+                &orchestration_id,
+                json!({"objective": "change and verify"}),
+            )
             .unwrap();
 
         let recorder = ToolSurfaceRecorder::default();

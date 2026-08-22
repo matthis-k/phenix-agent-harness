@@ -141,6 +141,7 @@ mod tests {
 
     fn node(id: &str, callable: CallableId, objective: Option<&str>) -> OrchestrationNode {
         OrchestrationNode {
+            input_bindings: Default::default(),
             id: OrchestrationNodeId::parse(id).unwrap(),
             callable,
             depends_on: Vec::new(),
@@ -161,6 +162,7 @@ mod tests {
     fn application_configuration_rebinds_agents_workflows_and_routes() {
         let agent = descriptor("agent.fixture", CallableKind::Agent);
         let orchestration = OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.fixture", CallableKind::Orchestration),
             nodes: vec![node(
@@ -255,6 +257,7 @@ mod tests {
                 ExecutionAuthority::read_only(),
             )],
             orchestrations: vec![OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor(workflow_id.as_str(), CallableKind::Orchestration),
                 nodes: vec![node(

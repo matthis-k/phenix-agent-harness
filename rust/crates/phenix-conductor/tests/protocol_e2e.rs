@@ -45,6 +45,7 @@ fn orchestration_node(
     objective: Option<&str>,
 ) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable: CallableId::parse(callable).unwrap(),
         depends_on: depends_on
@@ -76,6 +77,7 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
                 .unwrap();
             runtime
                 .register_orchestration(OrchestrationDefinition {
+                    output_bindings: Default::default(),
                     interface_agent: None,
                     descriptor: descriptor(
                         "orchestration.catalog",
@@ -315,7 +317,7 @@ fn typed_callable_command_executes_native_provider_without_model_backend() {
             Command::StartCallable {
                 session_id: phenix_core::SessionId::parse("session-1").unwrap(),
                 callable: CallableId::parse("agent.native").unwrap(),
-                objective: "inspect repository".to_owned(),
+                input: serde_json::json!("inspect repository"),
             },
         ])
         .run();
@@ -418,7 +420,7 @@ fn active_native_provider_cancellation_is_deterministic_and_never_uses_model_bac
             Command::StartCallable {
                 session_id: phenix_core::SessionId::parse("session-1").unwrap(),
                 callable: CallableId::parse("agent.blocking").unwrap(),
-                objective: "wait until cancelled".to_owned(),
+                input: serde_json::json!("wait until cancelled"),
             },
         ])
         .after_signal(
@@ -454,6 +456,7 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
                 .unwrap();
             runtime
                 .register_orchestration(OrchestrationDefinition {
+                    output_bindings: Default::default(),
                     interface_agent: None,
                     descriptor: descriptor(
                         "orchestration.two-step",
@@ -484,7 +487,7 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
             Command::StartCallable {
                 session_id: phenix_core::SessionId::parse("session-1").unwrap(),
                 callable: CallableId::parse("orchestration.two-step").unwrap(),
-                objective: "overall objective".to_owned(),
+                input: serde_json::json!({"objective": "overall objective"}),
             },
         ])
         .run();
@@ -714,6 +717,7 @@ fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration", CallableKind::Orchestration, false),
             nodes: vec![orchestration_node("guarded", "guarded-step", &[], None)],

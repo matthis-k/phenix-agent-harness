@@ -7,7 +7,8 @@ use phenix_backend::ToolResult;
 use phenix_core::{
     AgentDefinition, CallableDescriptor, CallableId, CallableKind, ExecutionAuthority,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
-    FileObservation, OrchestrationDefinition, OrchestrationNodeId, SessionId,
+    FileObservation, OrchestrationDefinition, OrchestrationNodeId, OrchestrationValueBinding,
+    SessionId,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -99,6 +100,11 @@ pub enum CallableRegistryError {
         node: OrchestrationNodeId,
         callable: CallableId,
     },
+    InvalidOrchestrationBinding {
+        orchestration: CallableId,
+        location: String,
+        message: String,
+    },
 }
 
 impl Display for CallableRegistryError {
@@ -148,6 +154,14 @@ impl Display for CallableRegistryError {
             } => write!(
                 f,
                 "orchestration {orchestration} node {node} references non-executable or unknown callable {callable}"
+            ),
+            Self::InvalidOrchestrationBinding {
+                orchestration,
+                location,
+                message,
+            } => write!(
+                f,
+                "orchestration {orchestration} has invalid binding at {location}: {message}"
             ),
         }
     }
@@ -374,6 +388,25 @@ impl CallableRegistry {
                     });
                 }
             }
+            for (field, binding) in &node.input_bindings {
+                validate_orchestration_binding(
+                    &orchestration,
+                    &format!("node {} input {field}", node.id),
+                    binding,
+                    &nodes,
+                    Some(node),
+                )?;
+            }
+        }
+
+        for (field, binding) in &definition.output_bindings {
+            validate_orchestration_binding(
+                &orchestration,
+                &format!("output {field}"),
+                binding,
+                &nodes,
+                None,
+            )?;
         }
 
         let mut indegree = nodes
@@ -560,6 +593,35 @@ impl CallableRegistry {
     }
 }
 
+fn validate_orchestration_binding(
+    orchestration: &CallableId,
+    location: &str,
+    binding: &OrchestrationValueBinding,
+    nodes: &BTreeMap<OrchestrationNodeId, phenix_core::OrchestrationNode>,
+    consumer: Option<&phenix_core::OrchestrationNode>,
+) -> Result<(), CallableRegistryError> {
+    let OrchestrationValueBinding::NodeOutput { node, .. } = binding else {
+        return Ok(());
+    };
+    if !nodes.contains_key(node) {
+        return Err(CallableRegistryError::InvalidOrchestrationBinding {
+            orchestration: orchestration.clone(),
+            location: location.to_owned(),
+            message: format!("references unknown node {node}"),
+        });
+    }
+    if let Some(consumer) = consumer {
+        if !consumer.depends_on.contains(node) {
+            return Err(CallableRegistryError::InvalidOrchestrationBinding {
+                orchestration: orchestration.clone(),
+                location: location.to_owned(),
+                message: format!("references node {node} without declaring it as a dependency"),
+            });
+        }
+    }
+    Ok(())
+}
+
 impl ConductorRuntime {
     /// Start an agent or orchestration as a first-class top-level execution in a
     /// session. This is the conductor-owned entrypoint used by frontends; it
@@ -568,20 +630,20 @@ impl ConductorRuntime {
         &mut self,
         session_id: &SessionId,
         callable: &CallableId,
-        objective: impl Into<String>,
+        input: impl Into<Value>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        self.start_session_callable_with_restrictions(session_id, callable, objective, None)
+        self.start_session_callable_with_restrictions(session_id, callable, input, None)
     }
 
     pub fn start_session_callable_with_restrictions(
         &mut self,
         session_id: &SessionId,
         callable: &CallableId,
-        objective: impl Into<String>,
+        input: impl Into<Value>,
         restrictions: Option<&ExecutionAuthority>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let objective = objective.into();
-        if objective.trim().is_empty() {
+        let input = input.into();
+        if input.as_str().is_some_and(|input| input.trim().is_empty()) {
             return Err(ConductorError::EmptyInput);
         }
         let callables = self
@@ -606,13 +668,22 @@ impl ConductorRuntime {
                     ExecutionKind::Agent,
                     callable.clone(),
                     ExecutionPayload::Invocation {
-                        input: objective.clone(),
+                        input: input
+                            .as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| input.to_string()),
                     },
                     restrictions,
                 )
             }
             CallableKind::Orchestration => {
                 let definition = callables.orchestration(callable)?.clone();
+                crate::validate_json_schema(&definition.descriptor.input_schema, &input).map_err(
+                    |message| ConductorError::InvalidExecutionData {
+                        execution_id: execution_id.clone(),
+                        message: format!("orchestration input: {message}"),
+                    },
+                )?;
                 self.check_session_callable_policy(
                     session_id,
                     &execution_id,
@@ -644,9 +715,7 @@ impl ConductorRuntime {
                     execution_id,
                     ExecutionKind::Orchestration,
                     callable.clone(),
-                    ExecutionPayload::Orchestration {
-                        objective: objective.clone(),
-                    },
+                    ExecutionPayload::Orchestration { input },
                     restrictions,
                 )?;
                 self.set_state(&summary.id, ExecutionState::Running)?;
@@ -703,7 +772,7 @@ impl ConductorRuntime {
     ) -> Result<ExecutionSummary, ConductorError> {
         let user_input = match &payload {
             ExecutionPayload::Invocation { input } => input.clone(),
-            ExecutionPayload::Orchestration { objective } => objective.clone(),
+            ExecutionPayload::Orchestration { input } => input.to_string(),
         };
         let target = self
             .sessions
@@ -773,6 +842,7 @@ mod tests {
         objective: Option<&str>,
     ) -> OrchestrationNode {
         OrchestrationNode {
+            input_bindings: Default::default(),
             id: OrchestrationNodeId::parse(id).unwrap(),
             callable: CallableId::parse(callable).unwrap(),
             depends_on: depends_on
@@ -875,6 +945,7 @@ mod tests {
             .unwrap();
         registry
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![node("run", "native", &[], None)],
@@ -893,6 +964,7 @@ mod tests {
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![
@@ -921,6 +993,7 @@ mod tests {
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![node("work", "worker", &["missing"], None)],
@@ -943,6 +1016,7 @@ mod tests {
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![
@@ -971,6 +1045,7 @@ mod tests {
         let orchestration = CallableId::parse("orchestration").unwrap();
         registry
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
                 nodes: vec![
@@ -1065,6 +1140,7 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("implement", CallableKind::Orchestration),
                 nodes: vec![node("worker", "worker", &[], None)],
@@ -1075,7 +1151,7 @@ mod tests {
             .start_session_callable(
                 &session.id,
                 &CallableId::parse("implement").unwrap(),
-                "implement it",
+                json!({"objective": "implement it"}),
             )
             .unwrap();
 
@@ -1100,7 +1176,275 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             user_inputs,
-            vec![(orchestration.id.clone(), "implement it".to_owned())]
+            vec![(
+                orchestration.id.clone(),
+                json!({"objective": "implement it"}).to_string()
+            )]
         );
+    }
+
+    #[test]
+    fn typed_orchestration_bindings_produce_durable_output() {
+        let mut runtime = ConductorRuntime::new();
+        let mut producer = descriptor("producer", CallableKind::Agent);
+        producer.input_schema = json!({
+            "type": "object",
+            "required": ["seed"],
+            "properties": {"seed": {"type": "integer"}}
+        });
+        producer.output_schema = json!({
+            "type": "object",
+            "required": ["value"],
+            "properties": {"value": {"type": "integer"}}
+        });
+        let mut consumer = descriptor("consumer", CallableKind::Agent);
+        consumer.input_schema = json!({
+            "type": "object",
+            "required": ["value"],
+            "properties": {"value": {"type": "integer"}}
+        });
+        consumer.output_schema = json!({
+            "type": "object",
+            "required": ["product"],
+            "properties": {"product": {"type": "integer"}}
+        });
+        for definition in [producer, consumer] {
+            runtime
+                .register_agent(AgentDefinition::new(
+                    definition,
+                    ExecutionAuthority::read_only(),
+                ))
+                .unwrap();
+        }
+        let mut orchestration = descriptor("typed", CallableKind::Orchestration);
+        orchestration.input_schema = json!({
+            "type": "object",
+            "required": ["factor"],
+            "properties": {"factor": {"type": "integer"}}
+        });
+        orchestration.output_schema = json!({
+            "type": "object",
+            "required": ["result"],
+            "properties": {"result": {"type": "integer"}}
+        });
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: orchestration,
+                interface_agent: None,
+                nodes: vec![
+                    OrchestrationNode {
+                        id: OrchestrationNodeId::parse("produce").unwrap(),
+                        callable: CallableId::parse("producer").unwrap(),
+                        depends_on: Vec::new(),
+                        objective: None,
+                        input_bindings: BTreeMap::from([(
+                            "seed".to_owned(),
+                            OrchestrationValueBinding::Input {
+                                pointer: "/factor".to_owned(),
+                            },
+                        )]),
+                    },
+                    OrchestrationNode {
+                        id: OrchestrationNodeId::parse("consume").unwrap(),
+                        callable: CallableId::parse("consumer").unwrap(),
+                        depends_on: vec![OrchestrationNodeId::parse("produce").unwrap()],
+                        objective: None,
+                        input_bindings: BTreeMap::from([(
+                            "value".to_owned(),
+                            OrchestrationValueBinding::NodeOutput {
+                                node: OrchestrationNodeId::parse("produce").unwrap(),
+                                pointer: "/value".to_owned(),
+                            },
+                        )]),
+                    },
+                ],
+                output_bindings: BTreeMap::from([(
+                    "result".to_owned(),
+                    OrchestrationValueBinding::NodeOutput {
+                        node: OrchestrationNodeId::parse("consume").unwrap(),
+                        pointer: "/product".to_owned(),
+                    },
+                )]),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let execution = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("typed").unwrap(),
+                json!({"factor": 3}),
+            )
+            .unwrap();
+        let produce = runtime
+            .orchestration_nodes
+            .iter()
+            .find_map(|(execution, node)| (node.as_str() == "produce").then(|| execution.clone()))
+            .unwrap();
+        assert_eq!(
+            runtime.orchestration_node_inputs.get(&(
+                execution.id.clone(),
+                OrchestrationNodeId::parse("produce").unwrap()
+            )),
+            Some(&json!({"seed": 3}))
+        );
+        runtime
+            .record_execution_output(&produce, json!({"value": 6}))
+            .unwrap();
+        runtime
+            .set_state(&produce, ExecutionState::Completed)
+            .unwrap();
+        let consume = runtime
+            .orchestration_nodes
+            .iter()
+            .find_map(|(execution, node)| (node.as_str() == "consume").then(|| execution.clone()))
+            .unwrap();
+        assert_eq!(
+            runtime.orchestration_node_inputs.get(&(
+                execution.id.clone(),
+                OrchestrationNodeId::parse("consume").unwrap()
+            )),
+            Some(&json!({"value": 6}))
+        );
+        runtime
+            .record_execution_output(&consume, json!({"product": 12}))
+            .unwrap();
+        runtime
+            .set_state(&consume, ExecutionState::Completed)
+            .unwrap();
+
+        assert_eq!(
+            runtime.execution_output(&execution.id),
+            Some(&json!({"result": 12}))
+        );
+        assert_eq!(
+            runtime
+                .snapshot()
+                .executions
+                .into_iter()
+                .find(|candidate| candidate.id == execution.id)
+                .unwrap()
+                .state,
+            ExecutionState::Completed
+        );
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert_eq!(
+            restored.execution_output(&execution.id),
+            Some(&json!({"result": 12}))
+        );
+    }
+
+    #[test]
+    fn successful_interface_agent_synthesizes_from_typed_state() {
+        let mut runtime = ConductorRuntime::new();
+        let worker = descriptor("worker", CallableKind::Agent);
+        let mut interface = descriptor("interface", CallableKind::Agent);
+        interface.output_schema = json!({
+            "type": "object",
+            "required": ["answer"],
+            "properties": {"answer": {"type": "integer"}}
+        });
+        for definition in [worker, interface] {
+            runtime
+                .register_agent(AgentDefinition::new(
+                    definition,
+                    ExecutionAuthority::read_only(),
+                ))
+                .unwrap();
+        }
+        let mut orchestration = descriptor("synthesized", CallableKind::Orchestration);
+        orchestration.output_schema = json!({
+            "type": "object",
+            "required": ["answer"],
+            "properties": {"answer": {"type": "integer"}}
+        });
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: orchestration,
+                interface_agent: Some(CallableId::parse("interface").unwrap()),
+                nodes: vec![node("work", "worker", &[], None)],
+                output_bindings: BTreeMap::new(),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let orchestration = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("synthesized").unwrap(),
+                json!({}),
+            )
+            .unwrap();
+        let worker = runtime.orchestration_nodes.keys().next().cloned().unwrap();
+        runtime.record_execution_output(&worker, json!({})).unwrap();
+        runtime
+            .set_state(&worker, ExecutionState::Completed)
+            .unwrap();
+        let interface = runtime
+            .orchestration_synthesis
+            .get(&orchestration.id)
+            .cloned()
+            .expect("successful nodes start interface synthesis");
+        let ExecutionPayload::Invocation { input } = &runtime.executions[&interface].payload else {
+            panic!("interface is an agent invocation");
+        };
+        let context: Value = serde_json::from_str(input).unwrap();
+        assert_eq!(context["input"], json!({}));
+        assert_eq!(context["nodes"]["work"]["output"], json!({}));
+        runtime
+            .record_execution_output(&interface, json!({"answer": 42}))
+            .unwrap();
+        runtime
+            .set_state(&interface, ExecutionState::Completed)
+            .unwrap();
+
+        assert_eq!(
+            runtime.execution_output(&orchestration.id),
+            Some(&json!({"answer": 42}))
+        );
+    }
+
+    #[test]
+    fn invalid_deterministic_orchestration_output_is_rejected() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let mut descriptor = descriptor("invalid-output", CallableKind::Orchestration);
+        descriptor.output_schema = json!({
+            "type": "object",
+            "required": ["answer"],
+            "properties": {"answer": {"type": "integer"}}
+        });
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                descriptor,
+                interface_agent: None,
+                nodes: vec![node("work", "worker", &[], None)],
+                output_bindings: BTreeMap::from([(
+                    "answer".to_owned(),
+                    OrchestrationValueBinding::Literal {
+                        value: json!("not an integer"),
+                    },
+                )]),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let orchestration = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("invalid-output").unwrap(),
+                json!({}),
+            )
+            .unwrap();
+        let worker = runtime.orchestration_nodes.keys().next().cloned().unwrap();
+        runtime.record_execution_output(&worker, json!({})).unwrap();
+        let error = runtime
+            .set_state(&worker, ExecutionState::Completed)
+            .unwrap_err();
+
+        assert!(matches!(error, ConductorError::InvalidExecutionData { .. }));
+        assert_eq!(runtime.execution_output(&orchestration.id), None);
     }
 }

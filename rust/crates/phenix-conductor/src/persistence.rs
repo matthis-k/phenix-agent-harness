@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 1;
+const DATABASE_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -226,8 +226,12 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
         connection.execute_batch(include_str!("../migrations/0001_runtime.sql"))?;
         connection.execute(
             "INSERT INTO schema_migrations(version) VALUES (?1)",
-            params![DATABASE_SCHEMA_VERSION],
+            params![1],
         )?;
+    }
+    if version < 2 {
+        connection.execute_batch(include_str!("../migrations/0002_orchestration_data.sql"))?;
+        connection.execute("INSERT INTO schema_migrations(version) VALUES (2)", [])?;
     }
     Ok(())
 }
@@ -316,6 +320,9 @@ fn event_type(event: &DomainEvent) -> &'static str {
         }
         DomainEvent::OrchestrationDecisionMade { .. } => "orchestration_decision_made",
         DomainEvent::OrchestrationNodeStarted { .. } => "orchestration_node_started",
+        DomainEvent::OrchestrationNodeInputBound { .. } => "orchestration_node_input_bound",
+        DomainEvent::OrchestrationSynthesisStarted { .. } => "orchestration_synthesis_started",
+        DomainEvent::ExecutionOutputRecorded { .. } => "execution_output_recorded",
         DomainEvent::InvocationResolved { .. } => "invocation_resolved",
         DomainEvent::WorkspaceCheckpointCaptured { .. } => "workspace_checkpoint_captured",
         DomainEvent::WorkspaceFileObserved { .. } => "workspace_file_observed",
@@ -564,6 +571,52 @@ fn normalize_event(
                 ],
             )?;
         }
+        DomainEvent::OrchestrationNodeInputBound {
+            execution_id,
+            node_id,
+            input,
+        } => {
+            transaction.execute(
+                "INSERT INTO orchestration_node_inputs(
+                     orchestration_execution_id, node_id, input_json, bound_sequence
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    execution_id.to_string(),
+                    node_id.to_string(),
+                    serde_json::to_string(input)?,
+                    sequence,
+                ],
+            )?;
+        }
+        DomainEvent::OrchestrationSynthesisStarted {
+            execution_id,
+            interface_execution_id,
+        } => {
+            transaction.execute(
+                "INSERT INTO orchestration_synthesis(
+                     orchestration_execution_id, interface_execution_id, started_sequence
+                 ) VALUES (?1, ?2, ?3)",
+                params![
+                    execution_id.to_string(),
+                    interface_execution_id.to_string(),
+                    sequence,
+                ],
+            )?;
+        }
+        DomainEvent::ExecutionOutputRecorded {
+            execution_id,
+            output,
+        } => {
+            transaction.execute(
+                "INSERT INTO execution_outputs(execution_id, output_json, recorded_sequence)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    execution_id.to_string(),
+                    serde_json::to_string(output)?,
+                    sequence,
+                ],
+            )?;
+        }
         DomainEvent::InvocationResolved {
             execution_id,
             route,
@@ -750,6 +803,9 @@ impl ConductorRuntime {
                 orchestration_decisions: &mut runtime.orchestration_decisions,
                 orchestration_interfaces: &mut runtime.orchestration_interfaces,
                 orchestration_nodes: &mut runtime.orchestration_nodes,
+                orchestration_node_inputs: &mut runtime.orchestration_node_inputs,
+                orchestration_synthesis: &mut runtime.orchestration_synthesis,
+                execution_outputs: &mut runtime.execution_outputs,
                 resolved_routes: &mut runtime.resolved_routes,
                 read_sets: &mut runtime.read_sets,
                 events: &mut runtime.events,
@@ -829,6 +885,7 @@ mod tests {
         objective: Option<&str>,
     ) -> OrchestrationNode {
         OrchestrationNode {
+            input_bindings: Default::default(),
             id: OrchestrationNodeId::parse(id).unwrap(),
             callable: CallableId::parse(callable).unwrap(),
             depends_on: depends_on
@@ -854,6 +911,7 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration.test", CallableKind::Orchestration),
                 nodes: vec![
@@ -886,7 +944,7 @@ mod tests {
             .start_orchestration(
                 &root.id,
                 &CallableId::parse("orchestration.test").unwrap(),
-                "orchestration objective",
+                json!({"objective": "orchestration objective"}),
             )
             .unwrap();
         let revision = runtime.current_config_revision().clone();

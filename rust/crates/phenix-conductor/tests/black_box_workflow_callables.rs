@@ -162,6 +162,7 @@ fn node(
     objective: Option<&str>,
 ) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable,
         depends_on: depends_on
@@ -218,6 +219,7 @@ fn root_model_discovers_and_starts_orchestration_then_worker_runs_mock_agents() 
     let orchestration = CallableId::parse(ORCHESTRATION_ID).unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
             nodes: vec![
@@ -404,6 +406,7 @@ fn dag_runtime_starts_all_ready_nodes_and_waits_for_join_dependencies() {
 
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
             nodes: vec![

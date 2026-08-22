@@ -100,6 +100,7 @@ fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
 
 fn node(id: &str, callable: CallableId, objective: Option<&str>) -> OrchestrationNode {
     OrchestrationNode {
+        input_bindings: Default::default(),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable,
         depends_on: Vec::new(),
@@ -229,6 +230,7 @@ fn workflow_step_is_provider_agnostic_and_completes_normally() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             nodes: vec![node("provider", step, Some("provider step"))],
@@ -283,6 +285,7 @@ fn provider_failure_uses_the_normal_child_and_workflow_failure_lifecycle() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            output_bindings: Default::default(),
             interface_agent: None,
             descriptor: descriptor("orchestration.native", CallableKind::Orchestration),
             nodes: vec![node(

@@ -602,13 +602,13 @@ impl ConductorServer {
             Command::StartCallable {
                 session_id,
                 callable,
-                objective,
+                input,
             } => {
                 return self.start_callable(
                     id,
                     session_id.clone(),
                     callable.clone(),
-                    objective.clone(),
+                    input.clone(),
                     output,
                     executions,
                 );
@@ -756,14 +756,14 @@ impl ConductorServer {
         request_id: u64,
         session_id: SessionId,
         callable: CallableId,
-        objective: String,
+        input: serde_json::Value,
         output: &SyncSender<ServerMessage>,
         executions: &ExecutionQueue,
     ) -> Result<(), ServerError> {
         let execution =
             match self
                 .lock_runtime()?
-                .start_session_callable(&session_id, &callable, objective)
+                .start_session_callable(&session_id, &callable, input)
             {
                 Ok(execution) => execution,
                 Err(error) => {
@@ -1881,6 +1881,14 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         ConductorError::EmptyInput => {
             protocol_error(ErrorCode::InvalidRequest, "input must not be empty")
         }
+        ConductorError::InvalidExecutionData {
+            execution_id,
+            message,
+        } => {
+            let mut error = protocol_error(ErrorCode::InvalidRequest, message);
+            error.execution_id = Some(execution_id);
+            error
+        }
         ConductorError::InvalidLifecycle(id) => {
             let mut error = protocol_error(
                 ErrorCode::InvalidRequest,
@@ -2061,6 +2069,7 @@ mod tests {
 
     fn node(id: &str, callable: &str, dependencies: &[&str]) -> OrchestrationNode {
         OrchestrationNode {
+            input_bindings: Default::default(),
             id: OrchestrationNodeId::parse(id).unwrap(),
             callable: CallableId::parse(callable).unwrap(),
             depends_on: dependencies
@@ -2262,9 +2271,11 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration.tree", CallableKind::Orchestration),
                 nodes: vec![OrchestrationNode {
+                    input_bindings: Default::default(),
                     id: OrchestrationNodeId::parse("child").unwrap(),
                     callable: CallableId::parse("agent.child").unwrap(),
                     depends_on: Vec::new(),
@@ -2281,7 +2292,7 @@ mod tests {
             .start_orchestration(
                 &root.id,
                 &CallableId::parse("orchestration.tree").unwrap(),
-                "tree",
+                json!({"objective": "tree"}),
             )
             .unwrap();
         let child = runtime
@@ -2538,6 +2549,7 @@ mod tests {
         }
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
                 nodes: vec![
@@ -2558,7 +2570,7 @@ mod tests {
         let target = serde_json::to_string(&ExecutionTarget::Fixed(model_target())).unwrap();
         let input = format!(
             "{{\"id\":1,\"command\":{{\"type\":\"create_session\",\"parent_session\":null,\"name\":\"dag\",\"target\":{target}}}}}\n\\
-             {{\"id\":2,\"command\":{{\"type\":\"start_callable\",\"session_id\":\"session-1\",\"callable\":\"orchestration.parallel\",\"objective\":\"run\"}}}}\n"
+             {{\"id\":2,\"command\":{{\"type\":\"start_callable\",\"session_id\":\"session-1\",\"callable\":\"orchestration.parallel\",\"input\":{{\"objective\":\"run\"}}}}}}\n"
         );
         server
             .serve_ndjson(std::io::Cursor::new(input), std::io::sink())

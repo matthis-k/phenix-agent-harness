@@ -87,6 +87,10 @@ pub enum ConductorError {
         actual: WorkspaceId,
     },
     EmptyInput,
+    InvalidExecutionData {
+        execution_id: ExecutionId,
+        message: String,
+    },
     InvalidLifecycle(ExecutionId),
     InvalidFailureDecision {
         parent_execution: ExecutionId,
@@ -147,6 +151,10 @@ impl Display for ConductorError {
                 "workspace binding mismatch: persisted {expected}, discovered {actual}"
             ),
             Self::EmptyInput => f.write_str("input must not be empty"),
+            Self::InvalidExecutionData {
+                execution_id,
+                message,
+            } => write!(f, "execution {execution_id} has invalid typed data: {message}"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
             Self::InvalidFailureDecision {
                 parent_execution,
@@ -232,7 +240,7 @@ struct SessionRecord {
 #[derive(Clone, Debug)]
 enum ExecutionPayload {
     Invocation { input: String },
-    Orchestration { objective: String },
+    Orchestration { input: Value },
 }
 
 #[derive(Clone, Debug)]
@@ -433,6 +441,9 @@ pub struct ConductorRuntime {
     orchestration_decisions: BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
     orchestration_interfaces: BTreeMap<ExecutionId, ExecutionId>,
     orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
+    orchestration_node_inputs: BTreeMap<(ExecutionId, OrchestrationNodeId), Value>,
+    orchestration_synthesis: BTreeMap<ExecutionId, ExecutionId>,
+    execution_outputs: BTreeMap<ExecutionId, Value>,
     resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
     read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
     events: Vec<ExecutionEvent>,
@@ -483,6 +494,9 @@ impl ConductorRuntime {
             orchestration_decisions: BTreeMap::new(),
             orchestration_interfaces: BTreeMap::new(),
             orchestration_nodes: BTreeMap::new(),
+            orchestration_node_inputs: BTreeMap::new(),
+            orchestration_synthesis: BTreeMap::new(),
+            execution_outputs: BTreeMap::new(),
             resolved_routes: BTreeMap::new(),
             read_sets: BTreeMap::new(),
             events: Vec::new(),
@@ -539,6 +553,9 @@ impl ConductorRuntime {
                 orchestration_decisions: &mut self.orchestration_decisions,
                 orchestration_interfaces: &mut self.orchestration_interfaces,
                 orchestration_nodes: &mut self.orchestration_nodes,
+                orchestration_node_inputs: &mut self.orchestration_node_inputs,
+                orchestration_synthesis: &mut self.orchestration_synthesis,
+                execution_outputs: &mut self.execution_outputs,
                 resolved_routes: &mut self.resolved_routes,
                 read_sets: &mut self.read_sets,
                 events: &mut self.events,
@@ -1435,13 +1452,20 @@ impl ConductorRuntime {
         &mut self,
         parent_id: &ExecutionId,
         callable: &CallableId,
-        objective: impl Into<String>,
+        input: impl Into<Value>,
     ) -> Result<ExecutionSummary, ConductorError> {
+        let input = input.into();
         let callables = self
             .configuration_for_execution(parent_id)?
             .callables
             .clone();
         let definition = callables.orchestration(callable)?.clone();
+        validate_json_schema(&definition.descriptor.input_schema, &input).map_err(|message| {
+            ConductorError::InvalidExecutionData {
+                execution_id: parent_id.clone(),
+                message: format!("orchestration input: {message}"),
+            }
+        })?;
         self.check_callable_policy(
             parent_id,
             &definition.descriptor,
@@ -1461,9 +1485,7 @@ impl ConductorRuntime {
             parent_id,
             ExecutionKind::Orchestration,
             callable.clone(),
-            ExecutionPayload::Orchestration {
-                objective: objective.into(),
-            },
+            ExecutionPayload::Orchestration { input },
             None,
         )?;
         self.set_state(&summary.id, ExecutionState::Running)?;
@@ -1834,6 +1856,9 @@ impl ConductorRuntime {
         execution_id: &ExecutionId,
         state: ExecutionState,
     ) -> Result<(), ConductorError> {
+        if state == ExecutionState::Completed {
+            self.ensure_orchestration_child_output(execution_id)?;
+        }
         let (current, parent) = {
             let execution = self
                 .executions
@@ -1875,6 +1900,87 @@ impl ConductorRuntime {
             }
         }
         Ok(())
+    }
+
+    pub fn record_execution_output(
+        &mut self,
+        execution_id: &ExecutionId,
+        output: Value,
+    ) -> Result<(), ConductorError> {
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        if self.execution_outputs.contains_key(execution_id) {
+            return Err(ConductorError::InvalidExecutionData {
+                execution_id: execution_id.clone(),
+                message: "output was already recorded".to_owned(),
+            });
+        }
+        if let Some(callable) = execution.summary.callable.as_ref() {
+            let descriptor = self
+                .configuration_for_execution(execution_id)?
+                .callables
+                .descriptor(callable)?;
+            validate_json_schema(&descriptor.output_schema, &output).map_err(|message| {
+                ConductorError::InvalidExecutionData {
+                    execution_id: execution_id.clone(),
+                    message: format!("output: {message}"),
+                }
+            })?;
+        }
+        self.record_domain_event(DomainEvent::ExecutionOutputRecorded {
+            execution_id: execution_id.clone(),
+            output,
+        })
+    }
+
+    #[must_use]
+    pub fn execution_output(&self, execution_id: &ExecutionId) -> Option<&Value> {
+        self.execution_outputs.get(execution_id)
+    }
+
+    fn ensure_orchestration_child_output(
+        &mut self,
+        execution_id: &ExecutionId,
+    ) -> Result<(), ConductorError> {
+        if self.execution_outputs.contains_key(execution_id) {
+            return Ok(());
+        }
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let Some(parent_id) = execution.summary.parent_execution.as_ref() else {
+            return Ok(());
+        };
+        if self
+            .executions
+            .get(parent_id)
+            .is_none_or(|parent| parent.summary.kind != ExecutionKind::Orchestration)
+        {
+            return Ok(());
+        }
+        let content = self
+            .events
+            .iter()
+            .filter(|event| event.execution_id == *execution_id)
+            .filter_map(|event| match &event.kind {
+                ExecutionEventKind::AssistantContentDelta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        let output = if content.trim().is_empty() {
+            Value::Object(serde_json::Map::new())
+        } else {
+            serde_json::from_str(&content).map_err(|error| {
+                ConductorError::InvalidExecutionData {
+                    execution_id: execution_id.clone(),
+                    message: format!("output is not valid JSON: {error}"),
+                }
+            })?
+        };
+        self.record_execution_output(execution_id, output)
     }
 
     pub fn subscribe_events(
@@ -2120,6 +2226,15 @@ impl ConductorRuntime {
 
 fn conductor_protocol_error(error: ConductorError) -> BackendError {
     BackendError::Protocol(error.to_string())
+}
+
+fn validate_json_schema(schema: &Value, value: &Value) -> Result<(), String> {
+    let validator = jsonschema::validator_for(schema)
+        .map_err(|error| format!("invalid configured JSON schema: {error}"))?;
+    if let Err(error) = validator.validate(value) {
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 fn is_terminal(state: &ExecutionState) -> bool {
@@ -2710,6 +2825,7 @@ mod tests {
         }
         runtime
             .register_orchestration(OrchestrationDefinition {
+                output_bindings: Default::default(),
                 interface_agent: None,
                 descriptor: CallableDescriptor {
                     id: CallableId::parse("orchestration.parallel").unwrap(),
@@ -2722,18 +2838,21 @@ mod tests {
                 },
                 nodes: vec![
                     phenix_core::OrchestrationNode {
+                        input_bindings: Default::default(),
                         id: OrchestrationNodeId::parse("fail").unwrap(),
                         callable: CallableId::parse("agent.fail").unwrap(),
                         depends_on: Vec::new(),
                         objective: None,
                     },
                     phenix_core::OrchestrationNode {
+                        input_bindings: Default::default(),
                         id: OrchestrationNodeId::parse("active").unwrap(),
                         callable: CallableId::parse("agent.active").unwrap(),
                         depends_on: Vec::new(),
                         objective: None,
                     },
                     phenix_core::OrchestrationNode {
+                        input_bindings: Default::default(),
                         id: OrchestrationNodeId::parse("done").unwrap(),
                         callable: CallableId::parse("agent.done").unwrap(),
                         depends_on: Vec::new(),
@@ -2749,7 +2868,7 @@ mod tests {
             .start_orchestration(
                 &root.id,
                 &CallableId::parse("orchestration.parallel").unwrap(),
-                "parallel work",
+                json!({"objective": "parallel work"}),
             )
             .unwrap();
         let children = runtime

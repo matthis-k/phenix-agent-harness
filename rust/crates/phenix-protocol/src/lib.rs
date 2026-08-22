@@ -6,6 +6,7 @@ use phenix_core::{
     RoutingProfileDescriptor, SessionId, SessionSummary, SkillDescriptor,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeSnapshot {
@@ -55,7 +56,7 @@ pub enum Command {
     StartCallable {
         session_id: SessionId,
         callable: CallableId,
-        objective: String,
+        input: Value,
     },
     CancelExecution {
         execution_id: ExecutionId,
@@ -191,14 +192,17 @@ mod tests {
             command: Command::StartCallable {
                 session_id: SessionId::parse("session-1").expect("valid session id"),
                 callable: CallableId::parse("orchestration.implement").expect("valid callable id"),
-                objective: "implement change".to_owned(),
+                input: serde_json::json!({"objective": "implement change"}),
             },
         };
         let value = serde_json::to_value(message).expect("serialize callable start");
         assert_eq!(value["command"]["type"], "start_callable");
         assert_eq!(value["command"]["session_id"], "session-1");
         assert_eq!(value["command"]["callable"], "orchestration.implement");
-        assert_eq!(value["command"]["objective"], "implement change");
+        assert_eq!(
+            value["command"]["input"],
+            serde_json::json!({"objective": "implement change"})
+        );
         assert!(value["command"].get("backend").is_none());
         assert!(value["command"].get("provider").is_none());
     }
