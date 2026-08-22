@@ -2,10 +2,10 @@ use crate::{
     ConfigRevisionFingerprint, ConfigRevisionSlot, ExecutionPayload, ExecutionRecord, SessionRecord,
 };
 use phenix_core::{
-    AttemptGroup, AttemptGroupId, ConfigRevisionId, ExecutionAuthority, ExecutionEvent,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet, ExecutionState,
-    ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation, FileVersion,
-    FilesystemAuthority, ModelTarget, OrchestrationFailureDecision,
+    AttemptGroup, AttemptGroupId, ConfigRevisionId, DiagnosticWritePatch, ExecutionAuthority,
+    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
+    ExecutionState, ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation,
+    FileVersion, FilesystemAuthority, ModelTarget, OrchestrationFailureDecision,
     OrchestrationFailureDecisionRecord, OrchestrationNodeId, SessionId, SessionState,
     SessionSummary, ToolCallId, WorkspaceId,
 };
@@ -158,6 +158,9 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         output: serde_json::Value,
     },
+    DiagnosticWritePatchCaptured {
+        patch: DiagnosticWritePatch,
+    },
     InvocationResolved {
         execution_id: ExecutionId,
         route: ResolvedRoute,
@@ -266,6 +269,7 @@ pub(crate) struct DurableProjection<'a> {
         &'a mut BTreeMap<(ExecutionId, OrchestrationNodeId), serde_json::Value>,
     pub orchestration_synthesis: &'a mut BTreeMap<ExecutionId, ExecutionId>,
     pub execution_outputs: &'a mut BTreeMap<ExecutionId, serde_json::Value>,
+    pub diagnostic_write_patches: &'a mut Vec<DiagnosticWritePatch>,
     pub resolved_routes: &'a mut BTreeMap<ExecutionId, ResolvedRoute>,
     pub read_sets: &'a mut BTreeMap<ExecutionId, ExecutionReadSet>,
     pub events: &'a mut Vec<ExecutionEvent>,
@@ -1128,6 +1132,21 @@ pub(crate) fn apply_domain_event(
                     "execution {execution_id} output was recorded more than once"
                 )));
             }
+        }
+        DomainEvent::DiagnosticWritePatchCaptured { patch } => {
+            let execution = state.executions.get(&patch.execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "diagnostic patch references unknown execution {}",
+                    patch.execution_id
+                ))
+            })?;
+            if execution.authority.filesystem != FilesystemAuthority::ReadOnly {
+                return Err(JournalError::InvalidEvent(format!(
+                    "diagnostic patch references writable execution {}",
+                    patch.execution_id
+                )));
+            }
+            state.diagnostic_write_patches.push(patch.clone());
         }
         DomainEvent::InvocationResolved {
             execution_id,

@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ToolExecutionContext {
+    pub execution_id: ExecutionId,
     pub authority: ExecutionAuthority,
     pub sandbox_state: Arc<crate::sandbox::ExecutionSandboxState>,
 }
@@ -29,6 +30,7 @@ pub struct ToolOutcome {
     pub output: String,
     pub success: bool,
     pub file_observations: Vec<FileObservation>,
+    pub diagnostic_write_patches: Vec<phenix_core::DiagnosticWritePatch>,
 }
 
 impl ToolOutcome {
@@ -38,12 +40,22 @@ impl ToolOutcome {
             output: output.into(),
             success: true,
             file_observations: Vec::new(),
+            diagnostic_write_patches: Vec::new(),
         }
     }
 
     #[must_use]
     pub fn with_file_observation(mut self, observation: FileObservation) -> Self {
         self.file_observations.push(observation);
+        self
+    }
+
+    #[must_use]
+    pub fn with_diagnostic_write_patches(
+        mut self,
+        patches: Vec<phenix_core::DiagnosticWritePatch>,
+    ) -> Self {
+        self.diagnostic_write_patches = patches;
         self
     }
 
@@ -60,6 +72,7 @@ impl ToolOutcome {
             output: output.into(),
             success: false,
             file_observations: Vec::new(),
+            diagnostic_write_patches: Vec::new(),
         }
     }
 }
@@ -1077,6 +1090,7 @@ mod tests {
             })
             .unwrap();
         let context = ToolExecutionContext {
+            execution_id: ExecutionId::parse("execution-tool-test").unwrap(),
             authority: ExecutionAuthority::read_only(),
             sandbox_state: crate::sandbox::ExecutionSandboxState::create().unwrap(),
         };

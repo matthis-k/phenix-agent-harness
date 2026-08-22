@@ -309,4 +309,77 @@ mod tests {
         assert!(debug.contains(root.join(".git").to_string_lossy().as_ref()));
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn outbound_network_omits_network_namespace_isolation() {
+        let state = ExecutionSandboxState::create().unwrap();
+        let mut authority = authority();
+        authority.network = NetworkAuthority::Outbound;
+        let mut command = Command::new("bwrap");
+        ExecutionSandbox::new(&authority, &state)
+            .configure_bwrap(
+                &mut command,
+                Path::new("/repo"),
+                &[],
+                WorkspaceMount::ReadOnly,
+            )
+            .unwrap();
+        assert!(!command
+            .get_args()
+            .any(|argument| argument == "--unshare-net"));
+    }
+
+    #[test]
+    fn only_granted_secret_and_ipc_are_injected() {
+        let socket_root = env::temp_dir().join(format!(
+            "phenix-sandbox-ipc-{}-{}",
+            std::process::id(),
+            NEXT_SANDBOX_STATE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&socket_root).unwrap();
+        let granted_socket = socket_root.join("granted.sock");
+        let ungranted_socket = socket_root.join("ungranted.sock");
+        fs::write(&granted_socket, "granted endpoint").unwrap();
+        fs::write(&ungranted_socket, "ungranted endpoint").unwrap();
+        let secret_name = "PHENIX_SANDBOX_TEST_SECRET";
+        env::set_var(secret_name, "explicit-value");
+        let state = ExecutionSandboxState::create().unwrap();
+        let mut authority = authority();
+        authority.secrets.insert(secret_name.to_owned());
+        authority
+            .ipc
+            .insert(granted_socket.to_string_lossy().into_owned());
+        let mut command = Command::new("bwrap");
+        ExecutionSandbox::new(&authority, &state)
+            .configure_bwrap(
+                &mut command,
+                Path::new("/repo"),
+                &[],
+                WorkspaceMount::ReadOnly,
+            )
+            .unwrap();
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let arguments = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            environment.get(secret_name),
+            Some(&Some("explicit-value".to_owned()))
+        );
+        assert!(!environment.contains_key("OPENAI_API_KEY"));
+        assert!(arguments.contains(&granted_socket.to_string_lossy().into_owned()));
+        assert!(!arguments.contains(&ungranted_socket.to_string_lossy().into_owned()));
+        env::remove_var(secret_name);
+        fs::remove_dir_all(socket_root).unwrap();
+    }
 }

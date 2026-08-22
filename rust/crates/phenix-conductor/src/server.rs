@@ -643,6 +643,7 @@ impl ConductorServer {
                 | Command::SetSessionTarget { .. }
                 | Command::RebaseSession { .. }
                 | Command::CloseSession { .. }
+                | Command::RequestWorkspaceCheckpoint { .. }
                 | Command::CancelExecution { .. }
         );
 
@@ -701,6 +702,9 @@ impl ConductorServer {
                 .map_err(map_conductor_error),
             Command::CloseSession { session_id } => self.close_session(&session_id),
             Command::CancelExecution { execution_id } => self.cancel_execution(&execution_id),
+            Command::RequestWorkspaceCheckpoint { execution_id } => {
+                self.capture_workspace_checkpoint(&execution_id)
+            }
             Command::RefreshBackendCatalog { backend_id } => self
                 .refresh_backend(&backend_id)
                 .map(|catalog| Reply::BackendCatalog { catalog })
@@ -789,6 +793,37 @@ impl ConductorServer {
                 bundle: Box::new(bundle),
             })
             .map_err(map_conductor_error)
+    }
+
+    fn capture_workspace_checkpoint(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Reply, ProtocolError> {
+        let consistency = self.workspace_consistency.as_ref().ok_or_else(|| {
+            protocol_error(
+                ErrorCode::InvalidRequest,
+                "workspace consistency is not installed",
+            )
+        })?;
+        let mut runtime = self
+            .lock_runtime()
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?;
+        let request = runtime
+            .workspace_lease_request(execution_id)
+            .map_err(map_conductor_error)?;
+        if request.mode != WorkspaceLeaseMode::Write {
+            return Err(protocol_error(
+                ErrorCode::InvalidRequest,
+                "workspace checkpoints require filesystem-write authority",
+            ));
+        }
+        let files = consistency
+            .checkpoint_baseline()
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?;
+        runtime
+            .record_workspace_checkpoint(execution_id, request.workspace_id, files)
+            .map_err(map_conductor_error)?;
+        Ok(Reply::Accepted)
     }
 
     fn start_callable(
@@ -2020,9 +2055,10 @@ mod tests {
     use super::*;
     use phenix_backend::{BackendExecutionRequest, BackendSessionRequest};
     use phenix_core::{
-        AuthenticationState, CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet,
-        InferenceOptions, ModelDescriptor, ModelId, ModelTarget, OrchestrationDefinition,
-        OrchestrationNode, OrchestrationNodeId, ProviderId,
+        AgentDefinition, AuthenticationState, CallableDescriptor, CallableKind, CallablePolicy,
+        CapabilitySet, ExecutionAuthority, FilesystemAuthority, InferenceOptions, ModelDescriptor,
+        ModelId, ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId,
+        ProviderId,
     };
     use rusqlite::params;
     use serde_json::json;
@@ -2296,6 +2332,59 @@ mod tests {
         assert!(!phase.enter(WorkspaceLeaseMode::Write));
         assert!(!phase.enter(WorkspaceLeaseMode::Read));
         assert!(phase.enter(WorkspaceLeaseMode::Write));
+    }
+
+    #[test]
+    fn explicit_checkpoint_request_persists_twice_within_one_write_phase() {
+        let workspace = temporary_database().with_extension("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("source.txt"), "one").unwrap();
+        let database = temporary_database();
+        let store = SqliteStore::new(&database);
+        let mut runtime = ConductorRuntime::new();
+        let mut authority = ExecutionAuthority::read_only();
+        authority.filesystem = FilesystemAuthority::Write;
+        runtime
+            .register_agent(AgentDefinition::new(
+                descriptor("agent.writer", CallableKind::Agent),
+                authority,
+            ))
+            .unwrap();
+        let workspace_id = WorkspaceId::parse("workspace:checkpoint").unwrap();
+        runtime.bind_workspace(workspace_id.clone()).unwrap();
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(model_target()))
+            .unwrap();
+        let execution = runtime.submit(&session.id, "write").unwrap();
+        let mut server = ConductorServer::new(runtime);
+        server.store = Some(store.clone());
+        server
+            .install_workspace_consistency(WorkspaceDescriptor {
+                id: workspace_id,
+                root: workspace.clone(),
+                scratch_paths: BTreeSet::new(),
+            })
+            .unwrap();
+
+        server.capture_workspace_checkpoint(&execution.id).unwrap();
+        std::fs::write(workspace.join("source.txt"), "two").unwrap();
+        server.capture_workspace_checkpoint(&execution.id).unwrap();
+        server.persist().unwrap();
+
+        let journal = store.load().unwrap();
+        assert_eq!(
+            journal
+                .entries
+                .iter()
+                .filter(|entry| matches!(
+                    entry.event,
+                    DomainEvent::WorkspaceCheckpointCaptured { .. }
+                ))
+                .count(),
+            2
+        );
+        std::fs::remove_file(database).unwrap();
+        std::fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]

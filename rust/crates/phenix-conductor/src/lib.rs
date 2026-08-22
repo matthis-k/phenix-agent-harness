@@ -39,10 +39,10 @@ use phenix_backend::{
 use phenix_core::{
     AgentDefinition, AttemptGroup, AttemptGroupId, CallableDescriptor, CallableId, CallableKind,
     ConfigRevisionId, DebugConversationMessage, DebugConversationRole, DebugOrchestration,
-    DebugResolvedRoute, DebugWorkspaceCheckpoint, ExecutionAuthority, ExecutionEvent,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet, ExecutionState,
-    ExecutionSummary, ExecutionTarget, ExecutionTerminationCause, ExecutionWorkspaceValidity,
-    FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
+    DebugResolvedRoute, DebugWorkspaceCheckpoint, DiagnosticWritePatch, ExecutionAuthority,
+    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
+    ExecutionState, ExecutionSummary, ExecutionTarget, ExecutionTerminationCause,
+    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
     OrchestrationFailureDecisionRecord, OrchestrationNodeId, RoutingProfile,
     RoutingProfileDescriptor, SessionDebugBundle, SessionId, SessionState, SessionSummary,
     SkillDescriptor, SkillId, ToolCallId, WorkspaceDescriptor, WorkspaceId, WorkspaceLeaseRequest,
@@ -446,6 +446,7 @@ pub struct ConductorRuntime {
     orchestration_node_inputs: BTreeMap<(ExecutionId, OrchestrationNodeId), Value>,
     orchestration_synthesis: BTreeMap<ExecutionId, ExecutionId>,
     execution_outputs: BTreeMap<ExecutionId, Value>,
+    diagnostic_write_patches: Vec<DiagnosticWritePatch>,
     resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
     read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
     events: Vec<ExecutionEvent>,
@@ -499,6 +500,7 @@ impl ConductorRuntime {
             orchestration_node_inputs: BTreeMap::new(),
             orchestration_synthesis: BTreeMap::new(),
             execution_outputs: BTreeMap::new(),
+            diagnostic_write_patches: Vec::new(),
             resolved_routes: BTreeMap::new(),
             read_sets: BTreeMap::new(),
             events: Vec::new(),
@@ -558,6 +560,7 @@ impl ConductorRuntime {
                 orchestration_node_inputs: &mut self.orchestration_node_inputs,
                 orchestration_synthesis: &mut self.orchestration_synthesis,
                 execution_outputs: &mut self.execution_outputs,
+                diagnostic_write_patches: &mut self.diagnostic_write_patches,
                 resolved_routes: &mut self.resolved_routes,
                 read_sets: &mut self.read_sets,
                 events: &mut self.events,
@@ -2246,6 +2249,16 @@ impl ConductorRuntime {
                 _ => None,
             })
             .collect();
+        bundle.diagnostic_write_patches = self
+            .diagnostic_write_patches
+            .iter()
+            .filter(|patch| execution_ids.contains(&patch.execution_id))
+            .cloned()
+            .map(|mut patch| {
+                redact_text(&mut patch.patch, &secret_values);
+                patch
+            })
+            .collect();
         Ok(bundle)
     }
 
@@ -2348,6 +2361,7 @@ impl ConductorRuntime {
                         .execution_sandbox_state(execution_id)
                         .map_err(|error| BackendError::Protocol(error.to_string()))?;
                     let context = callables::ToolExecutionContext {
+                        execution_id: execution_id.clone(),
                         authority,
                         sandbox_state,
                     };
@@ -2359,6 +2373,12 @@ impl ConductorRuntime {
                             self.record_file_observation(execution_id, observation)
                                 .map_err(conductor_protocol_error)?;
                         }
+                    }
+                    for patch in outcome.diagnostic_write_patches.iter().cloned() {
+                        self.record_domain_event(DomainEvent::DiagnosticWritePatchCaptured {
+                            patch,
+                        })
+                        .map_err(conductor_protocol_error)?;
                     }
                     outcome.into_backend_result()
                 }
@@ -2853,10 +2873,32 @@ mod tests {
                 ),
             ))
             .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.audit"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
         let workspace_id = WorkspaceId::parse("workspace:debug").unwrap();
         runtime.bind_workspace(workspace_id.clone()).unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let root = runtime.submit(&session.id, "inspect").unwrap();
+        let audit = runtime
+            .start_agent(
+                &root.id,
+                &CallableId::parse("agent.audit").unwrap(),
+                "attempt a diagnostic edit",
+            )
+            .unwrap();
+        runtime
+            .record_domain_event(DomainEvent::DiagnosticWritePatchCaptured {
+                patch: DiagnosticWritePatch {
+                    execution_id: audit.id,
+                    path: PathBuf::from("src/lib.rs"),
+                    patch: "+diagnostic only\n".to_owned(),
+                },
+            })
+            .unwrap();
         runtime.resolve_invocation(&root.id).unwrap();
         let tool_call_id = runtime.new_tool_call_id();
         runtime
@@ -2915,10 +2957,11 @@ mod tests {
             .unwrap();
         let serialized = serde_json::to_string(&bundle).unwrap();
 
-        assert_eq!(bundle.executions.len(), 1);
+        assert_eq!(bundle.executions.len(), 2);
         assert_eq!(bundle.resolved_routing.len(), 1);
         assert_eq!(bundle.tool_activity.len(), 3);
         assert_eq!(bundle.checkpoints.len(), 1);
+        assert_eq!(bundle.diagnostic_write_patches.len(), 1);
         assert_eq!(bundle.conversation.len(), 2);
         assert!(bundle.workspace_authority[&root.id].secrets.is_empty());
         assert!(!serialized.contains("credential-value"));

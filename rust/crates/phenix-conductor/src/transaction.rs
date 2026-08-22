@@ -1,7 +1,7 @@
 use super::super::workspace_consistency::WorkspaceConsistencyError;
 use super::WorkspaceConsistency;
 use crate::sandbox::{ExecutionSandbox, ExecutionSandboxState, WorkspaceMount};
-use phenix_core::ExecutionAuthority;
+use phenix_core::{DiagnosticWritePatch, ExecutionAuthority, ExecutionId, FileKind, FileVersion};
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display, Formatter};
@@ -198,6 +198,36 @@ impl WorkspaceTransaction {
         Ok(())
     }
 
+    pub fn diagnostic_patches(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<DiagnosticWritePatch>, TransactionError> {
+        let snapshot = self.paths.snapshot();
+        let snapshot_manifest = self.consistency.snapshot_manifest(&snapshot)?;
+        let paths = self
+            .baseline
+            .keys()
+            .chain(snapshot_manifest.keys())
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut patches = Vec::new();
+        for path in paths {
+            let before = self.baseline.get(&path).unwrap_or(&FileVersion::Absent);
+            let after = snapshot_manifest.get(&path).unwrap_or(&FileVersion::Absent);
+            if before == after || (!regular_or_absent(before) && !regular_or_absent(after)) {
+                continue;
+            }
+            let old = read_patch_text(&self.consistency.root().join(&path));
+            let new = read_patch_text(&snapshot.join(&path));
+            patches.push(DiagnosticWritePatch {
+                execution_id: execution_id.clone(),
+                path: path.clone(),
+                patch: unified_diagnostic_patch(&path, old.as_deref(), new.as_deref()),
+            });
+        }
+        Ok(patches)
+    }
+
     fn sandbox_command(&self, bwrap: &OsStr, work: &Path) -> Result<Command, TransactionError> {
         let mut process = Command::new(bwrap);
         ExecutionSandbox::new(&self.authority, &self.sandbox_state)
@@ -213,6 +243,45 @@ impl WorkspaceTransaction {
             .map_err(TransactionError::SandboxConfiguration)?;
         Ok(process)
     }
+}
+
+fn regular_or_absent(version: &FileVersion) -> bool {
+    matches!(
+        version,
+        FileVersion::Absent
+            | FileVersion::Present {
+                kind: FileKind::Regular,
+                ..
+            }
+    )
+}
+
+fn read_patch_text(path: &Path) -> Option<String> {
+    fs::read_to_string(path).ok()
+}
+
+fn unified_diagnostic_patch(path: &Path, old: Option<&str>, new: Option<&str>) -> String {
+    let label = path.to_string_lossy();
+    let old_label = old.map_or_else(|| "/dev/null".to_owned(), |_| format!("a/{label}"));
+    let new_label = new.map_or_else(|| "/dev/null".to_owned(), |_| format!("b/{label}"));
+    let old_lines = old.map_or_else(Vec::new, |text| text.lines().collect::<Vec<_>>());
+    let new_lines = new.map_or_else(Vec::new, |text| text.lines().collect::<Vec<_>>());
+    let mut patch = format!(
+        "--- {old_label}\n+++ {new_label}\n@@ -1,{} +1,{} @@\n",
+        old_lines.len(),
+        new_lines.len()
+    );
+    for line in old_lines {
+        patch.push('-');
+        patch.push_str(line);
+        patch.push('\n');
+    }
+    for line in new_lines {
+        patch.push('+');
+        patch.push_str(line);
+        patch.push('\n');
+    }
+    patch
 }
 
 #[derive(Debug)]

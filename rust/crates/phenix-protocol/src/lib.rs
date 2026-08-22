@@ -28,6 +28,9 @@ pub enum Command {
     ExportSessionDebug {
         session_id: SessionId,
     },
+    RequestWorkspaceCheckpoint {
+        execution_id: ExecutionId,
+    },
     CreateSession {
         parent_session: Option<SessionId>,
         name: Option<String>,
@@ -325,6 +328,19 @@ mod tests {
         let value = serde_json::to_value(message).unwrap();
         assert_eq!(value["command"]["type"], "export_session_debug");
         assert_eq!(value["command"]["session_id"], "session-1");
+    }
+
+    #[test]
+    fn workspace_checkpoint_request_is_explicit() {
+        let value = serde_json::to_value(ClientMessage {
+            id: 13,
+            command: Command::RequestWorkspaceCheckpoint {
+                execution_id: ExecutionId::parse("execution-1").unwrap(),
+            },
+        })
+        .unwrap();
+        assert_eq!(value["command"]["type"], "request_workspace_checkpoint");
+        assert_eq!(value["command"]["execution_id"], "execution-1");
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 2;
+const DATABASE_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -233,6 +233,10 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
         connection.execute_batch(include_str!("../migrations/0002_orchestration_data.sql"))?;
         connection.execute("INSERT INTO schema_migrations(version) VALUES (2)", [])?;
     }
+    if version < 3 {
+        connection.execute_batch(include_str!("../migrations/0003_diagnostic_patches.sql"))?;
+        connection.execute("INSERT INTO schema_migrations(version) VALUES (3)", [])?;
+    }
     Ok(())
 }
 
@@ -323,6 +327,7 @@ fn event_type(event: &DomainEvent) -> &'static str {
         DomainEvent::OrchestrationNodeInputBound { .. } => "orchestration_node_input_bound",
         DomainEvent::OrchestrationSynthesisStarted { .. } => "orchestration_synthesis_started",
         DomainEvent::ExecutionOutputRecorded { .. } => "execution_output_recorded",
+        DomainEvent::DiagnosticWritePatchCaptured { .. } => "diagnostic_write_patch_captured",
         DomainEvent::InvocationResolved { .. } => "invocation_resolved",
         DomainEvent::WorkspaceCheckpointCaptured { .. } => "workspace_checkpoint_captured",
         DomainEvent::WorkspaceFileObserved { .. } => "workspace_file_observed",
@@ -617,6 +622,19 @@ fn normalize_event(
                 ],
             )?;
         }
+        DomainEvent::DiagnosticWritePatchCaptured { patch } => {
+            transaction.execute(
+                "INSERT INTO diagnostic_write_patches(
+                     execution_id, path, patch, captured_sequence
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    patch.execution_id.to_string(),
+                    patch.path.to_string_lossy(),
+                    patch.patch.as_str(),
+                    sequence,
+                ],
+            )?;
+        }
         DomainEvent::InvocationResolved {
             execution_id,
             route,
@@ -806,6 +824,7 @@ impl ConductorRuntime {
                 orchestration_node_inputs: &mut runtime.orchestration_node_inputs,
                 orchestration_synthesis: &mut runtime.orchestration_synthesis,
                 execution_outputs: &mut runtime.execution_outputs,
+                diagnostic_write_patches: &mut runtime.diagnostic_write_patches,
                 resolved_routes: &mut runtime.resolved_routes,
                 read_sets: &mut runtime.read_sets,
                 events: &mut runtime.events,
@@ -848,9 +867,9 @@ mod tests {
     use crate::{ConductorError, DomainEvent};
     use phenix_core::{
         BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-        ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
-        OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
-        RoutingProfile, RoutingProfileId, SessionId, WorkspaceId,
+        DiagnosticWritePatch, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions,
+        ModelId, ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId,
+        ProviderId, RoutingProfile, RoutingProfileId, SessionId, WorkspaceId,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -1149,5 +1168,38 @@ mod tests {
             ConductorRuntime::restore(journal),
             Err(PersistenceError::InvalidJournal(_))
         ));
+    }
+
+    #[test]
+    fn diagnostic_write_patch_is_sql_backed_and_replayed() {
+        let (store, path) = temporary_store();
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed()).unwrap();
+        let execution = runtime.submit(&session.id, "audit").unwrap();
+        let patch = DiagnosticWritePatch {
+            execution_id: execution.id.clone(),
+            path: PathBuf::from("src/lib.rs"),
+            patch: "--- a/src/lib.rs\n+++ b/src/lib.rs\n".to_owned(),
+        };
+        runtime
+            .record_domain_event(DomainEvent::DiagnosticWritePatchCaptured {
+                patch: patch.clone(),
+            })
+            .unwrap();
+        store.save(runtime.journal()).unwrap();
+
+        let restored = ConductorRuntime::restore(store.load().unwrap()).unwrap();
+        assert_eq!(restored.diagnostic_write_patches, vec![patch]);
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM diagnostic_write_patches", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
+        drop(connection);
+        fs::remove_file(path).unwrap();
     }
 }
