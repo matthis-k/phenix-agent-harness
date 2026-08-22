@@ -147,6 +147,7 @@ mod tests {
     fn application_configuration_rebinds_agents_workflows_and_routes() {
         let agent = descriptor("agent.fixture", CallableKind::Agent);
         let orchestration = OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.fixture", CallableKind::Orchestration),
             nodes: vec![node(
                 "fixture",
@@ -239,6 +240,7 @@ mod tests {
                 ExecutionAuthority::read_only(),
             )],
             orchestrations: vec![OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor(workflow_id.as_str(), CallableKind::Orchestration),
                 nodes: vec![node(
                     "implement",

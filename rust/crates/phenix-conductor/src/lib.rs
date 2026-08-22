@@ -3,6 +3,7 @@
 mod callables;
 mod context;
 mod execution_provider;
+mod failure_decisions;
 mod journal;
 mod persistence;
 mod policy;
@@ -15,6 +16,7 @@ pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
     ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest,
 };
+pub use failure_decisions::OrchestrationFailureDecisionRequest;
 pub use journal::{
     DomainEvent, JournalEntry, JournalError, JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
@@ -32,13 +34,13 @@ use phenix_backend::{
     BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_core::{
-    AgentDefinition, AttemptFailureReport, AttemptGroup, AttemptGroupId, CallableDescriptor,
-    CallableId, CallableKind, ConfigRevisionId, ExecutionAuthority, ExecutionEvent,
-    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet, ExecutionState,
-    ExecutionSummary, ExecutionTarget, ExecutionWorkspaceValidity, FailureAttemptSummary,
-    FileObservation, FileVersion, ModelTarget, OrchestrationDefinition, OrchestrationNodeId,
-    RoutingProfile, SessionId, SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId,
-    WorkspaceId, WorkspaceLeaseRequest,
+    AgentDefinition, AttemptGroup, AttemptGroupId, CallableDescriptor, CallableId, CallableKind,
+    ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
+    ExecutionKind, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
+    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
+    OrchestrationFailureDecisionRecord, OrchestrationNodeId, RoutingProfile, SessionId,
+    SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId, WorkspaceId,
+    WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde_json::Value;
@@ -59,7 +61,14 @@ pub enum ConductorError {
     },
     EmptyInput,
     InvalidLifecycle(ExecutionId),
-    InvalidRetry(ExecutionId),
+    InvalidFailureDecision {
+        parent_execution: ExecutionId,
+        failed_child: ExecutionId,
+    },
+    FailureDecisionDenied {
+        parent_execution: ExecutionId,
+        decider_execution: ExecutionId,
+    },
     DelegationDenied {
         parent_execution: ExecutionId,
         callable: CallableId,
@@ -93,7 +102,20 @@ impl Display for ConductorError {
             ),
             Self::EmptyInput => f.write_str("input must not be empty"),
             Self::InvalidLifecycle(id) => write!(f, "execution is not runnable: {id}"),
-            Self::InvalidRetry(id) => write!(f, "execution cannot be retried: {id}"),
+            Self::InvalidFailureDecision {
+                parent_execution,
+                failed_child,
+            } => write!(
+                f,
+                "invalid failure decision for child {failed_child} of orchestration {parent_execution}"
+            ),
+            Self::FailureDecisionDenied {
+                parent_execution,
+                decider_execution,
+            } => write!(
+                f,
+                "execution {decider_execution} may not decide failures for orchestration {parent_execution}"
+            ),
             Self::DelegationDenied {
                 parent_execution,
                 callable,
@@ -226,6 +248,8 @@ pub struct ConductorRuntime {
     sessions: BTreeMap<SessionId, SessionRecord>,
     executions: BTreeMap<ExecutionId, ExecutionRecord>,
     attempt_groups: BTreeMap<AttemptGroupId, AttemptGroup>,
+    orchestration_decisions: BTreeMap<ExecutionId, OrchestrationFailureDecisionRecord>,
+    orchestration_interfaces: BTreeMap<ExecutionId, ExecutionId>,
     orchestration_nodes: BTreeMap<ExecutionId, OrchestrationNodeId>,
     resolved_routes: BTreeMap<ExecutionId, ResolvedRoute>,
     read_sets: BTreeMap<ExecutionId, ExecutionReadSet>,
@@ -262,6 +286,8 @@ impl ConductorRuntime {
             sessions: BTreeMap::new(),
             executions: BTreeMap::new(),
             attempt_groups: BTreeMap::new(),
+            orchestration_decisions: BTreeMap::new(),
+            orchestration_interfaces: BTreeMap::new(),
             orchestration_nodes: BTreeMap::new(),
             resolved_routes: BTreeMap::new(),
             read_sets: BTreeMap::new(),
@@ -316,6 +342,8 @@ impl ConductorRuntime {
                 sessions: &mut self.sessions,
                 executions: &mut self.executions,
                 attempt_groups: &mut self.attempt_groups,
+                orchestration_decisions: &mut self.orchestration_decisions,
+                orchestration_interfaces: &mut self.orchestration_interfaces,
                 orchestration_nodes: &mut self.orchestration_nodes,
                 resolved_routes: &mut self.resolved_routes,
                 read_sets: &mut self.read_sets,
@@ -500,6 +528,30 @@ impl ConductorRuntime {
             .cloned()
     }
 
+    #[must_use]
+    pub fn orchestration_failure_decisions(&self) -> Vec<OrchestrationFailureDecisionRecord> {
+        self.orchestration_decisions.values().cloned().collect()
+    }
+
+    #[must_use]
+    pub fn orchestration_failure_decision(
+        &self,
+        failed_child: &ExecutionId,
+    ) -> Option<OrchestrationFailureDecisionRecord> {
+        self.orchestration_decisions.get(failed_child).cloned()
+    }
+
+    pub(crate) fn failed_child_for_interface(
+        &self,
+        interface_execution: &ExecutionId,
+    ) -> Option<ExecutionId> {
+        self.orchestration_interfaces
+            .iter()
+            .find_map(|(failed_child, interface)| {
+                (interface == interface_execution).then(|| failed_child.clone())
+            })
+    }
+
     pub fn execution_read_set(
         &self,
         execution_id: &ExecutionId,
@@ -615,7 +667,7 @@ impl ConductorRuntime {
                     return Ok(ExecutionAuthority::read_only());
                 };
                 let definition = self.callables.orchestration(callable)?;
-                let authorities = definition
+                let mut authorities = definition
                     .nodes
                     .iter()
                     .map(|node| {
@@ -624,10 +676,16 @@ impl ConductorRuntime {
                             .map(|definition| &definition.authority)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+                if let Some(interface_agent) = definition.interface_agent.as_ref() {
+                    authorities.push(&self.callables.agent_definition(interface_agent)?.authority);
+                }
                 let mut authority = authority_envelope(authorities);
                 authority
                     .callables
                     .extend(definition.nodes.iter().map(|node| node.callable.clone()));
+                if let Some(interface_agent) = definition.interface_agent.as_ref() {
+                    authority.callables.insert(interface_agent.clone());
+                }
                 Ok(authority)
             }
         }
@@ -813,99 +871,6 @@ impl ConductorRuntime {
         Ok(child)
     }
 
-    pub fn retry_agent(
-        &mut self,
-        failed_execution_id: &ExecutionId,
-        report: AttemptFailureReport,
-    ) -> Result<ExecutionSummary, ConductorError> {
-        let (parent_id, callable, original_goal) = {
-            let failed = self
-                .executions
-                .get(failed_execution_id)
-                .ok_or_else(|| ConductorError::UnknownExecution(failed_execution_id.clone()))?;
-            if failed.summary.kind != ExecutionKind::Agent
-                || failed.summary.state != ExecutionState::Failed
-            {
-                return Err(ConductorError::InvalidRetry(failed_execution_id.clone()));
-            }
-            let parent_id = failed
-                .summary
-                .parent_execution
-                .clone()
-                .ok_or_else(|| ConductorError::InvalidRetry(failed_execution_id.clone()))?;
-            let callable = failed
-                .summary
-                .callable
-                .clone()
-                .ok_or_else(|| ConductorError::InvalidRetry(failed_execution_id.clone()))?;
-            let ExecutionPayload::Invocation { input } = &failed.payload else {
-                return Err(ConductorError::InvalidRetry(failed_execution_id.clone()));
-            };
-            (parent_id, callable, input.clone())
-        };
-        let parent = self
-            .executions
-            .get(&parent_id)
-            .ok_or_else(|| ConductorError::UnknownExecution(parent_id.clone()))?;
-        if is_terminal(&parent.summary.state) {
-            return Err(ConductorError::InvalidRetry(failed_execution_id.clone()));
-        }
-
-        let existing_group = self
-            .attempt_groups
-            .iter()
-            .find(|(_, group)| group.contains_execution(failed_execution_id))
-            .map(|(id, group)| (id.clone(), group.clone()));
-
-        let group_id = if let Some((group_id, group)) = existing_group {
-            if group.latest_execution() != Some(failed_execution_id) {
-                return Err(ConductorError::InvalidRetry(failed_execution_id.clone()));
-            }
-            if !group
-                .failures
-                .iter()
-                .any(|failure| failure.execution_id == *failed_execution_id)
-            {
-                let attempt = group
-                    .attempt_for_execution(failed_execution_id)
-                    .ok_or_else(|| ConductorError::InvalidRetry(failed_execution_id.clone()))?;
-                self.record_domain_event(DomainEvent::AttemptFailureRecorded {
-                    group_id: group_id.clone(),
-                    failure: failure_summary(failed_execution_id.clone(), attempt, &report),
-                })?;
-            }
-            group_id
-        } else {
-            let group_id = self.new_attempt_group_id();
-            let group = AttemptGroup::from_first_failure(
-                group_id.clone(),
-                parent_id.clone(),
-                callable.clone(),
-                original_goal,
-                failure_summary(failed_execution_id.clone(), 1, &report),
-            );
-            self.record_domain_event(DomainEvent::AttemptGroupCreated { group })?;
-            group_id
-        };
-
-        let context = self
-            .attempt_groups
-            .get(&group_id)
-            .expect("attempt group was recorded before retry")
-            .retry_context();
-        let serialized = serde_json::to_string(&context)
-            .expect("retry context contains only JSON-serializable values");
-        let retry_input = format!(
-            "Retry the same goal. Use only the compact failure context below; do not infer prior transcript content.\n\nRetry context JSON:\n{serialized}"
-        );
-        let retry = self.start_agent(&parent_id, &callable, retry_input)?;
-        self.record_domain_event(DomainEvent::AttemptRetryStarted {
-            group_id,
-            execution_id: retry.id.clone(),
-        })?;
-        Ok(retry)
-    }
-
     pub fn start_orchestration(
         &mut self,
         parent_id: &ExecutionId,
@@ -921,6 +886,11 @@ impl ConductorRuntime {
         for step in &definition.nodes {
             let descriptor = self.callables.descriptor(&step.callable)?.clone();
             self.callables.execution_provider(&step.callable)?;
+            self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgentNode)?;
+        }
+        if let Some(interface_agent) = definition.interface_agent.as_ref() {
+            let descriptor = self.callables.descriptor(interface_agent)?.clone();
+            self.callables.execution_provider(interface_agent)?;
             self.check_callable_policy(parent_id, &descriptor, CallableOperation::StartAgentNode)?;
         }
         let summary = self.create_child(
@@ -1319,109 +1289,6 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    fn refresh_orchestration(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
-        let Some(orchestration) = self.executions.get(execution_id) else {
-            return Err(ConductorError::UnknownExecution(execution_id.clone()));
-        };
-        if orchestration.summary.kind != ExecutionKind::Orchestration
-            || is_terminal(&orchestration.summary.state)
-        {
-            return Ok(());
-        }
-        let states: Vec<ExecutionState> = self
-            .executions
-            .values()
-            .filter(|record| record.summary.parent_execution.as_ref() == Some(execution_id))
-            .map(|record| record.summary.state.clone())
-            .collect();
-        if states.contains(&ExecutionState::Failed) {
-            self.set_state(execution_id, ExecutionState::Failed)?;
-            return Ok(());
-        }
-        if states.contains(&ExecutionState::Cancelled) {
-            self.set_state(execution_id, ExecutionState::Cancelled)?;
-            return Ok(());
-        }
-        if states.contains(&ExecutionState::Interrupted) {
-            self.set_state(execution_id, ExecutionState::Interrupted)?;
-            return Ok(());
-        }
-        self.advance_orchestration(execution_id)
-    }
-
-    fn advance_orchestration(&mut self, execution_id: &ExecutionId) -> Result<(), ConductorError> {
-        let (callable, objective, state) = {
-            let execution = self
-                .executions
-                .get(execution_id)
-                .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
-            let ExecutionPayload::Orchestration { objective } = &execution.payload else {
-                return Err(ConductorError::NonModelExecution(execution_id.clone()));
-            };
-            (
-                execution
-                    .summary
-                    .callable
-                    .clone()
-                    .expect("orchestration execution has callable"),
-                objective.clone(),
-                execution.summary.state.clone(),
-            )
-        };
-        if state != ExecutionState::Running {
-            return Ok(());
-        }
-        let definition = self.callables.orchestration(&callable)?.clone();
-        let node_states = self
-            .executions
-            .values()
-            .filter(|record| record.summary.parent_execution.as_ref() == Some(execution_id))
-            .filter_map(|record| {
-                self.orchestration_nodes
-                    .get(&record.summary.id)
-                    .map(|node_id| (node_id.clone(), record.summary.state.clone()))
-            })
-            .collect::<BTreeMap<_, _>>();
-        let ready = definition
-            .nodes
-            .iter()
-            .filter(|node| {
-                !node_states.contains_key(&node.id)
-                    && node.depends_on.iter().all(|dependency| {
-                        node_states.get(dependency) == Some(&ExecutionState::Completed)
-                    })
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if !ready.is_empty() {
-            for node in ready {
-                let node_objective = match node.objective {
-                    Some(node_objective) => {
-                        format!("{node_objective}\n\nOrchestration objective:\n{objective}")
-                    }
-                    None => objective.clone(),
-                };
-                self.start_agent_with_node(
-                    execution_id,
-                    &node.callable,
-                    node_objective,
-                    Some(node.id),
-                )?;
-            }
-            return Ok(());
-        }
-
-        if node_states.len() == definition.nodes.len()
-            && node_states
-                .values()
-                .all(|state| *state == ExecutionState::Completed)
-        {
-            self.set_state(execution_id, ExecutionState::Completed)?;
-        }
-        Ok(())
-    }
-
     pub fn subscribe_events(
         &mut self,
         capacity: usize,
@@ -1620,21 +1487,6 @@ impl ConductorRuntime {
 
     fn new_tool_call_id(&self) -> ToolCallId {
         ToolCallId::parse(format!("tool-call-{}", self.next_tool_call + 1)).expect("generated id")
-    }
-}
-
-fn failure_summary(
-    execution_id: ExecutionId,
-    attempt: u32,
-    report: &AttemptFailureReport,
-) -> FailureAttemptSummary {
-    FailureAttemptSummary {
-        execution_id,
-        attempt,
-        approach: report.approach.clone(),
-        failure_at: report.failure_at.clone(),
-        reason: report.reason.clone(),
-        completed_work: report.completed_work.clone(),
     }
 }
 
@@ -2168,6 +2020,7 @@ mod tests {
         }
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: CallableDescriptor {
                     id: CallableId::parse("orchestration.parallel").unwrap(),
                     kind: CallableKind::Orchestration,

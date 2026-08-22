@@ -218,6 +218,7 @@ fn root_model_discovers_and_starts_orchestration_then_worker_runs_mock_agents() 
     let orchestration = CallableId::parse(ORCHESTRATION_ID).unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
             nodes: vec![
                 node("scout", scout.clone(), &[], Some("inspect the repository")),
@@ -403,6 +404,7 @@ fn dag_runtime_starts_all_ready_nodes_and_waits_for_join_dependencies() {
 
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.parallel", CallableKind::Orchestration),
             nodes: vec![
                 node("alpha", alpha.clone(), &[], None),

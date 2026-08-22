@@ -132,6 +132,8 @@ impl ConductorRuntime {
                 sessions: &mut runtime.sessions,
                 executions: &mut runtime.executions,
                 attempt_groups: &mut runtime.attempt_groups,
+                orchestration_decisions: &mut runtime.orchestration_decisions,
+                orchestration_interfaces: &mut runtime.orchestration_interfaces,
                 orchestration_nodes: &mut runtime.orchestration_nodes,
                 resolved_routes: &mut runtime.resolved_routes,
                 read_sets: &mut runtime.read_sets,
@@ -226,6 +228,7 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration.test", CallableKind::Orchestration),
                 nodes: vec![
                     node("first", "agent.first", &[], Some("first")),

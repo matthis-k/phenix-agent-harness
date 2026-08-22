@@ -2,10 +2,12 @@
 
 mod attempts;
 mod debug;
+mod failures;
 mod workspace;
 
 pub use attempts::*;
 pub use debug::*;
+pub use failures::*;
 pub use workspace::*;
 
 use serde::{Deserialize, Serialize};
@@ -248,6 +250,8 @@ pub struct OrchestrationNode {
 #[serde(deny_unknown_fields)]
 pub struct OrchestrationDefinition {
     pub descriptor: CallableDescriptor,
+    #[serde(default)]
+    pub interface_agent: Option<CallableId>,
     pub nodes: Vec<OrchestrationNode>,
 }
 
@@ -344,6 +348,9 @@ pub enum ExecutionEventKind {
         child: ExecutionId,
         state: ExecutionState,
     },
+    OrchestrationDecisionMade {
+        decision: OrchestrationFailureDecisionRecord,
+    },
     Error {
         code: String,
         message: String,
@@ -422,6 +429,7 @@ mod tests {
     #[test]
     fn orchestration_definition_is_the_direct_source_shape() {
         let definition = OrchestrationDefinition {
+            interface_agent: None,
             descriptor: orchestration_descriptor(),
             nodes: vec![
                 OrchestrationNode {

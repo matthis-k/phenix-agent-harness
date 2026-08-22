@@ -88,6 +88,10 @@ pub enum CallableRegistryError {
         dependency: OrchestrationNodeId,
     },
     CyclicOrchestration(CallableId),
+    InvalidOrchestrationInterface {
+        orchestration: CallableId,
+        callable: CallableId,
+    },
     InvalidOrchestrationNode {
         orchestration: CallableId,
         node: OrchestrationNodeId,
@@ -128,6 +132,13 @@ impl Display for CallableRegistryError {
             Self::CyclicOrchestration(orchestration) => {
                 write!(f, "orchestration {orchestration} contains a dependency cycle")
             }
+            Self::InvalidOrchestrationInterface {
+                orchestration,
+                callable,
+            } => write!(
+                f,
+                "orchestration {orchestration} interface references non-executable or unknown callable {callable}"
+            ),
             Self::InvalidOrchestrationNode {
                 orchestration,
                 node,
@@ -275,6 +286,20 @@ impl CallableRegistry {
         }
 
         let orchestration = definition.descriptor.id.clone();
+        if let Some(interface_agent) = definition.interface_agent.as_ref() {
+            let Some(entry) = self.entries.get(interface_agent) else {
+                return Err(CallableRegistryError::InvalidOrchestrationInterface {
+                    orchestration: orchestration.clone(),
+                    callable: interface_agent.clone(),
+                });
+            };
+            if !matches!(entry, CallableEntry::Agent { .. }) || !entry.is_executable() {
+                return Err(CallableRegistryError::InvalidOrchestrationInterface {
+                    orchestration: orchestration.clone(),
+                    callable: interface_agent.clone(),
+                });
+            }
+        }
         let mut nodes = BTreeMap::new();
         for mut node in definition.nodes.drain(..) {
             node.depends_on.sort();
@@ -553,6 +578,16 @@ impl ConductorRuntime {
                         CallableOperation::StartAgentNode,
                     )?;
                 }
+                if let Some(interface_agent) = definition.interface_agent.as_ref() {
+                    let descriptor = self.callables.descriptor(interface_agent)?.clone();
+                    self.callables.execution_provider(interface_agent)?;
+                    self.check_session_callable_policy(
+                        session_id,
+                        &execution_id,
+                        &descriptor,
+                        CallableOperation::StartAgentNode,
+                    )?;
+                }
                 let summary = self.create_session_callable_execution(
                     session_id,
                     execution_id,
@@ -783,6 +818,7 @@ mod tests {
             .unwrap();
         registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![node("run", "native", &[], None)],
             })
@@ -800,6 +836,7 @@ mod tests {
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![
                     node("work", "worker", &[], None),
@@ -827,6 +864,7 @@ mod tests {
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![node("work", "worker", &["missing"], None)],
             })
@@ -848,6 +886,7 @@ mod tests {
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![
                     node("first", "worker", &["second"], None),
@@ -875,6 +914,7 @@ mod tests {
         let orchestration = CallableId::parse("orchestration").unwrap();
         registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
                 nodes: vec![
                     node("gamma", "gamma", &["alpha"], None),
@@ -967,6 +1007,7 @@ mod tests {
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("implement", CallableKind::Orchestration),
                 nodes: vec![node("worker", "worker", &[], None)],
             })

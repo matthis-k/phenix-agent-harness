@@ -76,6 +76,7 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
                 .unwrap();
             runtime
                 .register_orchestration(OrchestrationDefinition {
+                    interface_agent: None,
                     descriptor: descriptor(
                         "orchestration.catalog",
                         CallableKind::Orchestration,
@@ -445,6 +446,7 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
                 .unwrap();
             runtime
                 .register_orchestration(OrchestrationDefinition {
+                    interface_agent: None,
                     descriptor: descriptor(
                         "orchestration.two-step",
                         CallableKind::Orchestration,
@@ -704,6 +706,7 @@ fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration", CallableKind::Orchestration, false),
             nodes: vec![orchestration_node("guarded", "guarded-step", &[], None)],
         })

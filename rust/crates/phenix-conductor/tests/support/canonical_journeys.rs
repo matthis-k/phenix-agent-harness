@@ -59,6 +59,7 @@ fn bind_two_step_workflow(runtime: &mut ConductorRuntime) {
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.two-step", CallableKind::Orchestration),
             nodes: vec![
                 workflow_node("first", "agent.first", &[], Some("first")),
