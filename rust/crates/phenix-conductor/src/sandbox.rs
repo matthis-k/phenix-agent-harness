@@ -442,7 +442,7 @@ fi
   --ready-fd=3 \
   --exit-fd=4 \
   "$child_pid" tap0 \
-  3>&9 4<&10 2>"$slirp_error" &
+  3>&9 4<&10- 2>"$slirp_error" &
 network_pid=$!
 
 network_ready=
@@ -459,7 +459,7 @@ fi
 printf 1 >&8
 wait "$sandbox_pid"
 sandbox_status=$?
-printf 1 >&10
+exec 10>&-
 wait "$network_pid"
 network_status=$?
 if [ "$network_status" -ne 0 ]; then
