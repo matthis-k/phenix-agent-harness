@@ -1680,6 +1680,17 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.execution_id = Some(id);
             error
         }
+        ConductorError::DelegationDenied {
+            parent_execution,
+            callable,
+        } => {
+            let mut error = protocol_error(
+                ErrorCode::PolicyDenied,
+                format!("execution {parent_execution} may not delegate callable {callable}"),
+            );
+            error.execution_id = Some(parent_execution);
+            error
+        }
         ConductorError::NonModelExecution(id) => {
             let mut error = protocol_error(
                 ErrorCode::UnsupportedCapability,
