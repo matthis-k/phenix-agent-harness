@@ -1156,28 +1156,38 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    pub fn cancel_execution(&mut self, root: &ExecutionId) -> Result<(), ConductorError> {
+    fn execution_subtree(
+        &self,
+        root: &ExecutionId,
+    ) -> Result<BTreeSet<ExecutionId>, ConductorError> {
         if !self.executions.contains_key(root) {
             return Err(ConductorError::UnknownExecution(root.clone()));
         }
-        let mut cancelled = BTreeSet::from([root.clone()]);
+        let mut subtree = BTreeSet::from([root.clone()]);
         loop {
-            let before = cancelled.len();
+            let before = subtree.len();
             for (id, record) in &self.executions {
                 if record
                     .summary
                     .parent_execution
                     .as_ref()
-                    .is_some_and(|parent| cancelled.contains(parent))
+                    .is_some_and(|parent| subtree.contains(parent))
                 {
-                    cancelled.insert(id.clone());
+                    subtree.insert(id.clone());
                 }
             }
-            if cancelled.len() == before {
+            if subtree.len() == before {
                 break;
             }
         }
-        for id in cancelled {
+        Ok(subtree)
+    }
+
+    fn cancel_execution_set(
+        &mut self,
+        executions: BTreeSet<ExecutionId>,
+    ) -> Result<(), ConductorError> {
+        for id in executions {
             let state = self
                 .executions
                 .get(&id)
@@ -1190,6 +1200,17 @@ impl ConductorRuntime {
             }
         }
         Ok(())
+    }
+
+    fn cancel_descendants(&mut self, root: &ExecutionId) -> Result<(), ConductorError> {
+        let mut descendants = self.execution_subtree(root)?;
+        descendants.remove(root);
+        self.cancel_execution_set(descendants)
+    }
+
+    pub fn cancel_execution(&mut self, root: &ExecutionId) -> Result<(), ConductorError> {
+        let executions = self.execution_subtree(root)?;
+        self.cancel_execution_set(executions)
     }
 
     pub fn push_event(
@@ -1244,6 +1265,9 @@ impl ConductorRuntime {
                 state: state.clone(),
             },
         )?;
+        if state == ExecutionState::Failed {
+            self.cancel_descendants(execution_id)?;
+        }
         if is_terminal(&state) {
             self.skill_activations.remove(execution_id);
             if let Some(parent) = parent {
@@ -2018,6 +2042,165 @@ mod tests {
             .iter()
             .filter(|execution| execution.id == root.id || execution.id == child.id)
             .all(|execution| execution.state == ExecutionState::Cancelled));
+    }
+
+    #[test]
+    fn failed_orchestration_cancels_active_siblings_and_preserves_terminal_children() {
+        let mut runtime = ConductorRuntime::new();
+        for callable in ["agent.fail", "agent.active", "agent.done"] {
+            runtime
+                .register_agent(AgentDefinition::new(
+                    agent(callable),
+                    ExecutionAuthority::read_only(),
+                ))
+                .unwrap();
+        }
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: CallableDescriptor {
+                    id: CallableId::parse("orchestration.parallel").unwrap(),
+                    kind: CallableKind::Orchestration,
+                    description: "parallel failure fixture".to_owned(),
+                    input_schema: json!({"type": "object"}),
+                    output_schema: json!({"type": "object"}),
+                    capabilities: CapabilitySet::default(),
+                    policy: CallablePolicy::default(),
+                },
+                nodes: vec![
+                    phenix_core::OrchestrationNode {
+                        id: OrchestrationNodeId::parse("fail").unwrap(),
+                        callable: CallableId::parse("agent.fail").unwrap(),
+                        depends_on: Vec::new(),
+                        objective: None,
+                    },
+                    phenix_core::OrchestrationNode {
+                        id: OrchestrationNodeId::parse("active").unwrap(),
+                        callable: CallableId::parse("agent.active").unwrap(),
+                        depends_on: Vec::new(),
+                        objective: None,
+                    },
+                    phenix_core::OrchestrationNode {
+                        id: OrchestrationNodeId::parse("done").unwrap(),
+                        callable: CallableId::parse("agent.done").unwrap(),
+                        depends_on: Vec::new(),
+                        objective: None,
+                    },
+                ],
+            })
+            .unwrap();
+
+        let session = runtime.create_session(None, None, fixed("a")).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let orchestration = runtime
+            .start_orchestration(
+                &root.id,
+                &CallableId::parse("orchestration.parallel").unwrap(),
+                "parallel work",
+            )
+            .unwrap();
+        let children = runtime
+            .snapshot()
+            .executions
+            .into_iter()
+            .filter(|execution| execution.parent_execution.as_ref() == Some(&orchestration.id))
+            .collect::<Vec<_>>();
+        let child = |callable: &str| {
+            children
+                .iter()
+                .find(|execution| {
+                    execution
+                        .callable
+                        .as_ref()
+                        .is_some_and(|id| id.as_str() == callable)
+                })
+                .unwrap()
+                .id
+                .clone()
+        };
+        let failing = child("agent.fail");
+        let active = child("agent.active");
+        let done = child("agent.done");
+
+        runtime.set_state(&done, ExecutionState::Completed).unwrap();
+        runtime.set_state(&active, ExecutionState::Running).unwrap();
+        runtime
+            .set_state(&failing, ExecutionState::Running)
+            .unwrap();
+        runtime.set_state(&failing, ExecutionState::Failed).unwrap();
+
+        let snapshot = runtime.snapshot();
+        let state = |id: &ExecutionId| {
+            snapshot
+                .executions
+                .iter()
+                .find(|execution| &execution.id == id)
+                .unwrap()
+                .state
+                .clone()
+        };
+        assert_eq!(state(&failing), ExecutionState::Failed);
+        assert_eq!(state(&active), ExecutionState::Cancelled);
+        assert_eq!(state(&done), ExecutionState::Completed);
+        assert_eq!(state(&orchestration.id), ExecutionState::Failed);
+        assert!(runtime.events_since(0).iter().any(|event| {
+            event.execution_id == root.id
+                && matches!(
+                    &event.kind,
+                    ExecutionEventKind::ChildExecutionFinished { child, state }
+                        if child == &orchestration.id && *state == ExecutionState::Failed
+                )
+        }));
+    }
+
+    #[test]
+    fn failed_parent_cancels_deep_active_subtree() {
+        let mut runtime = ConductorRuntime::new();
+        for callable in ["agent.parent", "agent.child"] {
+            runtime
+                .register_agent(AgentDefinition::new(
+                    agent(callable),
+                    ExecutionAuthority::read_only(),
+                ))
+                .unwrap();
+        }
+        let session = runtime.create_session(None, None, fixed("a")).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let parent = runtime
+            .start_agent(
+                &root.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent",
+            )
+            .unwrap();
+        let child = runtime
+            .start_agent(
+                &parent.id,
+                &CallableId::parse("agent.child").unwrap(),
+                "child",
+            )
+            .unwrap();
+        runtime
+            .set_state(&parent.id, ExecutionState::Running)
+            .unwrap();
+        runtime
+            .set_state(&child.id, ExecutionState::Running)
+            .unwrap();
+
+        runtime.set_state(&root.id, ExecutionState::Failed).unwrap();
+
+        let snapshot = runtime.snapshot();
+        let state = |id: &ExecutionId| {
+            snapshot
+                .executions
+                .iter()
+                .find(|execution| &execution.id == id)
+                .unwrap()
+                .state
+                .clone()
+        };
+        assert_eq!(state(&root.id), ExecutionState::Failed);
+        assert_eq!(state(&parent.id), ExecutionState::Cancelled);
+        assert_eq!(state(&child.id), ExecutionState::Cancelled);
     }
 
     #[test]
