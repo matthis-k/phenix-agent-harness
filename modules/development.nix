@@ -387,11 +387,13 @@
                   stepName = "Unit tests";
                 };
                 runtimeInputs = pkgs: [
+                  pkgs.bash
                   pkgs.bubblewrap
                   pkgs.cargo
                   pkgs.coreutils
                   pkgs.git
                   pkgs.iproute2
+                  pkgs.ripgrep
                   pkgs.rsync
                   pkgs.rustc
                   pkgs.slirp4netns
