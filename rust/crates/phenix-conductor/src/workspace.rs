@@ -31,8 +31,18 @@ impl Workspace {
     }
 
     #[must_use]
+    pub fn descriptor(&self) -> &WorkspaceDescriptor {
+        &self.descriptor
+    }
+
+    #[must_use]
     pub fn root(&self) -> &Path {
         &self.descriptor.root
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &WorkspaceId {
+        &self.descriptor.id
     }
 }
 

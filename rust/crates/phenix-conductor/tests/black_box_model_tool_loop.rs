@@ -2,15 +2,16 @@ use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
     BackendSession, BackendSessionRequest, ToolInvocation, ToolPresentation,
 };
-use phenix_conductor::{ConductorError, ConductorRuntime};
+use phenix_conductor::{ConductorError, ConductorRuntime, ToolOutcome};
 use phenix_core::{
     BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, InferenceOptions, ModelId,
-    ModelTarget, OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId,
-    RoutingProfile, RoutingProfileId,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, FileKind, FileObservation,
+    FileVersion, InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition,
+    OrchestrationNode, OrchestrationNodeId, ProviderId, RoutingProfile, RoutingProfileId,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -100,6 +101,48 @@ impl BackendSession for ToolSession {
         assert_eq!(result.output, r#"{"value":"hello"}"#);
         host.emit(BackendEvent::ReasoningDelta("after tool".to_owned()))?;
         host.emit(BackendEvent::ContentDelta("done".to_owned()))?;
+        Ok(())
+    }
+
+    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+        Ok(())
+    }
+}
+
+struct ObservingToolBackend;
+struct ObservingToolSession;
+
+impl Backend for ObservingToolBackend {
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            tool_presentations: BTreeSet::from([ToolPresentation::Native]),
+            images: false,
+            persistent_sessions: false,
+        }
+    }
+
+    fn open_session(
+        &mut self,
+        request: BackendSessionRequest,
+    ) -> Result<Arc<dyn BackendSession>, BackendError> {
+        assert_eq!(request.tools.presentation(), Some(ToolPresentation::Native));
+        assert_eq!(request.tools.callables().len(), 1);
+        assert_eq!(request.tools.callables()[0].id.as_str(), "observe");
+        Ok(Arc::new(ObservingToolSession))
+    }
+}
+
+impl BackendSession for ObservingToolSession {
+    fn execute(
+        &self,
+        _request: BackendExecutionRequest,
+        host: &mut dyn BackendHost,
+    ) -> Result<(), BackendError> {
+        let result = host.invoke_tool(ToolInvocation {
+            callable: CallableId::parse("observe").unwrap(),
+            arguments_json: "{}".to_owned(),
+        })?;
+        assert!(result.success);
         Ok(())
     }
 
@@ -256,6 +299,42 @@ fn mock_backend_preserves_mixed_event_order() {
 }
 
 #[test]
+fn tool_file_observations_are_durable_execution_read_sets() {
+    let mut runtime = ConductorRuntime::new();
+    runtime
+        .register_tool(descriptor("observe", CallableKind::Tool), |_| {
+            Ok(
+                ToolOutcome::success("observed").with_file_observation(FileObservation {
+                    path: PathBuf::from("src/lib.rs"),
+                    version: FileVersion::Present {
+                        content_hash: "v1".to_owned(),
+                        kind: FileKind::Regular,
+                    },
+                }),
+            )
+        })
+        .unwrap();
+    let session = runtime.create_session(None, None, fixed()).unwrap();
+    let execution = runtime.submit(&session.id, "inspect").unwrap();
+    let mut backend = ObservingToolBackend;
+
+    runtime
+        .drive_execution(&execution.id, &mut backend)
+        .unwrap();
+    let reads = runtime.execution_read_set(&execution.id).unwrap();
+    assert_eq!(
+        reads.files[Path::new("src/lib.rs")],
+        FileVersion::Present {
+            content_hash: "v1".to_owned(),
+            kind: FileKind::Regular,
+        }
+    );
+
+    let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+    assert_eq!(restored.execution_read_set(&execution.id).unwrap(), reads);
+}
+
+#[test]
 fn routed_execution_resolves_before_backend_open() {
     let opened = Arc::new(AtomicBool::new(false));
     let mut backend = MockBackend {
@@ -287,7 +366,10 @@ fn routed_agent_uses_callable_specific_model() {
     let mut runtime = ConductorRuntime::new();
     let scout = CallableId::parse("agent.scout").unwrap();
     runtime
-        .register_agent(descriptor("agent.scout", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.scout", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     let profile = RoutingProfileId::parse("default").unwrap();
     runtime
@@ -319,13 +401,20 @@ fn dependency_ordered_workflow_is_conductor_owned_and_advances_agent_children() 
     let scout = CallableId::parse("agent.scout").unwrap();
     let worker = CallableId::parse("agent.worker").unwrap();
     runtime
-        .register_agent(descriptor("agent.scout", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.scout", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
-        .register_agent(descriptor("agent.worker", CallableKind::Agent))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("agent.worker", CallableKind::Agent),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.implement", CallableKind::Orchestration),
             nodes: vec![
                 node("scout", scout, &[], Some("inspect")),

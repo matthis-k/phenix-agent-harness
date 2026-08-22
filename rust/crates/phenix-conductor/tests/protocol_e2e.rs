@@ -69,10 +69,14 @@ fn callable_catalog_is_conductor_owned_and_lists_all_registered_kinds() {
                 })
                 .unwrap();
             runtime
-                .register_agent(descriptor("agent.catalog", CallableKind::Agent, false))
+                .register_agent(phenix_core::AgentDefinition::new(
+                    descriptor("agent.catalog", CallableKind::Agent, false),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ))
                 .unwrap();
             runtime
                 .register_orchestration(OrchestrationDefinition {
+                    interface_agent: None,
                     descriptor: descriptor(
                         "orchestration.catalog",
                         CallableKind::Orchestration,
@@ -164,9 +168,17 @@ fn journal_replay_restart_continues_protocol_with_monotonic_ids_and_events() {
     let before_restart = before.snapshot.clone();
     let session_id = before_restart.sessions[0].id.clone();
     let cursor = before_restart.last_event_sequence;
+    let revision = before.journal.config_revision.clone();
+    let configuration = ConductorRuntime::new()
+        .current_compiled_configuration()
+        .unwrap();
     let persisted = serde_json::to_vec(&before.journal).unwrap();
-    let restored = ConductorRuntime::restore(serde_json::from_slice(&persisted).unwrap()).unwrap();
+    let mut restored =
+        ConductorRuntime::restore(serde_json::from_slice(&persisted).unwrap()).unwrap();
     assert_eq!(restored.snapshot(), before_restart);
+    restored
+        .bind_configuration_revision(&revision, configuration)
+        .unwrap();
 
     let after = ProtocolHarness::model(MockModelScript::reply("after restart complete"))
         .runtime(restored)
@@ -281,7 +293,10 @@ fn typed_callable_command_executes_native_provider_without_model_backend() {
         .configure_runtime(move |runtime| {
             runtime
                 .register_provider_agent(
-                    descriptor("agent.native", CallableKind::Agent, false),
+                    phenix_core::AgentDefinition::new(
+                        descriptor("agent.native", CallableKind::Agent, false),
+                        phenix_core::ExecutionAuthority::read_only(),
+                    ),
                     NativeProvider {
                         calls: provider_calls,
                     },
@@ -379,7 +394,10 @@ fn active_native_provider_cancellation_is_deterministic_and_never_uses_model_bac
         .configure_runtime(move |runtime| {
             runtime
                 .register_provider_agent(
-                    descriptor("agent.blocking", CallableKind::Agent, false),
+                    phenix_core::AgentDefinition::new(
+                        descriptor("agent.blocking", CallableKind::Agent, false),
+                        phenix_core::ExecutionAuthority::read_only(),
+                    ),
                     BlockingNativeProvider {
                         started: provider_started,
                         released: provider_released,
@@ -423,13 +441,20 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
     let run = ProtocolHarness::model(MockModelScript::reply("step complete"))
         .configure_runtime(|runtime| {
             runtime
-                .register_agent(descriptor("agent.first", CallableKind::Agent, false))
+                .register_agent(phenix_core::AgentDefinition::new(
+                    descriptor("agent.first", CallableKind::Agent, false),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ))
                 .unwrap();
             runtime
-                .register_agent(descriptor("agent.second", CallableKind::Agent, false))
+                .register_agent(phenix_core::AgentDefinition::new(
+                    descriptor("agent.second", CallableKind::Agent, false),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ))
                 .unwrap();
             runtime
                 .register_orchestration(OrchestrationDefinition {
+                    interface_agent: None,
                     descriptor: descriptor(
                         "orchestration.two-step",
                         CallableKind::Orchestration,
@@ -648,7 +673,10 @@ fn built_in_permission_guard_suppresses_tool_handler_end_to_end() {
 fn built_in_permission_guard_denies_agent_before_child_creation() {
     let mut runtime = ConductorRuntime::new();
     runtime
-        .register_agent(descriptor("guarded-agent", CallableKind::Agent, true))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("guarded-agent", CallableKind::Agent, true),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     let session = runtime
         .create_session(
@@ -679,10 +707,14 @@ fn built_in_permission_guard_denies_agent_before_child_creation() {
 fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
     let mut runtime = ConductorRuntime::new();
     runtime
-        .register_agent(descriptor("guarded-step", CallableKind::Agent, true))
+        .register_agent(phenix_core::AgentDefinition::new(
+            descriptor("guarded-step", CallableKind::Agent, true),
+            phenix_core::ExecutionAuthority::read_only(),
+        ))
         .unwrap();
     runtime
         .register_orchestration(OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration", CallableKind::Orchestration, false),
             nodes: vec![orchestration_node("guarded", "guarded-step", &[], None)],
         })

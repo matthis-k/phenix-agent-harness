@@ -2,10 +2,12 @@
 
 mod attempts;
 mod debug;
+mod failures;
 mod workspace;
 
 pub use attempts::*;
 pub use debug::*;
+pub use failures::*;
 pub use workspace::*;
 
 use serde::{Deserialize, Serialize};
@@ -199,6 +201,23 @@ pub struct CallableDescriptor {
     pub policy: CallablePolicy,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AgentDefinition {
+    #[serde(flatten)]
+    pub descriptor: CallableDescriptor,
+    pub authority: ExecutionAuthority,
+}
+
+impl AgentDefinition {
+    #[must_use]
+    pub fn new(descriptor: CallableDescriptor, authority: ExecutionAuthority) -> Self {
+        Self {
+            descriptor,
+            authority,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoutingProfile {
     pub id: RoutingProfileId,
@@ -231,6 +250,8 @@ pub struct OrchestrationNode {
 #[serde(deny_unknown_fields)]
 pub struct OrchestrationDefinition {
     pub descriptor: CallableDescriptor,
+    #[serde(default)]
+    pub interface_agent: Option<CallableId>,
     pub nodes: Vec<OrchestrationNode>,
 }
 
@@ -253,6 +274,13 @@ pub enum ExecutionState {
     Interrupted,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExecutionTerminationCause {
+    ExplicitCancellation { requested_execution: ExecutionId },
+    AncestorFailure { failed_ancestor: ExecutionId },
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
@@ -266,6 +294,7 @@ pub struct SessionSummary {
     pub id: SessionId,
     pub parent_session: Option<SessionId>,
     pub name: Option<String>,
+    pub workspace_id: WorkspaceId,
     pub config_revision: ConfigRevisionId,
     pub default_target: ExecutionTarget,
     #[serde(default)]
@@ -300,6 +329,9 @@ pub enum ExecutionEventKind {
     ExecutionStateChanged {
         state: ExecutionState,
     },
+    ExecutionTerminated {
+        cause: ExecutionTerminationCause,
+    },
     AssistantContentDelta {
         text: String,
     },
@@ -325,6 +357,9 @@ pub enum ExecutionEventKind {
     ChildExecutionFinished {
         child: ExecutionId,
         state: ExecutionState,
+    },
+    OrchestrationDecisionMade {
+        decision: OrchestrationFailureDecisionRecord,
     },
     Error {
         code: String,
@@ -355,11 +390,42 @@ mod tests {
     }
 
     #[test]
+    fn serialized_agent_definition_requires_explicit_authority() {
+        let mut descriptor = orchestration_descriptor();
+        descriptor.id = CallableId::parse("agent.scout").unwrap();
+        descriptor.kind = CallableKind::Agent;
+        let value = serde_json::to_value(descriptor).unwrap();
+        assert!(serde_json::from_value::<AgentDefinition>(value).is_err());
+    }
+
+    #[test]
+    fn agent_definition_serializes_authority_with_descriptor() {
+        let mut descriptor = orchestration_descriptor();
+        descriptor.id = CallableId::parse("agent.implement").unwrap();
+        descriptor.kind = CallableKind::Agent;
+        let definition = AgentDefinition::new(
+            descriptor,
+            ExecutionAuthority {
+                filesystem: FilesystemAuthority::Write,
+                network: NetworkAuthority::None,
+                repository: RepositoryAuthority::Read,
+                ipc: BTreeSet::new(),
+                secrets: BTreeSet::new(),
+                callables: BTreeSet::new(),
+            },
+        );
+        let value = serde_json::to_value(&definition).unwrap();
+        assert_eq!(value["id"], "agent.implement");
+        assert_eq!(value["authority"]["filesystem"], "write");
+    }
+
+    #[test]
     fn missing_session_state_deserializes_as_active_for_old_journals() {
         let value = serde_json::json!({
             "id": "session-1",
             "parent_session": null,
             "name": null,
+            "workspace_id": "workspace:test",
             "config_revision": "config-1",
             "default_target": {
                 "kind": "routed",
@@ -373,6 +439,7 @@ mod tests {
     #[test]
     fn orchestration_definition_is_the_direct_source_shape() {
         let definition = OrchestrationDefinition {
+            interface_agent: None,
             descriptor: orchestration_descriptor(),
             nodes: vec![
                 OrchestrationNode {

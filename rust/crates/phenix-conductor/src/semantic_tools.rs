@@ -1,4 +1,6 @@
-use crate::{ConductorRuntime, ResolvedInvocation};
+use crate::{
+    ConductorError, ConductorRuntime, OrchestrationFailureDecisionRequest, ResolvedInvocation,
+};
 use phenix_backend::{BackendError, ToolInvocation, ToolResult};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
@@ -10,6 +12,7 @@ use std::collections::BTreeSet;
 
 pub(super) const ORCHESTRATION_LIST_ID: &str = "phenix_orchestration_list";
 pub(super) const ORCHESTRATION_START_ID: &str = "phenix_orchestration_start";
+pub(super) const ORCHESTRATION_DECIDE_FAILURE_ID: &str = "phenix_orchestration_decide_failure";
 pub(super) const SKILL_LOAD_ID: &str = "phenix_skill_load";
 pub(super) const SKILL_RESOURCE_READ_ID: &str = "phenix_skill_resource_read";
 
@@ -18,6 +21,15 @@ pub(super) const SKILL_RESOURCE_READ_ID: &str = "phenix_skill_resource_read";
 struct OrchestrationStartInput {
     orchestration: String,
     objective: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
+enum OrchestrationDecisionInput {
+    Retry,
+    ChooseAnotherChild { callable: String, objective: String },
+    Continue,
+    Fail,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,32 +45,49 @@ struct SkillResourceReadInput {
     path: String,
 }
 
-pub(super) fn extend_semantic_tools(runtime: &ConductorRuntime, resolved: &mut ResolvedInvocation) {
+pub(super) fn extend_semantic_tools(
+    runtime: &ConductorRuntime,
+    resolved: &mut ResolvedInvocation,
+) -> Result<(), ConductorError> {
     let is_root = runtime.snapshot().executions.iter().any(|execution| {
         execution.id == resolved.execution_id && execution.kind == ExecutionKind::Root
     });
     let has_orchestrations = runtime
-        .callable_descriptors()
+        .callable_descriptors_for_execution(&resolved.execution_id)?
         .iter()
         .any(|descriptor| descriptor.kind == CallableKind::Orchestration);
     if is_root && has_orchestrations {
         resolved.tools.callables.extend(orchestration_descriptors());
     }
-    if runtime.has_model_invocable_skills() {
+    if runtime
+        .failed_child_for_interface(&resolved.execution_id)
+        .is_some()
+    {
+        resolved
+            .tools
+            .callables
+            .push(orchestration_decide_failure_descriptor());
+    }
+    if runtime.has_model_invocable_skills_for_execution(&resolved.execution_id)? {
         resolved.tools.callables.push(skill_load_descriptor());
     }
-    if runtime.has_skills() {
+    if runtime.has_skills_for_execution(&resolved.execution_id)? {
         resolved
             .tools
             .callables
             .push(skill_resource_read_descriptor());
     }
+    Ok(())
 }
 
 pub(super) fn is_semantic_tool(id: &CallableId) -> bool {
     matches!(
         id.as_str(),
-        ORCHESTRATION_LIST_ID | ORCHESTRATION_START_ID | SKILL_LOAD_ID | SKILL_RESOURCE_READ_ID
+        ORCHESTRATION_LIST_ID
+            | ORCHESTRATION_START_ID
+            | ORCHESTRATION_DECIDE_FAILURE_ID
+            | SKILL_LOAD_ID
+            | SKILL_RESOURCE_READ_ID
     )
 }
 
@@ -96,14 +125,18 @@ pub(super) fn invoke(
         .map_err(conductor_protocol_error)?;
 
     let outcome = match invocation.callable.as_str() {
-        ORCHESTRATION_LIST_ID => parse_list(&invocation.arguments_json).map(|()| {
-            list_output(
-                runtime
-                    .callable_descriptors()
-                    .into_iter()
-                    .filter(|descriptor| descriptor.kind == CallableKind::Orchestration)
-                    .collect(),
-            )
+        ORCHESTRATION_LIST_ID => parse_list(&invocation.arguments_json).and_then(|()| {
+            runtime
+                .callable_descriptors_for_execution(execution_id)
+                .map(|descriptors| {
+                    list_output(
+                        descriptors
+                            .into_iter()
+                            .filter(|descriptor| descriptor.kind == CallableKind::Orchestration)
+                            .collect(),
+                    )
+                })
+                .map_err(|error| error.to_string())
         }),
         SKILL_LOAD_ID => parse_skill_load(&invocation.arguments_json).and_then(|skill| {
             runtime
@@ -125,6 +158,21 @@ pub(super) fn invoke(
                     .map_err(|error| error.to_string())
             })
         }
+        ORCHESTRATION_DECIDE_FAILURE_ID => parse_failure_decision(&invocation.arguments_json)
+            .and_then(|decision| {
+                let failed_child = runtime
+                    .failed_child_for_interface(execution_id)
+                    .ok_or_else(|| {
+                        "execution is not an orchestration failure interface".to_owned()
+                    })?;
+                runtime
+                    .decide_orchestration_failure(execution_id, decision)
+                    .map_err(|error| error.to_string())?;
+                let record = runtime
+                    .orchestration_failure_decision(&failed_child)
+                    .expect("successful decision is durably recorded");
+                serde_json::to_string(&record).map_err(|error| error.to_string())
+            }),
         _ => unreachable!("semantic tool was checked before dispatch"),
     };
     let result = tool_result(outcome);
@@ -185,6 +233,32 @@ fn parse_start(arguments_json: &str) -> Result<(CallableId, String), String> {
     Ok((orchestration, input.objective))
 }
 
+fn parse_failure_decision(
+    arguments_json: &str,
+) -> Result<OrchestrationFailureDecisionRequest, String> {
+    let input: OrchestrationDecisionInput = serde_json::from_str(arguments_json)
+        .map_err(|error| format!("invalid orchestration failure decision: {error}"))?;
+    match input {
+        OrchestrationDecisionInput::Retry => Ok(OrchestrationFailureDecisionRequest::Retry),
+        OrchestrationDecisionInput::ChooseAnotherChild {
+            callable,
+            objective,
+        } => {
+            if objective.trim().is_empty() {
+                return Err("replacement objective must not be empty".to_owned());
+            }
+            let callable = CallableId::parse(callable)
+                .map_err(|error| format!("invalid replacement callable id: {error}"))?;
+            Ok(OrchestrationFailureDecisionRequest::ChooseAnotherChild {
+                callable,
+                objective,
+            })
+        }
+        OrchestrationDecisionInput::Continue => Ok(OrchestrationFailureDecisionRequest::Continue),
+        OrchestrationDecisionInput::Fail => Ok(OrchestrationFailureDecisionRequest::Fail),
+    }
+}
+
 fn parse_skill_load(arguments_json: &str) -> Result<SkillId, String> {
     let input: SkillLoadInput = serde_json::from_str(arguments_json)
         .map_err(|error| format!("invalid skill load arguments: {error}"))?;
@@ -232,6 +306,52 @@ fn start_output(execution: &ExecutionSummary) -> String {
 
 fn conductor_protocol_error(error: crate::ConductorError) -> BackendError {
     BackendError::Protocol(error.to_string())
+}
+
+fn orchestration_decide_failure_descriptor() -> CallableDescriptor {
+    CallableDescriptor {
+        id: CallableId::parse(ORCHESTRATION_DECIDE_FAILURE_ID)
+            .expect("static orchestration decision id"),
+        kind: CallableKind::Tool,
+        description: "Record exactly one parent decision for the failed child assigned to this orchestration interface execution.".to_owned(),
+        input_schema: json!({
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["decision"],
+                    "properties": { "decision": { "const": "retry" } }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["decision", "callable", "objective"],
+                    "properties": {
+                        "decision": { "const": "choose_another_child" },
+                        "callable": { "type": "string", "minLength": 1 },
+                        "objective": { "type": "string", "minLength": 1 }
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["decision"],
+                    "properties": { "decision": { "const": "continue" } }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["decision"],
+                    "properties": { "decision": { "const": "fail" } }
+                }
+            ]
+        }),
+        output_schema: json!({ "type": "object" }),
+        capabilities: CapabilitySet::default(),
+        policy: CallablePolicy {
+            requires_permission: false,
+        },
+    }
 }
 
 fn skill_load_descriptor() -> CallableDescriptor {

@@ -1,13 +1,23 @@
-use crate::{CallableId, ExecutionId, WorkspaceId};
+use crate::{CallableId, CapabilitySet, ExecutionId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+
+pub const CAPABILITY_FILESYSTEM_READ: &str = "filesystem.read";
+pub const CAPABILITY_FILESYSTEM_WRITE: &str = "filesystem.write";
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilesystemAuthority {
     ReadOnly,
     Write,
+}
+
+impl FilesystemAuthority {
+    #[must_use]
+    pub fn permits_capabilities(self, capabilities: &CapabilitySet) -> bool {
+        !capabilities.0.contains(CAPABILITY_FILESYSTEM_WRITE) || self == FilesystemAuthority::Write
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -35,6 +45,12 @@ pub struct ExecutionAuthority {
     pub secrets: BTreeSet<String>,
     #[serde(default)]
     pub callables: BTreeSet<CallableId>,
+}
+
+impl Default for ExecutionAuthority {
+    fn default() -> Self {
+        Self::read_only()
+    }
 }
 
 impl ExecutionAuthority {
@@ -73,6 +89,29 @@ where
     T: Clone + Ord,
 {
     left.intersection(right).cloned().collect()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceLeaseMode {
+    Read,
+    Write,
+}
+
+impl From<FilesystemAuthority> for WorkspaceLeaseMode {
+    fn from(authority: FilesystemAuthority) -> Self {
+        match authority {
+            FilesystemAuthority::ReadOnly => Self::Read,
+            FilesystemAuthority::Write => Self::Write,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceLeaseRequest {
+    pub workspace_id: WorkspaceId,
+    pub execution_id: ExecutionId,
+    pub mode: WorkspaceLeaseMode,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -125,7 +164,9 @@ impl ExecutionReadSet {
     }
 
     pub fn observe(&mut self, observation: FileObservation) {
-        self.files.insert(observation.path, observation.version);
+        self.files
+            .entry(observation.path)
+            .or_insert(observation.version);
     }
 
     #[must_use]
@@ -145,6 +186,19 @@ impl ExecutionReadSet {
             })
             .collect()
     }
+
+    #[must_use]
+    pub fn validity_against(
+        &self,
+        current: &BTreeMap<PathBuf, FileVersion>,
+    ) -> ExecutionWorkspaceValidity {
+        let conflicts = self.conflicts_with(current);
+        if conflicts.is_empty() {
+            ExecutionWorkspaceValidity::Current
+        } else {
+            ExecutionWorkspaceValidity::Invalidated { conflicts }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -154,12 +208,28 @@ pub struct WorkspaceConflict {
     pub actual: FileVersion,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ExecutionWorkspaceValidity {
+    Current,
+    Invalidated { conflicts: Vec<WorkspaceConflict> },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn callable(id: &str) -> CallableId {
         CallableId::parse(id).unwrap()
+    }
+
+    #[test]
+    fn authority_defaults_to_read_only() {
+        assert_eq!(
+            ExecutionAuthority::default(),
+            ExecutionAuthority::read_only()
+        );
     }
 
     #[test]
@@ -190,6 +260,86 @@ mod tests {
         assert_eq!(child.callables, BTreeSet::from([callable("tool.read")]));
         assert!(parent.permits(&child));
         assert!(!parent.permits(&requested));
+    }
+
+    #[test]
+    fn filesystem_authority_selects_workspace_lease_mode() {
+        assert_eq!(
+            WorkspaceLeaseMode::from(FilesystemAuthority::ReadOnly),
+            WorkspaceLeaseMode::Read
+        );
+        assert_eq!(
+            WorkspaceLeaseMode::from(FilesystemAuthority::Write),
+            WorkspaceLeaseMode::Write
+        );
+    }
+
+    #[test]
+    fn filesystem_authority_filters_write_capabilities() {
+        let read = CapabilitySet(BTreeSet::from([CAPABILITY_FILESYSTEM_READ.to_owned()]));
+        let write = CapabilitySet(BTreeSet::from([CAPABILITY_FILESYSTEM_WRITE.to_owned()]));
+
+        assert!(FilesystemAuthority::ReadOnly.permits_capabilities(&read));
+        assert!(!FilesystemAuthority::ReadOnly.permits_capabilities(&write));
+        assert!(FilesystemAuthority::Write.permits_capabilities(&write));
+    }
+
+    #[test]
+    fn read_set_keeps_the_first_observed_version() {
+        let mut reads = ExecutionReadSet::new(ExecutionId::parse("execution-1").unwrap());
+        reads.observe(FileObservation {
+            path: PathBuf::from("src/lib.rs"),
+            version: FileVersion::Present {
+                content_hash: "v1".to_owned(),
+                kind: FileKind::Regular,
+            },
+        });
+        reads.observe(FileObservation {
+            path: PathBuf::from("src/lib.rs"),
+            version: FileVersion::Present {
+                content_hash: "v2".to_owned(),
+                kind: FileKind::Regular,
+            },
+        });
+
+        assert_eq!(
+            reads.files[Path::new("src/lib.rs")],
+            FileVersion::Present {
+                content_hash: "v1".to_owned(),
+                kind: FileKind::Regular,
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_validity_tracks_exact_observed_versions() {
+        let mut reads = ExecutionReadSet::new(ExecutionId::parse("execution-1").unwrap());
+        let original = FileVersion::Present {
+            content_hash: "v1".to_owned(),
+            kind: FileKind::Regular,
+        };
+        reads.observe(FileObservation {
+            path: PathBuf::from("src/lib.rs"),
+            version: original.clone(),
+        });
+
+        let changed = BTreeMap::from([(
+            PathBuf::from("src/lib.rs"),
+            FileVersion::Present {
+                content_hash: "v2".to_owned(),
+                kind: FileKind::Regular,
+            },
+        )]);
+        assert!(matches!(
+            reads.validity_against(&changed),
+            ExecutionWorkspaceValidity::Invalidated { conflicts } if conflicts.len() == 1
+        ));
+
+        let restored = BTreeMap::from([(PathBuf::from("src/lib.rs"), original)]);
+        assert_eq!(
+            reads.validity_against(&restored),
+            ExecutionWorkspaceValidity::Current
+        );
     }
 
     #[test]

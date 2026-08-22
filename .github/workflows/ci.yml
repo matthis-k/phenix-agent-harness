@@ -124,6 +124,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-workflow-callables
 
+      - name: "conductor / durable_retries"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-durable-retries
+
       - name: "conductor / execution_provider_runtime"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
@@ -159,6 +165,18 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-runtime-edge-cases
+
+      - name: "conductor / termination_causes"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-termination-causes
+
+      - name: "conductor / workspace_execution_leases"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-workspace-execution-leases
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}

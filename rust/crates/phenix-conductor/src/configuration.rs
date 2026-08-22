@@ -1,5 +1,5 @@
-use phenix_conductor::{ConductorError, ConductorRuntime};
-use phenix_core::{CallableDescriptor, OrchestrationDefinition, RoutingProfile};
+use phenix_conductor::{CompiledConfiguration, ConductorError};
+use phenix_core::{AgentDefinition, OrchestrationDefinition, RoutingProfile};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfiguration {
     #[serde(default)]
-    pub agents: Vec<CallableDescriptor>,
+    pub agents: Vec<AgentDefinition>,
     #[serde(default)]
     pub orchestrations: Vec<OrchestrationDefinition>,
     #[serde(default)]
@@ -36,17 +36,20 @@ impl RuntimeConfiguration {
         })
     }
 
-    pub fn apply(self, runtime: &mut ConductorRuntime) -> Result<(), ConfigurationError> {
+    pub fn compile(
+        self,
+        mut configuration: CompiledConfiguration,
+    ) -> Result<CompiledConfiguration, ConfigurationError> {
         for agent in self.agents {
-            runtime.register_agent(agent)?;
+            configuration.register_agent(agent)?;
         }
         for orchestration in self.orchestrations {
-            runtime.register_orchestration(orchestration)?;
+            configuration.register_orchestration(orchestration)?;
         }
         for profile in self.routing_profiles {
-            runtime.register_routing_profile(profile)?;
+            configuration.register_routing_profile(profile)?;
         }
-        Ok(())
+        Ok(configuration)
     }
 }
 
@@ -104,13 +107,24 @@ impl From<ConductorError> for ConfigurationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_conductor::ConductorRuntime;
     use phenix_core::{
-        BackendId, CallableId, CallableKind, CallablePolicy, CapabilitySet, ExecutionTarget,
-        InferenceOptions, ModelId, ModelTarget, OrchestrationNode, OrchestrationNodeId, ProviderId,
-        RoutingProfileId,
+        BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+        ExecutionAuthority, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId,
+        ModelTarget, NetworkAuthority, OrchestrationNode, OrchestrationNodeId, ProviderId,
+        RepositoryAuthority, RoutingProfileId,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
+
+    fn install_configuration(
+        runtime: &mut ConductorRuntime,
+        configuration: RuntimeConfiguration,
+    ) -> Result<(), ConfigurationError> {
+        let base = runtime.current_compiled_configuration()?;
+        runtime.reload_configuration(configuration.compile(base)?)?;
+        Ok(())
+    }
 
     fn descriptor(id: &str, kind: CallableKind) -> CallableDescriptor {
         CallableDescriptor {
@@ -146,6 +160,7 @@ mod tests {
     fn application_configuration_rebinds_agents_workflows_and_routes() {
         let agent = descriptor("agent.fixture", CallableKind::Agent);
         let orchestration = OrchestrationDefinition {
+            interface_agent: None,
             descriptor: descriptor("orchestration.fixture", CallableKind::Orchestration),
             nodes: vec![node(
                 "fixture",
@@ -159,19 +174,23 @@ mod tests {
             callable_targets: BTreeMap::from([(agent.id.clone(), target("agent"))]),
         };
         let encoded = serde_json::to_string(&RuntimeConfiguration {
-            agents: vec![agent.clone()],
+            agents: vec![AgentDefinition::new(
+                agent.clone(),
+                ExecutionAuthority::read_only(),
+            )],
             orchestrations: vec![orchestration],
             routing_profiles: vec![route],
         })
         .unwrap();
         let configuration: RuntimeConfiguration = serde_json::from_str(&encoded).unwrap();
         let mut runtime = ConductorRuntime::new();
-        configuration.apply(&mut runtime).unwrap();
+        install_configuration(&mut runtime, configuration).unwrap();
 
-        assert_eq!(runtime.callable_descriptors().len(), 2);
+        assert_eq!(runtime.callable_descriptors().unwrap().len(), 2);
         assert_eq!(
             runtime
                 .callable_descriptors()
+                .unwrap()
                 .into_iter()
                 .map(|item| item.id)
                 .collect::<Vec<_>>(),
@@ -196,12 +215,46 @@ mod tests {
     }
 
     #[test]
+    fn configured_agent_authority_reaches_execution_creation() {
+        let descriptor = descriptor("agent.writer", CallableKind::Agent);
+        let authority = ExecutionAuthority {
+            filesystem: FilesystemAuthority::Write,
+            network: NetworkAuthority::None,
+            repository: RepositoryAuthority::Read,
+            ..ExecutionAuthority::read_only()
+        };
+        let configuration = RuntimeConfiguration {
+            agents: vec![AgentDefinition::new(descriptor.clone(), authority.clone())],
+            ..RuntimeConfiguration::default()
+        };
+        let encoded = serde_json::to_string(&configuration).unwrap();
+        let decoded: RuntimeConfiguration = serde_json::from_str(&encoded).unwrap();
+        let mut runtime = ConductorRuntime::new();
+        install_configuration(&mut runtime, decoded).unwrap();
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(target("worker")))
+            .unwrap();
+        let execution = runtime
+            .start_session_callable(&session.id, &descriptor.id, "write")
+            .unwrap();
+
+        assert_eq!(
+            runtime.execution_authority(&execution.id).unwrap(),
+            authority
+        );
+    }
+
+    #[test]
     fn configured_workflow_step_keeps_the_user_objective() {
         let agent = descriptor("agent.worker", CallableKind::Agent);
         let workflow_id = CallableId::parse("orchestration.implement").unwrap();
         let configuration = RuntimeConfiguration {
-            agents: vec![agent.clone()],
+            agents: vec![AgentDefinition::new(
+                agent.clone(),
+                ExecutionAuthority::read_only(),
+            )],
             orchestrations: vec![OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor(workflow_id.as_str(), CallableKind::Orchestration),
                 nodes: vec![node(
                     "implement",
@@ -212,7 +265,7 @@ mod tests {
             ..RuntimeConfiguration::default()
         };
         let mut runtime = ConductorRuntime::new();
-        configuration.apply(&mut runtime).unwrap();
+        install_configuration(&mut runtime, configuration).unwrap();
 
         let session = runtime
             .create_session(None, None, ExecutionTarget::Fixed(target("worker")))
@@ -237,11 +290,14 @@ mod tests {
     #[test]
     fn application_configuration_rejects_wrong_callable_kinds() {
         let configuration = RuntimeConfiguration {
-            agents: vec![descriptor("tool.not-an-agent", CallableKind::Tool)],
+            agents: vec![AgentDefinition::new(
+                descriptor("tool.not-an-agent", CallableKind::Tool),
+                ExecutionAuthority::read_only(),
+            )],
             ..RuntimeConfiguration::default()
         };
         assert!(matches!(
-            configuration.apply(&mut ConductorRuntime::new()),
+            install_configuration(&mut ConductorRuntime::new(), configuration),
             Err(ConfigurationError::Runtime(_))
         ));
     }

@@ -125,6 +125,8 @@ scout -> read-oriented tools and permitted read-only children
 
 Tool visibility and delegation policy are separate concerns.
 
+`ExecutionAuthority.callables` is the execution's effective delegation ceiling. Creating a child requires the child's callable ID in that set. The child then receives the intersection of that ceiling and its own configured callable authority, so no descendant can regain a callable removed by an ancestor. Root executions include every configured executable callable in their delegation ceiling. An orchestration includes its declared node callables plus the callable authority needed by those nodes' configured maxima.
+
 A child uses its own configured maximum authority, further restricted by the parent and invocation. Authority never expands from parent to child. A read-only parent therefore cannot create a writable child.
 
 ## Orchestrations

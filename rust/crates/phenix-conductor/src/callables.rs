@@ -1,19 +1,72 @@
 use crate::{
     CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
-    ExecutionProvider, ExecutionProviderBinding, InvocationPolicyContext, InvocationSubject,
-    JournalExecutionPayload,
+    ExecutionProvider, ExecutionProviderBinding, ExecutionProviderKind, InvocationPolicyContext,
+    InvocationSubject, JournalExecutionPayload,
 };
 use phenix_backend::ToolResult;
 use phenix_core::{
-    CallableDescriptor, CallableId, CallableKind, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionState, ExecutionSummary, OrchestrationDefinition, OrchestrationNodeId, SessionId,
+    AgentDefinition, CallableDescriptor, CallableId, CallableKind, ExecutionAuthority,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
+    FileObservation, OrchestrationDefinition, OrchestrationNodeId, SessionId,
 };
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
 
-type ToolHandler = dyn Fn(&str) -> Result<String, String> + Send + Sync;
+#[derive(Clone, Debug)]
+pub(crate) struct ToolExecutionContext {
+    pub authority: ExecutionAuthority,
+}
+
+type ToolHandler = dyn Fn(&ToolExecutionContext, &str) -> Result<ToolOutcome, String> + Send + Sync;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolOutcome {
+    pub output: String,
+    pub success: bool,
+    pub file_observations: Vec<FileObservation>,
+}
+
+impl ToolOutcome {
+    #[must_use]
+    pub fn success(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            success: true,
+            file_observations: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_file_observation(mut self, observation: FileObservation) -> Self {
+        self.file_observations.push(observation);
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn into_backend_result(self) -> ToolResult {
+        ToolResult {
+            output: self.output,
+            success: self.success,
+        }
+    }
+
+    fn failure(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            success: false,
+            file_observations: Vec::new(),
+        }
+    }
+}
+
+impl From<String> for ToolOutcome {
+    fn from(output: String) -> Self {
+        Self::success(output)
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CallableRegistryError {
@@ -36,6 +89,10 @@ pub enum CallableRegistryError {
         dependency: OrchestrationNodeId,
     },
     CyclicOrchestration(CallableId),
+    InvalidOrchestrationInterface {
+        orchestration: CallableId,
+        callable: CallableId,
+    },
     InvalidOrchestrationNode {
         orchestration: CallableId,
         node: OrchestrationNodeId,
@@ -76,6 +133,13 @@ impl Display for CallableRegistryError {
             Self::CyclicOrchestration(orchestration) => {
                 write!(f, "orchestration {orchestration} contains a dependency cycle")
             }
+            Self::InvalidOrchestrationInterface {
+                orchestration,
+                callable,
+            } => write!(
+                f,
+                "orchestration {orchestration} interface references non-executable or unknown callable {callable}"
+            ),
             Self::InvalidOrchestrationNode {
                 orchestration,
                 node,
@@ -90,33 +154,43 @@ impl Display for CallableRegistryError {
 
 impl Error for CallableRegistryError {}
 
-enum CallableImplementation {
-    Tool(Arc<ToolHandler>),
-    Executable(ExecutionProviderBinding),
+#[derive(Clone)]
+enum CallableEntry {
+    Tool {
+        descriptor: CallableDescriptor,
+        handler: Arc<ToolHandler>,
+    },
+    Agent {
+        definition: AgentDefinition,
+        provider: ExecutionProviderBinding,
+    },
     Orchestration(Box<OrchestrationDefinition>),
 }
 
-struct CallableEntry {
-    descriptor: CallableDescriptor,
-    implementation: CallableImplementation,
-}
-
 impl CallableEntry {
+    fn descriptor(&self) -> &CallableDescriptor {
+        match self {
+            Self::Tool { descriptor, .. } => descriptor,
+            Self::Agent { definition, .. } => &definition.descriptor,
+            Self::Orchestration(definition) => &definition.descriptor,
+        }
+    }
+
     fn is_executable(&self) -> bool {
-        matches!(&self.implementation, CallableImplementation::Executable(_))
+        matches!(self, Self::Agent { .. })
     }
 }
 
 impl Debug for CallableEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("CallableEntry")
-            .field("descriptor", &self.descriptor)
+            .field("descriptor", self.descriptor())
             .field("executable", &self.is_executable())
             .finish_non_exhaustive()
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CallableRegistry {
     entries: BTreeMap<CallableId, CallableEntry>,
 }
@@ -130,30 +204,84 @@ impl Debug for CallableRegistry {
 }
 
 impl CallableRegistry {
-    pub fn register_tool<F>(
+    pub(crate) fn semantic_manifest(&self) -> Value {
+        Value::Array(
+            self.entries
+                .values()
+                .map(|entry| match entry {
+                    CallableEntry::Tool { descriptor, .. } => json!({
+                        "type": "tool",
+                        "descriptor": descriptor,
+                    }),
+                    CallableEntry::Agent {
+                        definition,
+                        provider,
+                    } => {
+                        let provider_kind = match provider.kind() {
+                            ExecutionProviderKind::Model => "model",
+                            ExecutionProviderKind::Native => "native",
+                            ExecutionProviderKind::Acp => "acp",
+                            ExecutionProviderKind::RemotePhenix => "remote_phenix",
+                        };
+                        json!({
+                            "type": "agent",
+                            "definition": definition,
+                            "provider_kind": provider_kind,
+                        })
+                    }
+                    CallableEntry::Orchestration(definition) => json!({
+                        "type": "orchestration",
+                        "definition": definition,
+                    }),
+                })
+                .collect(),
+        )
+    }
+
+    pub fn register_tool<F, O>(
         &mut self,
         descriptor: CallableDescriptor,
         handler: F,
     ) -> Result<(), CallableRegistryError>
     where
-        F: Fn(&str) -> Result<String, String> + Send + Sync + 'static,
+        F: Fn(&str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
     {
-        self.register(
-            descriptor,
+        self.register_contextual_tool(descriptor, move |_context, arguments| handler(arguments))
+    }
+
+    pub(crate) fn register_contextual_tool<F, O>(
+        &mut self,
+        descriptor: CallableDescriptor,
+        handler: F,
+    ) -> Result<(), CallableRegistryError>
+    where
+        F: Fn(&ToolExecutionContext, &str) -> Result<O, String> + Send + Sync + 'static,
+        O: Into<ToolOutcome> + 'static,
+    {
+        let handler = move |context: &ToolExecutionContext, arguments: &str| {
+            handler(context, arguments).map(Into::into)
+        };
+        self.insert(
+            CallableEntry::Tool {
+                descriptor,
+                handler: Arc::new(handler),
+            },
             CallableKind::Tool,
-            CallableImplementation::Tool(Arc::new(handler)),
         )
     }
 
     /// Register the canonical model-backed agent provider.
     pub fn register_agent(
         &mut self,
-        descriptor: CallableDescriptor,
+        definition: AgentDefinition,
     ) -> Result<(), CallableRegistryError> {
-        self.register(
-            descriptor,
+        self.insert(
+            CallableEntry::Agent {
+                definition,
+                provider: ExecutionProviderBinding::Model,
+            },
             CallableKind::Agent,
-            CallableImplementation::Executable(ExecutionProviderBinding::Model),
         )
     }
 
@@ -161,18 +289,18 @@ impl CallableRegistry {
     /// supplied by an explicit provider rather than the model backend path.
     pub fn register_provider_agent<P>(
         &mut self,
-        descriptor: CallableDescriptor,
+        definition: AgentDefinition,
         provider: P,
     ) -> Result<(), CallableRegistryError>
     where
         P: ExecutionProvider + 'static,
     {
-        self.register(
-            descriptor,
+        self.insert(
+            CallableEntry::Agent {
+                definition,
+                provider: ExecutionProviderBinding::Provider(Arc::new(provider)),
+            },
             CallableKind::Agent,
-            CallableImplementation::Executable(ExecutionProviderBinding::Provider(Arc::new(
-                provider,
-            ))),
         )
     }
 
@@ -194,6 +322,20 @@ impl CallableRegistry {
         }
 
         let orchestration = definition.descriptor.id.clone();
+        if let Some(interface_agent) = definition.interface_agent.as_ref() {
+            let Some(entry) = self.entries.get(interface_agent) else {
+                return Err(CallableRegistryError::InvalidOrchestrationInterface {
+                    orchestration: orchestration.clone(),
+                    callable: interface_agent.clone(),
+                });
+            };
+            if !matches!(entry, CallableEntry::Agent { .. }) || !entry.is_executable() {
+                return Err(CallableRegistryError::InvalidOrchestrationInterface {
+                    orchestration: orchestration.clone(),
+                    callable: interface_agent.clone(),
+                });
+            }
+        }
         let mut nodes = BTreeMap::new();
         for mut node in definition.nodes.drain(..) {
             node.depends_on.sort();
@@ -277,37 +419,30 @@ impl CallableRegistry {
         }
         definition.nodes = normalized;
 
-        let descriptor = definition.descriptor.clone();
-        self.register(
-            descriptor,
+        self.insert(
+            CallableEntry::Orchestration(Box::new(definition)),
             CallableKind::Orchestration,
-            CallableImplementation::Orchestration(Box::new(definition)),
         )
     }
 
-    fn register(
+    fn insert(
         &mut self,
-        descriptor: CallableDescriptor,
+        entry: CallableEntry,
         expected: CallableKind,
-        implementation: CallableImplementation,
     ) -> Result<(), CallableRegistryError> {
+        let descriptor = entry.descriptor();
         if descriptor.kind != expected {
             return Err(CallableRegistryError::WrongKind {
-                callable: descriptor.id,
+                callable: descriptor.id.clone(),
                 expected,
-                actual: descriptor.kind,
+                actual: descriptor.kind.clone(),
             });
         }
-        if self.entries.contains_key(&descriptor.id) {
-            return Err(CallableRegistryError::Duplicate(descriptor.id));
+        let id = descriptor.id.clone();
+        if self.entries.contains_key(&id) {
+            return Err(CallableRegistryError::Duplicate(id));
         }
-        self.entries.insert(
-            descriptor.id.clone(),
-            CallableEntry {
-                descriptor,
-                implementation,
-            },
-        );
+        self.entries.insert(id, entry);
         Ok(())
     }
 
@@ -315,7 +450,7 @@ impl CallableRegistry {
     pub fn descriptors(&self) -> Vec<CallableDescriptor> {
         self.entries
             .values()
-            .map(|entry| entry.descriptor.clone())
+            .map(|entry| entry.descriptor().clone())
             .collect()
     }
 
@@ -323,8 +458,8 @@ impl CallableRegistry {
     pub fn tool_descriptors(&self) -> Vec<CallableDescriptor> {
         self.entries
             .values()
-            .filter(|entry| entry.descriptor.kind == CallableKind::Tool)
-            .map(|entry| entry.descriptor.clone())
+            .filter(|entry| entry.descriptor().kind == CallableKind::Tool)
+            .map(|entry| entry.descriptor().clone())
             .collect()
     }
 
@@ -334,8 +469,33 @@ impl CallableRegistry {
     ) -> Result<&CallableDescriptor, CallableRegistryError> {
         self.entries
             .get(id)
-            .map(|entry| &entry.descriptor)
+            .map(CallableEntry::descriptor)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))
+    }
+
+    pub fn agent_definition(
+        &self,
+        id: &CallableId,
+    ) -> Result<&AgentDefinition, CallableRegistryError> {
+        let entry = self
+            .entries
+            .get(id)
+            .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
+        match entry {
+            CallableEntry::Agent { definition, .. } => Ok(definition),
+            _ => Err(CallableRegistryError::WrongKind {
+                callable: id.clone(),
+                expected: CallableKind::Agent,
+                actual: entry.descriptor().kind.clone(),
+            }),
+        }
+    }
+
+    pub fn agent_definitions(&self) -> impl Iterator<Item = &AgentDefinition> {
+        self.entries.values().filter_map(|entry| match entry {
+            CallableEntry::Agent { definition, .. } => Some(definition),
+            _ => None,
+        })
     }
 
     pub fn execution_provider(
@@ -346,8 +506,8 @@ impl CallableRegistry {
             .entries
             .get(id)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
-        match &entry.implementation {
-            CallableImplementation::Executable(provider) => Ok(provider),
+        match entry {
+            CallableEntry::Agent { provider, .. } => Ok(provider),
             _ => Err(CallableRegistryError::NotExecutable(id.clone())),
         }
     }
@@ -360,12 +520,12 @@ impl CallableRegistry {
             .entries
             .get(id)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
-        match &entry.implementation {
-            CallableImplementation::Orchestration(definition) => Ok(definition.as_ref()),
+        match entry {
+            CallableEntry::Orchestration(definition) => Ok(definition.as_ref()),
             _ => Err(CallableRegistryError::WrongKind {
                 callable: id.clone(),
                 expected: CallableKind::Orchestration,
-                actual: entry.descriptor.kind.clone(),
+                actual: entry.descriptor().kind.clone(),
             }),
         }
     }
@@ -375,31 +535,26 @@ impl CallableRegistry {
         self.entries.contains_key(id)
     }
 
-    pub fn invoke_tool(
+    pub(crate) fn invoke_tool(
         &self,
+        context: &ToolExecutionContext,
         id: &CallableId,
         arguments_json: &str,
-    ) -> Result<ToolResult, CallableRegistryError> {
+    ) -> Result<ToolOutcome, CallableRegistryError> {
         let entry = self
             .entries
             .get(id)
             .ok_or_else(|| CallableRegistryError::Unknown(id.clone()))?;
-        let CallableImplementation::Tool(handler) = &entry.implementation else {
+        let CallableEntry::Tool { handler, .. } = entry else {
             return Err(CallableRegistryError::WrongKind {
                 callable: id.clone(),
                 expected: CallableKind::Tool,
-                actual: entry.descriptor.kind.clone(),
+                actual: entry.descriptor().kind.clone(),
             });
         };
-        Ok(match handler(arguments_json) {
-            Ok(output) => ToolResult {
-                output,
-                success: true,
-            },
-            Err(output) => ToolResult {
-                output,
-                success: false,
-            },
+        Ok(match handler(context, arguments_json) {
+            Ok(outcome) => outcome,
+            Err(output) => ToolOutcome::failure(output),
         })
     }
 }
@@ -418,12 +573,16 @@ impl ConductorRuntime {
         if objective.trim().is_empty() {
             return Err(ConductorError::EmptyInput);
         }
-        let descriptor = self.callables.descriptor(callable)?.clone();
+        let callables = self
+            .configuration_for_session(session_id)?
+            .callables
+            .clone();
+        let descriptor = callables.descriptor(callable)?.clone();
         let execution_id = self.new_execution_id();
 
         match descriptor.kind {
             CallableKind::Agent => {
-                self.callables.execution_provider(callable)?;
+                callables.execution_provider(callable)?;
                 self.check_session_callable_policy(
                     session_id,
                     &execution_id,
@@ -442,7 +601,7 @@ impl ConductorRuntime {
                 )
             }
             CallableKind::Orchestration => {
-                let definition = self.callables.orchestration(callable)?.clone();
+                let definition = callables.orchestration(callable)?.clone();
                 self.check_session_callable_policy(
                     session_id,
                     &execution_id,
@@ -450,12 +609,22 @@ impl ConductorRuntime {
                     CallableOperation::StartOrchestration,
                 )?;
                 for node in &definition.nodes {
-                    let node_descriptor = self.callables.descriptor(&node.callable)?.clone();
-                    self.callables.execution_provider(&node.callable)?;
+                    let node_descriptor = callables.descriptor(&node.callable)?.clone();
+                    callables.execution_provider(&node.callable)?;
                     self.check_session_callable_policy(
                         session_id,
                         &execution_id,
                         &node_descriptor,
+                        CallableOperation::StartAgentNode,
+                    )?;
+                }
+                if let Some(interface_agent) = definition.interface_agent.as_ref() {
+                    let descriptor = callables.descriptor(interface_agent)?.clone();
+                    callables.execution_provider(interface_agent)?;
+                    self.check_session_callable_policy(
+                        session_id,
+                        &execution_id,
+                        &descriptor,
                         CallableOperation::StartAgentNode,
                     )?;
                 }
@@ -466,7 +635,6 @@ impl ConductorRuntime {
                     callable.clone(),
                     ExecutionPayload::Orchestration {
                         objective: objective.clone(),
-                        next_node: 0,
                     },
                     objective,
                 )?;
@@ -631,7 +799,10 @@ mod tests {
     fn ids_are_unique_across_callable_kinds() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_agent(descriptor("same", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("same", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         assert!(matches!(
             registry.register_tool(
@@ -648,10 +819,19 @@ mod tests {
         let model = CallableId::parse("model").unwrap();
         let native = CallableId::parse("native").unwrap();
         registry
-            .register_agent(descriptor("model", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("model", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         registry
-            .register_provider_agent(descriptor("native", CallableKind::Agent), TestProvider)
+            .register_provider_agent(
+                phenix_core::AgentDefinition::new(
+                    descriptor("native", CallableKind::Agent),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ),
+                TestProvider,
+            )
             .unwrap();
 
         assert_eq!(
@@ -668,10 +848,17 @@ mod tests {
     fn orchestrations_validate_executable_callable_references() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_provider_agent(descriptor("native", CallableKind::Agent), TestProvider)
+            .register_provider_agent(
+                phenix_core::AgentDefinition::new(
+                    descriptor("native", CallableKind::Agent),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ),
+                TestProvider,
+            )
             .unwrap();
         registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![node("run", "native", &[], None)],
             })
@@ -682,10 +869,14 @@ mod tests {
     fn orchestrations_reject_duplicate_node_ids() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_agent(descriptor("worker", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![
                     node("work", "worker", &[], None),
@@ -706,10 +897,14 @@ mod tests {
     fn orchestrations_reject_unknown_dependencies() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_agent(descriptor("worker", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![node("work", "worker", &["missing"], None)],
             })
@@ -724,10 +919,14 @@ mod tests {
     fn orchestrations_reject_dependency_cycles() {
         let mut registry = CallableRegistry::default();
         registry
-            .register_agent(descriptor("worker", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         let error = registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("orchestration", CallableKind::Orchestration),
                 nodes: vec![
                     node("first", "worker", &["second"], None),
@@ -746,12 +945,16 @@ mod tests {
         let mut registry = CallableRegistry::default();
         for callable in ["alpha", "beta", "gamma"] {
             registry
-                .register_agent(descriptor(callable, CallableKind::Agent))
+                .register_agent(phenix_core::AgentDefinition::new(
+                    descriptor(callable, CallableKind::Agent),
+                    phenix_core::ExecutionAuthority::read_only(),
+                ))
                 .unwrap();
         }
         let orchestration = CallableId::parse("orchestration").unwrap();
         registry
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor(orchestration.as_str(), CallableKind::Orchestration),
                 nodes: vec![
                     node("gamma", "gamma", &["alpha"], None),
@@ -781,8 +984,15 @@ mod tests {
                 Ok(arguments.to_owned())
             })
             .unwrap();
+        let context = ToolExecutionContext {
+            authority: ExecutionAuthority::read_only(),
+        };
         let result = registry
-            .invoke_tool(&CallableId::parse("echo").unwrap(), r#"{"value":1}"#)
+            .invoke_tool(
+                &context,
+                &CallableId::parse("echo").unwrap(),
+                r#"{"value":1}"#,
+            )
             .unwrap();
         assert!(result.success);
         assert_eq!(result.output, r#"{"value":1}"#);
@@ -792,7 +1002,10 @@ mod tests {
     fn session_agent_entrypoint_is_parentless_and_uses_session_target() {
         let mut runtime = ConductorRuntime::new();
         runtime
-            .register_agent(descriptor("scout", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("scout", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
         let execution = runtime
@@ -827,10 +1040,14 @@ mod tests {
     fn session_workflow_entrypoint_creates_normal_child_execution_tree() {
         let mut runtime = ConductorRuntime::new();
         runtime
-            .register_agent(descriptor("worker", CallableKind::Agent))
+            .register_agent(phenix_core::AgentDefinition::new(
+                descriptor("worker", CallableKind::Agent),
+                phenix_core::ExecutionAuthority::read_only(),
+            ))
             .unwrap();
         runtime
             .register_orchestration(OrchestrationDefinition {
+                interface_agent: None,
                 descriptor: descriptor("implement", CallableKind::Orchestration),
                 nodes: vec![node("worker", "worker", &[], None)],
             })
