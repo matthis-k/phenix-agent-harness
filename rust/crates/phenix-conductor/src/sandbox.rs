@@ -390,9 +390,8 @@ bwrap=$2
 info=$3
 gate=$4
 ready_pipe=$5
-exit_pipe=$6
-slirp_error=$7
-shift 7
+slirp_error=$6
+shift 6
 
 exec 8<>"$gate"
 exec 9<>"$ready_pipe"
@@ -439,11 +438,9 @@ fi
   --enable-sandbox \
   --enable-seccomp \
   --ready-fd=3 \
-  --exit-fd=4 \
   "$child_pid" tap0 \
-  3>&9 4<"$exit_pipe" 2>"$slirp_error" &
+  3>&9 2>"$slirp_error" &
 network_pid=$!
-exec 10>"$exit_pipe"
 
 network_ready=
 IFS= read -r -n 1 -t 15 network_ready <&9 || true
@@ -459,26 +456,28 @@ fi
 printf 1 >&8
 wait "$sandbox_pid"
 sandbox_status=$?
-exec 10>&-
+if ! kill -0 "$network_pid" 2>/dev/null; then
+  wait "$network_pid" 2>/dev/null || true
+  printf '%s\n' 'outbound network helper stopped before sandbox exit' >&2
+  while IFS= read -r line; do printf '%s\n' "$line" >&2; done <"$slirp_error"
+  exit 125
+fi
+
 network_timeout="$slirp_error.timeout"
 (
   sleep 5
   if kill -0 "$network_pid" 2>/dev/null; then
     : >"$network_timeout"
-    kill "$network_pid" 2>/dev/null || true
+    kill -KILL "$network_pid" 2>/dev/null || true
   fi
 ) &
 watchdog_pid=$!
-wait "$network_pid"
-network_status=$?
+kill "$network_pid" 2>/dev/null || true
+wait "$network_pid" 2>/dev/null || true
 kill "$watchdog_pid" 2>/dev/null || true
 wait "$watchdog_pid" 2>/dev/null || true
 if [ -e "$network_timeout" ]; then
-  printf '%s\\n' 'outbound network helper did not stop after sandbox exit' >&2
-  while IFS= read -r line; do printf '%s\\n' "$line" >&2; done <"$slirp_error"
-  exit 125
-fi
-if [ "$network_status" -ne 0 ]; then
+  printf '%s\n' 'outbound network helper did not stop after sandbox exit' >&2
   while IFS= read -r line; do printf '%s\n' "$line" >&2; done <"$slirp_error"
   exit 125
 fi
@@ -490,13 +489,11 @@ fn run_with_outbound_network(process: &Command, state_root: &Path) -> Result<Out
     let info = control.join("bwrap-info.json");
     let gate = control.join("start.pipe");
     let ready = control.join("ready.pipe");
-    let exit = control.join("exit.pipe");
     let slirp_error = control.join("slirp.stderr");
     let mkfifo = sibling_coreutils_program("mkfifo");
     let fifo_status = Command::new(&mkfifo)
         .arg(&gate)
         .arg(&ready)
-        .arg(&exit)
         .status()
         .map_err(|error| {
             format!(
@@ -529,7 +526,6 @@ fn run_with_outbound_network(process: &Command, state_root: &Path) -> Result<Out
         .arg(&info)
         .arg(&gate)
         .arg(&ready)
-        .arg(&exit)
         .arg(&slirp_error)
         .args(process.get_args());
     if let Some(directory) = process.get_current_dir() {
