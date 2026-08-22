@@ -274,6 +274,13 @@ pub enum ExecutionState {
     Interrupted,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExecutionTerminationCause {
+    ExplicitCancellation { requested_execution: ExecutionId },
+    AncestorFailure { failed_ancestor: ExecutionId },
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
@@ -321,6 +328,9 @@ pub enum ExecutionEventKind {
     },
     ExecutionStateChanged {
         state: ExecutionState,
+    },
+    ExecutionTerminated {
+        cause: ExecutionTerminationCause,
     },
     AssistantContentDelta {
         text: String,
