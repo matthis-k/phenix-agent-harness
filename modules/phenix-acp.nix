@@ -35,6 +35,14 @@ _: {
             --set PHENIX_RG "${pkgs.ripgrep}/bin/rg" \
             --set PHENIX_RM "${pkgs.coreutils}/bin/rm" \
             --set PHENIX_RSYNC "${pkgs.rsync}/bin/rsync" \
+            --set PHENIX_SLIRP4NETNS "${pkgs.slirp4netns}/bin/slirp4netns" \
+            --prefix PATH : "${
+              pkgs.lib.makeBinPath [
+                pkgs.coreutils
+                pkgs.iproute2
+                pkgs.util-linux
+              ]
+            }" \
             --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
             --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           runHook postInstall

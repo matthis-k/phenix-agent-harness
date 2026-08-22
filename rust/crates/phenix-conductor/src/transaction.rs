@@ -1,6 +1,6 @@
 use super::super::workspace_consistency::WorkspaceConsistencyError;
 use super::WorkspaceConsistency;
-use crate::sandbox::{ExecutionSandbox, ExecutionSandboxState, WorkspaceMount};
+use crate::sandbox::{ExecutionSandbox, ExecutionSandboxState, SandboxCommand, WorkspaceMount};
 use phenix_core::{DiagnosticWritePatch, ExecutionAuthority, ExecutionId, FileKind, FileVersion};
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
@@ -131,10 +131,7 @@ impl WorkspaceTransaction {
             .arg(exclude_rules)
             .arg(command)
             .output()
-            .map_err(|source| TransactionError::Spawn {
-                program: PathBuf::from(&bwrap),
-                source,
-            })?;
+            .map_err(TransactionError::SandboxConfiguration)?;
         if !output.status.success() {
             return Err(TransactionError::SandboxFailed {
                 exit_code: output.status.code().unwrap_or(-1),
@@ -228,11 +225,14 @@ impl WorkspaceTransaction {
         Ok(patches)
     }
 
-    fn sandbox_command(&self, bwrap: &OsStr, work: &Path) -> Result<Command, TransactionError> {
-        let mut process = Command::new(bwrap);
+    fn sandbox_command(
+        &self,
+        bwrap: &OsStr,
+        work: &Path,
+    ) -> Result<SandboxCommand, TransactionError> {
         ExecutionSandbox::new(&self.authority, &self.sandbox_state)
             .configure_bwrap(
-                &mut process,
+                bwrap,
                 self.consistency.root(),
                 &self.scratch_mounts,
                 WorkspaceMount::Overlay {
@@ -240,8 +240,7 @@ impl WorkspaceTransaction {
                     work,
                 },
             )
-            .map_err(TransactionError::SandboxConfiguration)?;
-        Ok(process)
+            .map_err(TransactionError::SandboxConfiguration)
     }
 }
 

@@ -391,8 +391,11 @@
                   pkgs.cargo
                   pkgs.coreutils
                   pkgs.git
+                  pkgs.iproute2
                   pkgs.rsync
                   pkgs.rustc
+                  pkgs.slirp4netns
+                  pkgs.util-linux
                 ];
                 exec = ''
                   ${rustRoot}
@@ -519,6 +522,7 @@
           pkgs.rust-analyzer
           pkgs.rustc
           pkgs.rustfmt
+          pkgs.slirp4netns
           pkgs.statix
           pkgs.taplo
           maintenancePackage.package
