@@ -192,13 +192,20 @@ impl ContextRegistry {
 
 impl SkillRegistry {
     pub fn discover(cwd: impl AsRef<Path>) -> Result<Self, ContextError> {
+        Self::discover_with_user_home(cwd, env::var_os("HOME").map(PathBuf::from).as_deref())
+    }
+
+    fn discover_with_user_home(
+        cwd: impl AsRef<Path>,
+        user_home: Option<&Path>,
+    ) -> Result<Self, ContextError> {
         let cwd = cwd.as_ref();
         let project_root = project_root(cwd);
         let mut registry = Self::default();
 
         // Lowest to highest precedence. Project-local sources override user sources,
         // portable roots override compatibility roots, and Phenix-native roots win.
-        if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+        if let Some(home) = user_home {
             for root in [
                 home.join(".cursor/skills"),
                 home.join(".claude/skills"),
@@ -845,7 +852,7 @@ mod tests {
         write(&resource_path, "frozen resource v1");
 
         let context = ContextRegistry::discover(&nested).unwrap();
-        let skills = SkillRegistry::discover(&nested).unwrap();
+        let skills = SkillRegistry::discover_with_user_home(&nested, None).unwrap();
         write(&resource_path, "mutated resource v2");
         let catalog = skills.skill_descriptors();
         assert_eq!(catalog.len(), 2);
@@ -967,7 +974,7 @@ mod tests {
         );
 
         let context = ContextRegistry::discover(&root).unwrap();
-        let skills = SkillRegistry::discover(&root).unwrap();
+        let skills = SkillRegistry::discover_with_user_home(&root, None).unwrap();
         let prompt = context
             .compose_prompt(&skills, "<user_request>nested request</user_request>")
             .unwrap();

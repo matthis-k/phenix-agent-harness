@@ -205,6 +205,10 @@ mod unix_service {
             .arg(socket)
             .arg("--state")
             .arg(state)
+            .env(
+                "HOME",
+                socket.parent().expect("service socket has a parent"),
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())

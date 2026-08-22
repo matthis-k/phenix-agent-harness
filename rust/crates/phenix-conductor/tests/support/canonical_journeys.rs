@@ -358,7 +358,7 @@ fn multi_step_workflow_continues_after_replay_between_steps() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.two-step").unwrap(),
-            "orchestration objective",
+            serde_json::json!({"objective": "orchestration objective"}),
         )
         .unwrap();
     let first = runtime

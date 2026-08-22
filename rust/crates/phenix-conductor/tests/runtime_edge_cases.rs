@@ -448,7 +448,7 @@ fn cancelling_root_cascades_through_workflow_without_starting_later_steps() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.edge").unwrap(),
-            "orchestration",
+            serde_json::json!({"objective": "orchestration"}),
         )
         .unwrap();
 

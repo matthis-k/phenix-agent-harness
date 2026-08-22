@@ -7,10 +7,11 @@ use phenix_conductor::{
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
     ExecutionEventKind, ExecutionState, ExecutionTarget, OrchestrationDefinition,
-    OrchestrationNode, OrchestrationNodeId,
+    OrchestrationNode, OrchestrationNodeId, OrchestrationValueBinding,
 };
 use phenix_protocol::{Command, Reply};
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
@@ -45,7 +46,12 @@ fn orchestration_node(
     objective: Option<&str>,
 ) -> OrchestrationNode {
     OrchestrationNode {
-        input_bindings: Default::default(),
+        input_bindings: BTreeMap::from([(
+            "objective".to_owned(),
+            OrchestrationValueBinding::Input {
+                pointer: "/objective".to_owned(),
+            },
+        )]),
         id: OrchestrationNodeId::parse(id).unwrap(),
         callable: CallableId::parse(callable).unwrap(),
         depends_on: depends_on
@@ -440,7 +446,7 @@ fn active_native_provider_cancellation_is_deterministic_and_never_uses_model_bac
 
 #[test]
 fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
-    let run = ProtocolHarness::model(MockModelScript::reply("step complete"))
+    let run = ProtocolHarness::model(MockModelScript::reply("{}"))
         .configure_runtime(|runtime| {
             runtime
                 .register_agent(phenix_core::AgentDefinition::new(
@@ -500,8 +506,8 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
     assert_eq!(
         run.backend.prompts(),
         vec![
-            "first step\n\nOrchestration objective:\noverall objective",
-            "second step\n\nOrchestration objective:\noverall objective",
+            "first step\n\nTyped orchestration input:\n{\"objective\":\"overall objective\"}",
+            "second step\n\nTyped orchestration input:\n{\"objective\":\"overall objective\"}",
         ]
     );
     assert_eq!(run.snapshot.executions.len(), 3);
@@ -736,7 +742,7 @@ fn built_in_permission_guard_preflights_workflow_steps_before_creation() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration").unwrap(),
-            "objective",
+            serde_json::json!({"objective": "objective"}),
         )
         .unwrap_err();
 

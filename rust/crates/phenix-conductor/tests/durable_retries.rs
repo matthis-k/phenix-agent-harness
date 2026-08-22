@@ -95,7 +95,7 @@ fn setup(
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.test").unwrap(),
-            "recover safely",
+            serde_json::json!({"objective": "recover safely"}),
         )
         .unwrap();
     let first = runtime
@@ -289,7 +289,7 @@ fn interface_without_recovery_authority_cannot_choose_another_child() {
         .start_orchestration(
             &root.id,
             &CallableId::parse("orchestration.test").unwrap(),
-            "test delegation",
+            serde_json::json!({"objective": "test delegation"}),
         )
         .unwrap();
     let first = runtime
